@@ -24045,27 +24045,10 @@ fn detect_harness(_arguments: &Value) -> String {
     "codex".to_string()
 }
 
-fn harness_model_defaults(harness: &str) -> toml::value::Table {
-    let mut defaults = toml::value::Table::new();
-    if harness == "codex" {
-        defaults.insert(
-            "pre_filter".to_string(),
-            toml::Value::String("gpt-5.6-sol".to_string()),
-        );
-        defaults.insert(
-            "lens_review".to_string(),
-            toml::Value::String("gpt-5.6-terra".to_string()),
-        );
-        defaults.insert(
-            "post_filter".to_string(),
-            toml::Value::String("gpt-5.6-luna".to_string()),
-        );
-        defaults.insert(
-            "verifier".to_string(),
-            toml::Value::String("gpt-5.6-sol".to_string()),
-        );
-    }
-    defaults
+fn harness_model_defaults(_harness: &str) -> toml::value::Table {
+    // Agent model and effort are selected by the caller for each assignment.
+    // The coordinator retains abstract role defaults when no project override exists.
+    toml::value::Table::new()
 }
 
 fn string(arguments: &Value, key: &str, default: &str) -> String {
@@ -26390,13 +26373,13 @@ verifier = "config-verify"
             "project_root": config_root
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
-        assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-5.6-sol");
-        assert_eq!(parsed["model_roles"]["lens_review"], "gpt-5.6-terra");
-        assert_eq!(parsed["model_roles"]["post_filter"], "gpt-5.6-luna");
-        assert_eq!(parsed["model_roles"]["verifier"], "gpt-5.6-sol");
+        assert_eq!(parsed["model_roles"]["pre_filter"], "strong-reviewer");
+        assert_eq!(parsed["model_roles"]["lens_review"], "substantive-worker");
+        assert_eq!(parsed["model_roles"]["post_filter"], "bounded-helper");
+        assert_eq!(parsed["model_roles"]["verifier"], "strong-reviewer");
         assert_eq!(
             parsed["model_role_sources"]["pre_filter"],
-            "harness_default"
+            "generic_abstract_role"
         );
 
         let _ = fs::remove_dir_all(config_root);
@@ -26414,8 +26397,8 @@ post_filter = "generic-post"
 verifier = "generic-verify"
 
 [final_review.models.codex]
-pre_filter = "gpt-5.6-luna"
-lens_review = "gpt-5.6-sol"
+pre_filter = "gpt-6-luna"
+lens_review = "gpt-6-astra"
 "#,
         )
         .expect("write config");
@@ -26429,8 +26412,8 @@ lens_review = "gpt-5.6-sol"
         }));
         let parsed: Value = serde_json::from_str(&output).expect("json");
 
-        assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-5.6-luna");
-        assert_eq!(parsed["model_roles"]["lens_review"], "gpt-5.6-sol");
+        assert_eq!(parsed["model_roles"]["pre_filter"], "gpt-6-luna");
+        assert_eq!(parsed["model_roles"]["lens_review"], "gpt-6-astra");
         assert_eq!(parsed["model_roles"]["post_filter"], "generic-post");
         assert_eq!(parsed["model_roles"]["verifier"], "generic-verify");
         assert_eq!(

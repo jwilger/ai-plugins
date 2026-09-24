@@ -292,9 +292,9 @@ JSON
   run node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-no-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-6-sol-full-marketplace"* ]]
+  [[ "$output" == *"label: codex-gpt-6-sol-targeted-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-6-sol-no-plugins"* ]]
   [[ "$output" == *"pluginMode: no-plugins"* ]]
   [[ "$output" == *"pluginMode: targeted-plugins"* ]]
   [[ "$output" == *"pluginMode: full-marketplace"* ]]
@@ -317,9 +317,9 @@ JSON
     def plugins($label):
       [.providerCompositions[] | select(.label == $label) | .plugins] | first;
     (.providerLabels | sort) == ([.providerCompositions[].label] | sort)
-      and plugins("codex-gpt-5.6-terra-targeted-plugins") == ["development-system"]
-      and plugins("codex-gpt-5.6-terra-no-plugins") == []
-      and plugins("codex-gpt-5.6-terra-full-marketplace") == ["development-system"]
+      and plugins("codex-gpt-6-sol-targeted-plugins") == ["development-system"]
+      and plugins("codex-gpt-6-sol-no-plugins") == []
+      and plugins("codex-gpt-6-sol-full-marketplace") == ["development-system"]
   ' "$generated_metadata"
   run node - "$generated_config" "$generated_metadata" <<'NODE'
 const fs = require('node:fs');
@@ -481,13 +481,13 @@ NODE
 {
   "results": [
     {
-      "provider": {"label": "codex-gpt-5.6-terra-full-marketplace"},
-      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
+      "provider": {"label": "codex-gpt-6-sol-full-marketplace"},
+      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-6-sol", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
       "gradingResult": {"pass": true, "score": 1}
     },
     {
-      "provider": {"label": "codex-gpt-5.6-terra-no-plugins"},
-      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
+      "provider": {"label": "codex-gpt-6-sol-no-plugins"},
+      "testCase": {"vars": {"case_id": "alpha", "behavior": "Alpha", "provider_variant": "codex-gpt-6-sol", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1, "hard_guard_status": "passed"}},
       "gradingResult": {"pass": false, "score": 0}
     }
   ]
@@ -500,10 +500,10 @@ JSON
   run node - <<NODE
 const fs = require('fs');
 const summary = JSON.parse(fs.readFileSync('$ROOT/site/evals/summary.json', 'utf8'));
-if (!summary.aggregates.some((group) => group.providerVariant === 'codex-gpt-5.6-terra' && group.pluginMode === 'full-marketplace')) {
+if (!summary.aggregates.some((group) => group.providerVariant === 'codex-gpt-6-sol' && group.pluginMode === 'full-marketplace')) {
   throw new Error('missing provider variant/plugin mode aggregate');
 }
-if (!summary.valueGateSummaries.some((gate) => gate.caseId === 'alpha' && gate.providerVariant === 'codex-gpt-5.6-terra' && gate.status === 'pass')) {
+if (!summary.valueGateSummaries.some((gate) => gate.caseId === 'alpha' && gate.providerVariant === 'codex-gpt-6-sol' && gate.status === 'pass')) {
   throw new Error(`missing passing value gate: ${JSON.stringify(summary.valueGateSummaries)}`);
 }
 NODE
@@ -519,13 +519,13 @@ NODE
 {
   "results": [
     {
-      "provider": {"label": "codex-gpt-5.6-terra-full-marketplace"},
-      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
+      "provider": {"label": "codex-gpt-6-sol-full-marketplace"},
+      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-6-sol", "plugin_mode": "full-marketplace", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
       "gradingResult": {"pass": true, "score": 1}
     },
     {
-      "provider": {"label": "codex-gpt-5.6-terra-no-plugins"},
-      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-5.6-terra", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
+      "provider": {"label": "codex-gpt-6-sol-no-plugins"},
+      "testCase": {"vars": {"case_id": "blocked-baseline", "behavior": "Blocked", "provider_variant": "codex-gpt-6-sol", "plugin_mode": "no-plugins", "plugins": ["example"], "skills": ["alpha"], "min_pass_rate": 0.8, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1}},
       "gradingResult": {"pass": false, "score": 0, "reason": "provider unavailable: not logged in"}
     }
   ]

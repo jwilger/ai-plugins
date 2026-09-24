@@ -171,7 +171,7 @@ function expectedProvider(mode) {
       deep_tracing: false,
       enable_streaming: false,
       inherit_process_env: false,
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-5.6-terra') }}",
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}",
       model_reasoning_effort:
         "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}",
       network_access_enabled: false,

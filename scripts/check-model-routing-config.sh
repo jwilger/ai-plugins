@@ -1,76 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/development-system/components/development-discipline" && pwd)"}"
-agents="$plugin_root/agents"
+plugin_root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins/development-system" && pwd)"}"
 
-fail() {
-  echo "model-routing-config: $*" >&2
-  exit 1
-}
-
-quoted_value() {
-  local file="$1"
-  local key="$2"
-  local value
-
-  [ -f "$file" ] || fail "missing-agent: $file"
-  if ! value="$(python3 - "$file" "$key" <<'PY'
+python3 - "$plugin_root" <<'PY'
+import json
 import pathlib
 import sys
 import tomllib
 
-path = pathlib.Path(sys.argv[1])
-key = sys.argv[2]
+root = pathlib.Path(sys.argv[1])
+expected = {
+    "bounded-helper": "read-only",
+    "substantive-worker": "read-only",
+    "strong-reviewer": "read-only",
+    "strong-worker": "read-only",
+    "advisor": "read-only",
+}
 
-try:
-    document = tomllib.loads(path.read_text(encoding="utf-8"))
-except (OSError, UnicodeError, tomllib.TOMLDecodeError):
-    raise SystemExit(1)
+agents = {}
+for name, sandbox in expected.items():
+    path = root / "agents" / f"{name}.toml"
+    try:
+        agent = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise SystemExit(f"model-routing-config: invalid-agent: {path}: {error}")
+    for key in ("model", "model_reasoning_effort", "reasoning_effort"):
+        if key in agent:
+            raise SystemExit(f"model-routing-config: hardcoded-route: {path}:{key}")
+    if agent.get("sandbox_mode") != sandbox:
+        raise SystemExit(f"model-routing-config: invalid-sandbox: {path}")
+    if agent.get("name") != ("advisor" if name == "advisor" else f"model-routing-{name}"):
+        raise SystemExit(f"model-routing-config: invalid-name: {path}")
+    agents[name] = {"sandbox": sandbox}
 
-value = document.get(key)
-if not isinstance(value, str):
-    raise SystemExit(1)
-
-print(value)
+print(json.dumps({"codex": agents}, separators=(",", ":")))
 PY
-  )"; then
-    fail "invalid-toml-field: $file:$key"
-  fi
-  printf '%s\n' "$value"
-}
-
-require_equal() {
-  local actual="$1"
-  local expected="$2"
-  local label="$3"
-
-  [ "$actual" = "$expected" ] ||
-    fail "$label expected=$expected actual=$actual"
-}
-
-check_codex() {
-  local route="$1"
-  local model="$2"
-  local reasoning="$3"
-  local sandbox="$4"
-  local file="$agents/$route.toml"
-
-  require_equal "$(quoted_value "$file" model)" "$model" "$route.codex.model"
-  require_equal "$(quoted_value "$file" model_reasoning_effort)" "$reasoning" "$route.codex.reasoning"
-  require_equal "$(quoted_value "$file" sandbox_mode)" "$sandbox" "$route.codex.sandbox"
-}
-
-check_codex bounded-helper gpt-5.6-luna low read-only
-check_codex substantive-worker gpt-5.6-terra medium read-only
-check_codex strong-reviewer gpt-5.6-sol high read-only
-check_codex strong-worker gpt-5.6-sol high read-only
-
-jq -cn '{
-  codex: {
-    "bounded-helper": {model: "gpt-5.6-luna", reasoning: "low", sandbox: "read-only"},
-    "substantive-worker": {model: "gpt-5.6-terra", reasoning: "medium", sandbox: "read-only"},
-    "strong-reviewer": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"},
-    "strong-worker": {model: "gpt-5.6-sol", reasoning: "high", sandbox: "read-only"}
-  }
-}'

@@ -22,7 +22,7 @@ user-managed MCPs that need compatibility review.
 
 | Plugin                                                     | Harness | Description                                                                                          | Version |
 | ---------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.3.0   |
+| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.7.0   |
 
 ## Using the marketplace (Codex)
 
@@ -103,18 +103,18 @@ sharing so a behavior run is a fresh local record.
 
 Default eval harness posture:
 
-- Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with
+- Codex execution: `openai:codex-sdk`, `gpt-6-sol` with
   `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
   deep tracing disabled, and isolated generated homes containing no plugins,
   the selected cases' deterministic plugin union, or the complete
   harness-specific catalog according to the behavior mode.
   Model-graded assertions independently default to
-  `gpt-5.6-sol` with high reasoning through the same SDK, so OpenAI model access
+  `gpt-6-astra` with high reasoning through the same SDK, so OpenAI model access
   goes through local Codex auth rather than `OPENAI_API_KEY`. Override the two
   roles separately with `CODEX_EVAL_MODEL` / `CODEX_EVAL_REASONING_EFFORT` and
   `CODEX_GRADER_MODEL` / `CODEX_GRADER_REASONING_EFFORT`.
 
-The focused [GPT-5.6 model-family benchmark](evals/benchmarks/gpt-5.6-model-family/README.md)
+The retained historical [GPT-5.6 model-family benchmark](evals/benchmarks/gpt-5.6-model-family/README.md)
 compares Sol, Terra, and Luna without running the full marketplace eval suite.
 Its trace-enforced Codex app-server wrapper and skills-only/no-plugin homes are
 benchmark controls; the canonical behavior runner above continues to use the

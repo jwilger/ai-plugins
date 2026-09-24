@@ -5,11 +5,11 @@ import path from "node:path";
 
 const expectedTaskFamilies = [
   "mechanical-assistance",
-  "implementation-and-tests",
+  "research-and-discovery",
+  "implementation",
   "review",
-  "diagnosis-and-correction",
+  "debugging",
   "architecture-and-advice",
-  "orchestration",
 ];
 const expectedCaseKinds = [
   "nominal",
@@ -20,9 +20,8 @@ const expectedCaseKinds = [
   "regression",
 ];
 const expectedModels = [
-  "gpt-5.6-luna",
-  "gpt-5.6-terra",
-  "gpt-5.6-sol",
+  "gpt-6-luna",
+  "gpt-6-sol",
   "gpt-6-astra",
 ];
 const expectedEfforts = ["low", "medium", "high", "xhigh", "max"];
@@ -194,7 +193,7 @@ function validate(document) {
   }
   exactArray(
     document.judge?.reference?.semantic_assessors,
-    ["gpt-6-astra/high", "gpt-5.6-sol/high"],
+    ["gpt-6-astra/high", "gpt-6-sol/high"],
     "judge.reference.semantic_assessors",
   );
   if (

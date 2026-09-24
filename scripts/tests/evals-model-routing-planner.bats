@@ -44,10 +44,10 @@ const run = createCodexSubjectProviderFunction({
   now: (() => { const values = [10, 55]; return () => values.shift(); })()
 });
 const result = await run({
-  job_id: "implementation/case-001/gpt-5.6-terra/high",
+  job_id: "implementation/case-001/gpt-6-sol/high",
   prompt: "implement fix",
   fixture: "implementation-001",
-  model: "gpt-5.6-terra",
+  model: "gpt-6-sol",
   effort: "high",
   execution_surface: "workspace-write"
 });
@@ -55,7 +55,7 @@ console.log(JSON.stringify({ result, observed }));
 EOF
   [ "$status" -eq 0 ]
   [ "$(jq -r '.observed.id' <<<"$output")" = "openai:codex-app-server" ]
-  [ "$(jq -r '.observed.options.options.config.model' <<<"$output")" = "gpt-5.6-terra" ]
+  [ "$(jq -r '.observed.options.options.config.model' <<<"$output")" = "gpt-6-sol" ]
   [ "$(jq -r '.observed.options.options.config.model_reasoning_effort' <<<"$output")" = "high" ]
   [ "$(jq -r '.observed.options.options.config.working_dir' <<<"$output")" = "/tmp/fixed-workspace" ]
   [ "$(jq -r '.observed.options.options.config.sandbox_mode' <<<"$output")" = "workspace-write" ]
@@ -94,14 +94,14 @@ const run = createCodexJudgeProviderFunction({
 });
 const result = await run({
   prompt: "fixed prompt",
-  model: "gpt-5.6-luna",
+  model: "gpt-6-luna",
   effort: "max",
   isolation: { plugins: false, tools: false, workspace: false }
 });
 console.log(JSON.stringify({ result, observed }));
 EOF
   [ "$status" -eq 0 ]
-  [ "$(jq -r '.observed.config.model' <<<"$output")" = "gpt-5.6-luna" ]
+  [ "$(jq -r '.observed.config.model' <<<"$output")" = "gpt-6-luna" ]
   [ "$(jq -r '.observed.config.model_reasoning_effort' <<<"$output")" = "max" ]
   [ "$(jq -r '.observed.config.cli_config.features.plugins' <<<"$output")" = "false" ]
   [ "$(jq -r '.result.usage.cached_input_tokens' <<<"$output")" -eq 4 ]
@@ -110,7 +110,7 @@ EOF
 
 @test "runner resolves a fixed case and records a successful subject result" {
   node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN"
-  job_id="mechanical-assistance/case-001/gpt-5.6-luna/none"
+  job_id="mechanical-assistance/case-001/gpt-6-luna/none"
   provider="$TMPROOT/provider.mjs"
   result_root="$TMPROOT/results"
   cat >"$provider" <<'EOF'
@@ -131,7 +131,7 @@ EOF
   [ "$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .status' "$PLAN")" = "success" ]
   result_ref="$(jq --arg id "$job_id" -r '.jobs[] | select(.job_id == $id) | .result_ref' "$PLAN")"
   [ -f "$result_root/$result_ref" ]
-  [ "$(jq -r '.request.model' "$result_root/$result_ref")" = "gpt-5.6-luna" ]
+  [ "$(jq -r '.request.model' "$result_root/$result_ref")" = "gpt-6-luna" ]
   [ "$(jq -r '.request.effort' "$result_root/$result_ref")" = "none" ]
   [ "$(jq -r '.cost.subject.input_tokens' "$result_root/$result_ref")" -eq 11 ]
   [ "$(jq -r '.cost.judges' "$result_root/$result_ref")" = "null" ]
@@ -139,7 +139,7 @@ EOF
 
 @test "runner resumes from a persisted result without repeating the provider call" {
   node "$PLANNER" "$CAMPAIGN" --phase screening --output "$PLAN"
-  job_id="mechanical-assistance/case-001/gpt-5.6-luna/none"
+  job_id="mechanical-assistance/case-001/gpt-6-luna/none"
   provider="$TMPROOT/provider.mjs"
   result_root="$TMPROOT/results"
   cat >"$provider" <<'EOF'
@@ -184,7 +184,7 @@ teardown() {
   [ "$(jq -r '.phase' "$PLAN")" = "screening" ]
   [[ "$(jq -r '.case_catalog_sha256' "$PLAN")" =~ ^[0-9a-f]{64}$ ]]
   [[ "$(jq -r '.fixture_specs_sha256' "$PLAN")" =~ ^[0-9a-f]{64}$ ]]
-  [ "$(jq '.jobs | length' "$PLAN")" -eq 992 ]
+  [ "$(jq '.jobs | length' "$PLAN")" -eq 744 ]
   [ "$(jq '[.jobs[].task_family] | unique | length' "$PLAN")" -eq 6 ]
   [ "$(jq '[.jobs[] | select(.task_family == "mechanical-assistance") | .effort] | unique | sort == ["high", "low", "max", "medium", "none", "xhigh"]' "$PLAN")" = "true" ]
   [ "$(jq '[.jobs[] | select(.task_family != "mechanical-assistance") | .effort] | unique | sort == ["high", "low", "max", "medium", "xhigh"]' "$PLAN")" = "true" ]
@@ -279,7 +279,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq --arg id "$completed_id" -r '.jobs[] | select(.job_id == $id) | .status' "$PLAN")" = "success" ]
   [ "$(jq --arg id "$completed_id" -r '.jobs[] | select(.job_id == $id) | .result_ref' "$PLAN")" = "checkpoints/example.json" ]
-  [ "$(jq '.jobs | length' "$PLAN")" -eq 992 ]
+  [ "$(jq '.jobs | length' "$PLAN")" -eq 744 ]
 }
 
 @test "resume fails closed when the campaign identity changes" {

@@ -26,10 +26,10 @@ make_codex_eval_fixture() {
 {
   "providerVariants": [
     {
-      "id": "codex-gpt-5.6-terra",
+      "id": "codex-gpt-6-sol",
       "provider": "openai:codex-sdk",
       "modelEnv": "CODEX_EVAL_MODEL",
-      "defaultModel": "gpt-5.6-terra",
+      "defaultModel": "gpt-6-sol",
       "reasoningEffortEnv": "CODEX_EVAL_REASONING_EFFORT",
       "defaultReasoningEffort": "medium"
     }
@@ -121,13 +121,13 @@ MD
   [[ "$output" != *"openai:gpt-5-mini"* ]]
 }
 
-@test "generated Codex config defaults execution to Terra and grading to independent Sol" {
+@test "generated Codex config defaults execution to GPT-6 Sol and grading to independent Astra" {
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"model: \"{{ env.CODEX_EVAL_MODEL | default('gpt-5.6-terra') }}\""* ]]
+  [[ "$output" == *"model: \"{{ env.CODEX_EVAL_MODEL | default('gpt-6-sol') }}\""* ]]
   [[ "$output" == *"model_reasoning_effort: \"{{ env.CODEX_EVAL_REASONING_EFFORT | default('medium') }}\""* ]]
-  [[ "$output" == *"model: \"{{ env.CODEX_GRADER_MODEL | default('gpt-5.6-sol') }}\""* ]]
+  [[ "$output" == *"model: \"{{ env.CODEX_GRADER_MODEL | default('gpt-6-astra') }}\""* ]]
   [[ "$output" == *"model_reasoning_effort: \"{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}\""* ]]
 }
 
@@ -236,7 +236,7 @@ JSON
   run env EVAL_CASE_FILTER=codex-only-case node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"codex-gpt-5.6-terra-targeted-plugins"* ]]
+  [[ "$output" == *"codex-gpt-6-sol-targeted-plugins"* ]]
 }
 
 @test "generated canary config is separate from natural behavior scenarios" {

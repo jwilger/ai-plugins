@@ -54,29 +54,7 @@ model role used for verification while ordinary lenses use the substantive
 review role. An unavailable or inherited route follows the canonical bounded
 handoff or blocked-result protocol, never an implicit downgrade.
 
-For Codex, bind those responsibilities in the project-local final-review TOML;
-do not put Codex identifiers in universal defaults:
-
-```toml
-[final_review.models.codex]
-pre_filter = "gpt-5.6-sol"
-lens_review = "gpt-5.6-terra"
-post_filter = "gpt-5.6-luna"
-verifier = "gpt-5.6-sol"
-```
-
-`pre_filter` owns the all-dimension broad risk scout. For Codex, `lens_review`
-is Terra for ordinary risk-selected substantive lenses. The coordinator routes
-an assigned architecture, security, or human-safety lens through the resolved
-strong role: `gpt-5.6-sol`. `post_filter` labels
-the normally deterministic
-`final_review.filter_findings` path; deterministic relevance and path filtering
-normally make no model call. `verifier` owns blocking, disputed, or materially
-uncertain batched verification. These roles are part of the review contract,
-not permission for the MCP to spawn agents. The caller starts every assignment
-as a fresh-context subagent, closes it immediately after receiving the result,
-and submits the required caller attestation naming the assigned model role plus
-`fresh_context: true` and `closed_after_result: true`.
+The canonical `model-routing` skill supplies the default GPT-6 model and effort for each assignment. Project-local `[final_review.models.codex]` entries and explicit plan arguments may override the model role for a phase; the coordinator still resolves the actual model and effort before each spawn. `pre_filter` owns the all-dimension broad risk scout; `post_filter` normally uses the deterministic `final_review.filter_findings` path and makes no model call. The caller starts each assignment as a fresh-context subagent, closes it after receiving the result, and submits the required attestation naming the assigned model role plus `fresh_context: true` and `closed_after_result: true`.
 
 Run a local, fresh-context review cycle before creating a pull request, merging,
 or claiming a change is ready.

@@ -101,7 +101,7 @@ export function validateBenchmarkContract(contract) {
   assertObject(contract.provider, "benchmark provider");
   const expectedProvider = {
     id: "openai:codex-sdk",
-    model: "gpt-5.6-terra",
+    model: "gpt-6-sol",
     reasoningEffort: "medium",
     sandboxMode: "workspace-write",
     approvalPolicy: "never",

@@ -411,11 +411,8 @@ lens_review = "substantive-worker"
 post_filter = "bounded-helper"
 verifier = "strong-reviewer"
 
-[final_review.models.codex]
-pre_filter = "gpt-5.6-sol"
-lens_review = "gpt-5.6-terra"
-post_filter = "gpt-5.6-luna"
-verifier = "gpt-5.6-sol"
+# Optional concrete Codex overrides belong in project-local configuration.
+# Select their GPT-6 models and efforts per assignment using model-routing.
 
 ```
 
@@ -510,7 +507,7 @@ runtime facts after closing each subagent:
 ```json
 {
   "caller_attestation": {
-    "model_role": "gpt-5.6-terra",
+    "model_role": "substantive-worker",
     "fresh_context": true,
     "closed_after_result": true
   }

@@ -12,37 +12,37 @@ setup() {
     "providers": [
       {
         "id": "openai:codex-sdk",
-        "label": "codex-gpt-5.6-terra-targeted-plugins"
+        "label": "codex-gpt-6-sol-targeted-plugins"
       },
       {
         "id": "openai:codex-sdk",
-        "label": "codex-gpt-5.6-terra-full-marketplace"
+        "label": "codex-gpt-6-sol-full-marketplace"
       },
       {
         "id": "openai:codex-sdk",
-        "label": "codex-gpt-5.6-terra-no-plugins"
+        "label": "codex-gpt-6-sol-no-plugins"
       }
     ],
     "metadata": {
       "providerCompositions": [
         {
-          "label": "codex-gpt-5.6-terra-targeted-plugins",
+          "label": "codex-gpt-6-sol-targeted-plugins",
           "provider": "openai:codex-sdk",
-          "providerVariant": "codex-gpt-5.6-terra",
+          "providerVariant": "codex-gpt-6-sol",
           "pluginMode": "targeted-plugins",
           "plugins": ["tiber"]
         },
         {
-          "label": "codex-gpt-5.6-terra-full-marketplace",
+          "label": "codex-gpt-6-sol-full-marketplace",
           "provider": "openai:codex-sdk",
-          "providerVariant": "codex-gpt-5.6-terra",
+          "providerVariant": "codex-gpt-6-sol",
           "pluginMode": "full-marketplace",
           "plugins": ["advisor", "tiber"]
         },
         {
-          "label": "codex-gpt-5.6-terra-no-plugins",
+          "label": "codex-gpt-6-sol-no-plugins",
           "provider": "openai:codex-sdk",
-          "providerVariant": "codex-gpt-5.6-terra",
+          "providerVariant": "codex-gpt-6-sol",
           "pluginMode": "no-plugins",
           "plugins": []
         }
@@ -62,7 +62,7 @@ setup() {
           "min_pass_rate": 0.67
         },
         "provider": {
-          "label": "codex-gpt-5.6-terra"
+          "label": "codex-gpt-6-sol"
         },
         "gradingResult": {
           "pass": true,
@@ -81,7 +81,7 @@ setup() {
           "min_pass_rate": 0.67
         },
         "provider": {
-          "label": "codex-gpt-5.6-terra"
+          "label": "codex-gpt-6-sol"
         },
         "gradingResult": {
           "pass": false,
@@ -100,7 +100,7 @@ setup() {
           "min_pass_rate": 0.67
         },
         "provider": {
-          "label": "codex-gpt-5.6-terra"
+          "label": "codex-gpt-6-sol"
         },
         "gradingResult": {
           "pass": true,
@@ -119,7 +119,7 @@ setup() {
           "min_pass_rate": 0
         },
         "provider": {
-          "label": "codex-gpt-5.6-terra"
+          "label": "codex-gpt-6-sol"
         },
         "gradingResult": {
           "pass": false,
@@ -138,7 +138,7 @@ setup() {
           "min_pass_rate": 1
         },
         "provider": {
-          "label": "codex-gpt-5.6-terra"
+          "label": "codex-gpt-6-sol"
         },
         "gradingResult": {
           "pass": false,
@@ -157,7 +157,7 @@ setup() {
           "min_pass_rate": 1
         },
         "provider": {
-          "label": "codex-gpt-5.6-terra"
+          "label": "codex-gpt-6-sol"
         },
         "gradingResult": {
           "pass": false,
@@ -187,7 +187,7 @@ teardown() {
   [ "$(jq -r '.suite' "$TMPROOT/site/evals/summary.json")" = "development-system" ]
   [ "$(jq -r '.status.state' "$TMPROOT/site/evals/summary.json")" = "completed" ]
   [ "$(jq -r '.status.suite' "$TMPROOT/site/evals/summary.json")" = "development-system" ]
-  [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-5.6-terra" ]
+  [ "$(jq -r '.aggregates[] | select(.id == "fixture-pass") | .provider' "$TMPROOT/site/evals/summary.json")" = "codex-gpt-6-sol" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-pass") | .passRate' "$TMPROOT/site/evals/summary.json")" = "0.6666666666666666" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .samples[0].sampleIndex' "$TMPROOT/site/evals/summary.json")" = "0" ]
   [ "$(jq '.aggregates[] | select(.id == "fixture-zero-defaults") | .minPassRate' "$TMPROOT/site/evals/summary.json")" = "0" ]
@@ -205,13 +205,13 @@ teardown() {
   [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "full-marketplace") | .plugins' "$TMPROOT/site/evals/summary.json")" = '["advisor","tiber"]' ]
   [ "$(jq -c '.providerCompositions[] | select(.pluginMode == "no-plugins") | .plugins' "$TMPROOT/site/evals/summary.json")" = '[]' ]
   grep -q "fixture-pass" "$TMPROOT/site/evals/index.html"
-  grep -q "codex-gpt-5.6-terra" "$TMPROOT/site/evals/index.html"
+  grep -q "codex-gpt-6-sol" "$TMPROOT/site/evals/index.html"
   grep -q "66.7%" "$TMPROOT/site/evals/index.html"
   grep -q "fixture-provider-limit" "$TMPROOT/site/evals/index.html"
   grep -q "blocked" "$TMPROOT/site/evals/index.html"
   grep -q "Installed provider composition" "$TMPROOT/site/evals/index.html"
   grep -q "Case-target plugin summary" "$TMPROOT/site/evals/index.html"
-  grep -q "codex-gpt-5.6-terra-targeted-plugins" "$TMPROOT/site/evals/index.html"
+  grep -q "codex-gpt-6-sol-targeted-plugins" "$TMPROOT/site/evals/index.html"
   grep -q ">tiber<" "$TMPROOT/site/evals/index.html"
   grep -q ">None<" "$TMPROOT/site/evals/index.html"
   grep -q "Skill summary" "$TMPROOT/site/evals/index.html"

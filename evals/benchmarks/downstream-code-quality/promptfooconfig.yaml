@@ -11,7 +11,7 @@ providers:
   - id: openai:codex-sdk
     label: openai-codex-sdk-no-marketplace-skills
     config:
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-5.6-terra') }}"
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}"
       model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
       working_dir: "{{ workspace }}"
       sandbox_mode: workspace-write
@@ -107,7 +107,7 @@ providers:
   - id: openai:codex-sdk
     label: openai-codex-sdk-targeted-quality-skills
     config:
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-5.6-terra') }}"
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}"
       model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
       working_dir: "{{ workspace }}"
       sandbox_mode: workspace-write
@@ -203,7 +203,7 @@ providers:
   - id: openai:codex-sdk
     label: openai-codex-sdk-all-marketplace-skills
     config:
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-5.6-terra') }}"
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}"
       model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
       working_dir: "{{ workspace }}"
       sandbox_mode: workspace-write

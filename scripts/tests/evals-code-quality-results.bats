@@ -305,7 +305,7 @@ const provenance = {
   workspaceManifestSha256: runtime.workspaceManifestSha256,
   runtimeManifestSha256: digest(runtimeBytes),
   matrixHash: runtime.matrixHash,
-  model: "gpt-5.6-terra",
+  model: "gpt-6-sol",
   reasoningEffort: "medium",
   codexVersion: "0.144.5",
   codexBinarySha256: fixed("d"),
@@ -665,7 +665,7 @@ run_checker() {
       (.skillActivations | length) == 1 and
       all(.skillActivations[]; test("^[a-z0-9-]+:[a-z0-9-]+$"))
     ) and
-    .provenance.model == "gpt-5.6-terra" and
+    .provenance.model == "gpt-6-sol" and
     .provenance.codexVersion == "0.144.5" and
     .provenance.nodeVersion == "22.23.1" and
     .provenance.promptfooVersion == "0.121.18" and

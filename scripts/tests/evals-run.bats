@@ -48,8 +48,8 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: scripts/evals/run.sh"* ]]
-  [[ "$output" == *"Codex: provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium"* ]]
-  [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-5.6-sol)"* ]]
+  [[ "$output" == *"Codex: provider=openai:codex-sdk, model=gpt-6-sol, model_reasoning_effort=medium"* ]]
+  [[ "$output" == *"CODEX_GRADER_MODEL            (default: gpt-6-astra)"* ]]
   [[ "$output" == *"CODEX_GRADER_REASONING_EFFORT (default: high)"* ]]
   [[ "$output" == *"The provider loads the relevant Codex marketplace surface"* ]]
   [[ "$output" == *"Pinned eval packages are managed by package.json and package-lock.json"* ]]
@@ -447,7 +447,7 @@ SH
     PROMPTFOO_BIN="$fake_promptfoo" \
     EVAL_OUT_DIR="$fixture_root/out" \
     EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
+    EVAL_PROVIDER_FILTER=codex-gpt-6-sol-targeted-plugins \
     EVAL_TIMEOUT=0 \
     CODEX_EVAL_HOME="$fixture_root/codex-full" \
     CODEX_EVAL_HOME_FULL_MARKETPLACE="$fixture_root/codex-full" \
@@ -499,7 +499,7 @@ SH
       PROMPTFOO_BIN="$fake_promptfoo" \
       EVAL_OUT_DIR="$fixture_root/out" \
       EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture \
-      EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra-targeted-plugins \
+      EVAL_PROVIDER_FILTER=codex-gpt-6-sol-targeted-plugins \
       EVAL_TIMEOUT=0 \
       CODEX_EVAL_HOME="$full_home" \
       CODEX_EVAL_HOME_FULL_MARKETPLACE="$full_home" \
@@ -536,7 +536,7 @@ SH
     OPENAI_API_KEY=fixture \
     PROMPTFOO_BIN="$fake_promptfoo" \
     EVAL_OUT_DIR="$fixture_root/out" \
-    EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra \
+    EVAL_PROVIDER_FILTER=codex-gpt-6-sol \
     EVAL_TIMEOUT=0 \
     CODEX_EVAL_HOME="$shared_home" \
     CODEX_EVAL_HOME_FULL_MARKETPLACE="$shared_home" \
@@ -551,7 +551,7 @@ SH
 }
 
 @test "eval runner dry-run prepares only selected Codex plugin mode" {
-  run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra "$RUNNER" --dry-run
+  run env EVAL_PROVIDER_FILTER=codex-gpt-6-sol "$RUNNER" --dry-run
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c 'prepare-codex-home.mjs')" -eq 1 ]
@@ -589,24 +589,24 @@ SH
 }
 
 @test "generated eval config exact provider variant filter selects one full-marketplace provider" {
-  run env EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+  run env EVAL_PROVIDER_FILTER=codex-gpt-6-sol node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
+  [[ "$output" == *"label: codex-gpt-6-sol-full-marketplace"* ]]
+  [[ "$output" != *"label: codex-gpt-6-sol-targeted-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-6-sol-no-plugins"* ]]
   [[ "$output" == *"pluginModes:"*$'\n'"      - id: full-marketplace"* ]]
 }
 
 @test "generated eval config combines case and provider filters without expanding provider modes" {
-  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-5.6-terra node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
+  run env EVAL_CASE_FILTER=tiber-new-task-command-backlog-capture EVAL_PROVIDER_FILTER=codex-gpt-6-sol node "$ROOT/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
   [ "$(printf '%s\n' "$output" | grep -c '^  - id: openai:codex-sdk$')" -eq 1 ]
-  [[ "$output" == *"label: codex-gpt-5.6-terra-full-marketplace"* ]]
+  [[ "$output" == *"label: codex-gpt-6-sol-full-marketplace"* ]]
   [[ "$output" == *"evals/out/generated/load-harness-cases.runtime.cjs"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-targeted-plugins"* ]]
-  [[ "$output" != *"label: codex-gpt-5.6-terra-no-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-6-sol-targeted-plugins"* ]]
+  [[ "$output" != *"label: codex-gpt-6-sol-no-plugins"* ]]
 }
 
 @test "eval runner uses project-local Promptfoo state for real runs" {
@@ -692,7 +692,7 @@ JSON
     "results": [
       {
         "success": true,
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "vars": {
           "case_id": "forced-diagnostic",
           "plugin_mode": "targeted-plugins",
@@ -730,7 +730,7 @@ JSON
     "results": [
       {
         "success": true,
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "vars": {
           "case_id": "forced-diagnostic",
           "plugin_mode": "targeted-plugins",
@@ -766,7 +766,7 @@ JSON
     "results": [
       {
         "success": true,
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "vars": {
           "case_id": "forced-diagnostic",
           "plugin_mode": "targeted-plugins",
@@ -805,7 +805,7 @@ JSON
     "results": [
       {
         "success": true,
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "vars": {
           "case_id": "forced-diagnostic",
           "plugin_mode": "targeted-plugins",
@@ -835,7 +835,7 @@ JSON
   "config": { "metadata": { "skillInvocationMode": "forced" } },
   "results": { "results": [{
     "success": true,
-    "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+    "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
     "vars": {
       "case_id": "forced-diagnostic",
       "plugin_mode": "targeted-plugins",
@@ -853,7 +853,7 @@ JSON
   mutations=(
     '.config.metadata.skillInvocationMode = "invalid"'
     '.results.results[0].vars.skill_invocation_mode = "natural"'
-    '.results.results[0].provider.label = "codex-gpt-5.6-terra-no-plugins"'
+    '.results.results[0].provider.label = "codex-gpt-6-sol-no-plugins"'
     '.results.results[0].vars.skill_references = ["development-system:development-workflow"]'
     '.results.results[0].vars.skills = ["development-workflow", "delivery"]'
   )
@@ -874,17 +874,17 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-no-plugins" },
         "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "no-plugins", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": false, "score": 0, "reason": "No plugin-specific command known" }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "targeted-plugins", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": true, "score": 1 }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "provider": { "label": "codex-gpt-6-sol-full-marketplace" },
         "testCase": { "vars": { "case_id": "plugin-specific-safety", "plugin_mode": "full-marketplace", "min_pass_rate": 1, "value_gate_mode": "safety-critical", "baseline_lift_threshold": 0 } },
         "gradingResult": { "pass": true, "score": 1 }
       }
@@ -908,17 +908,17 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-no-plugins" },
         "testCase": { "vars": { "case_id": "already-solved", "plugin_mode": "no-plugins", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
         "gradingResult": { "pass": true, "score": 1 }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "testCase": { "vars": { "case_id": "already-solved", "plugin_mode": "targeted-plugins", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
         "gradingResult": { "pass": true, "score": 1 }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "provider": { "label": "codex-gpt-6-sol-full-marketplace" },
         "testCase": { "vars": { "case_id": "already-solved", "plugin_mode": "full-marketplace", "min_pass_rate": 1, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
         "gradingResult": { "pass": true, "score": 1 }
       }
@@ -942,17 +942,17 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-no-plugins" },
         "testCase": { "vars": { "case_id": "composition-regression", "plugin_mode": "no-plugins", "min_pass_rate": 0, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
         "gradingResult": { "pass": false, "score": 0 }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "testCase": { "vars": { "case_id": "composition-regression", "plugin_mode": "targeted-plugins", "min_pass_rate": 0, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
         "gradingResult": { "pass": false, "score": 0 }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "provider": { "label": "codex-gpt-6-sol-full-marketplace" },
         "testCase": { "vars": { "case_id": "composition-regression", "plugin_mode": "full-marketplace", "min_pass_rate": 0, "value_gate_mode": "standard", "baseline_lift_threshold": 0.1 } },
         "gradingResult": { "pass": true, "score": 1 }
       }
@@ -965,7 +965,7 @@ JSON
 
   rm -rf "$fixture_root"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"codex-gpt-5.6-terra::targeted-plugins::composition-regression"* ]]
+  [[ "$output" == *"codex-gpt-6-sol::targeted-plugins::composition-regression"* ]]
 }
 
 @test "eval threshold checker reports failed hard-guard components hidden by semantic reasons" {
@@ -976,7 +976,7 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.6-terra-targeted-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-targeted-plugins" },
         "testCase": { "vars": { "case_id": "hidden-hard-guard", "plugin_mode": "targeted-plugins", "min_pass_rate": 0, "value_gate_mode": "none" } },
         "gradingResult": {
           "pass": false,
@@ -1019,12 +1019,12 @@ JSON
   "results": {
     "results": [
       {
-        "provider": { "label": "codex-gpt-5.6-terra-full-marketplace" },
+        "provider": { "label": "codex-gpt-6-sol-full-marketplace" },
         "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
         "gradingResult": { "pass": true, "score": 1 }
       },
       {
-        "provider": { "label": "codex-gpt-5.6-terra-no-plugins" },
+        "provider": { "label": "codex-gpt-6-sol-no-plugins" },
         "testCase": { "vars": { "case_id": "composition", "min_pass_rate": 1, "value_gate_mode": "none" } },
         "gradingResult": { "pass": true, "score": 1 }
       }
@@ -1725,19 +1725,19 @@ const metadataOutput = process.argv[process.argv.indexOf('--metadata-output') + 
 fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, `providers:
   - id: openai:codex-sdk
-    label: codex-gpt-5.6-terra-targeted-plugins
+    label: codex-gpt-6-sol-targeted-plugins
     pluginMode: targeted-plugins
 `);
 const targeted = {
-  label: 'codex-gpt-5.6-terra-targeted-plugins',
+  label: 'codex-gpt-6-sol-targeted-plugins',
   provider: 'openai:codex-sdk',
-  providerVariant: 'codex-gpt-5.6-terra',
+  providerVariant: 'codex-gpt-6-sol',
   pluginMode: 'targeted-plugins',
   plugins: ['tiber'],
 };
 const noPlugins = {
   ...targeted,
-  label: 'codex-gpt-5.6-terra-no-plugins',
+  label: 'codex-gpt-6-sol-no-plugins',
   pluginMode: 'no-plugins',
   plugins: [],
 };
@@ -1757,7 +1757,7 @@ const cases = {
   no_plugins_nonempty: [
     {
       ...targeted,
-      label: 'codex-gpt-5.6-terra-no-plugins',
+      label: 'codex-gpt-6-sol-no-plugins',
       pluginMode: 'no-plugins',
     },
   ],
@@ -1766,7 +1766,7 @@ const cases = {
   unknown_mode: [
     {
       ...targeted,
-      label: 'codex-gpt-5.6-terra-unknown-mode',
+      label: 'codex-gpt-6-sol-unknown-mode',
       pluginMode: 'unknown-mode',
     },
   ],
@@ -1814,8 +1814,8 @@ NODE
     "duplicate_plugin|non-canonical plugin list" \
     "unsorted_plugins|non-canonical plugin list" \
     "invalid_plugin_name|invalid plugin list" \
-    "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-5.6-terra-no-plugins" \
-    "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-5.6-terra-no-plugins" \
+    "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-6-sol-no-plugins" \
+    "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-6-sol-no-plugins" \
     "both_missing_and_extra|provider composition labels do not match configured providers: missing: codex-missing-full-marketplace, codex-missing-no-plugins; extra: codex-other-no-plugins"; do
     composition_case="${fixture%%|*}"
     expected="${fixture#*|}"
@@ -1840,8 +1840,8 @@ SH
   chmod +x "$fixture_root/scripts/evals/ensure-node-deps.sh"
   for fixture in \
     "empty|providerCompositions must contain at least one provider" \
-    "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-5.6-terra-no-plugins" \
-    "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-5.6-terra-no-plugins"; do
+    "missing_composition_label|provider composition labels do not match configured providers: missing: codex-gpt-6-sol-no-plugins" \
+    "extra_composition_label|provider composition labels do not match configured providers: extra: codex-gpt-6-sol-no-plugins"; do
     composition_case="${fixture%%|*}"
     expected="${fixture#*|}"
     grader_home="$fixture_root/grader-home-$composition_case"

@@ -49,12 +49,12 @@ they exercise.
 
 Default eval posture matches intended use:
 
-- Codex execution: `openai:codex-sdk`, `gpt-5.6-terra` with medium reasoning
+- Codex execution: `openai:codex-sdk`, `gpt-6-sol` with medium reasoning
   effort, a read-only sandbox, no approvals, streaming, deep tracing disabled,
   and isolated generated homes containing no plugins, the selected cases'
   deterministic plugin union, or the complete harness-specific catalog
   according to the behavior mode. Independent model grading defaults to
-  `gpt-5.6-sol` with high reasoning. Both execution and grader roles retain
+  `gpt-6-astra` with high reasoning. Both execution and grader roles retain
   separate environment overrides.
 
 Canaries are separate from behavior evals. Canaries explicitly prove plugin and

@@ -5,6 +5,8 @@ description: Use when designing, scaffolding, evaluating, or delivering LLM and 
 
 # Agentic systems
 
+For delegated agent model and effort selection, read [model-routing](../model-routing/SKILL.md) before spawning. Keep that coordinator policy separate from application provider routing.
+
 Require `[features].agentic_systems = true` in
 `.development-system.toml`.
 

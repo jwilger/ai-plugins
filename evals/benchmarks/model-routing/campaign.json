@@ -21,7 +21,7 @@
     "regression"
   ],
   "candidates": {
-    "models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"],
+    "models": ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"],
     "efforts": ["low", "medium", "high", "xhigh", "max"],
     "mechanical_additional_efforts": ["none"],
     "unsupported_combinations_are_results": true,
@@ -85,7 +85,7 @@
     ],
     "reference": {
       "deterministic_witnesses_first": true,
-      "semantic_assessors": ["gpt-6-astra/high", "gpt-5.6-sol/high"],
+      "semantic_assessors": ["gpt-6-astra/high", "gpt-6-sol/high"],
       "disagreement": "unresolved"
     },
     "calibration": {

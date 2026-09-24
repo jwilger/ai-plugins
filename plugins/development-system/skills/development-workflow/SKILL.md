@@ -5,6 +5,8 @@ description: Use when making repository changes, debugging, handling review feed
 
 # Development workflow
 
+When selecting a delegated agent's model or reasoning effort, read [model-routing](../model-routing/SKILL.md) before spawning. It is the canonical task-local routing policy; agent definitions do not choose a model.
+
 Use `workspace-reader.status` before choosing a workflow. Outside Git, without
 configuration, or with invalid configuration, inspection remains available but
 the plugin cannot provide configured workflow guidance. This advisory state
@@ -334,7 +336,7 @@ Load the retained specialist contract only when its intent matches:
 - Final-review scope, findings, or verifier flow: [final
   review](../../components/development-discipline/skills/final-review/SKILL.md).
 - Worker or reviewer selection: [model
-  routing](../../components/development-discipline/skills/model-routing/SKILL.md).
+  routing](../model-routing/SKILL.md).
 - Failed pushed CI: [CI failure
   follow-up](../../components/development-discipline/skills/ci-failure-follow-up/SKILL.md).
 - Lifecycle-aware delivery: [delivery

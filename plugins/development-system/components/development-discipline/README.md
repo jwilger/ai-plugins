@@ -72,13 +72,11 @@ and retrying the submission cannot preserve an earlier clean streak.
 
 ## Harness
 
-Codex consumes the canonical routing policy from `skills/`. The plugin packages
-four task-local agents:
-`bounded-helper`, `substantive-worker`, `strong-reviewer`, and `strong-worker`.
-Codex agents pin
-the exact GPT-5.6 model identifiers and sandbox modes. If Codex cannot honor the
-requested route, the agent reports that failure
-instead of treating inheritance or substitution as success.
+Codex consumes the canonical routing policy from the installed plugin root `skills/model-routing/`. The plugin root packages these task-local agents:
+`bounded-helper`, `substantive-worker`, `strong-reviewer`, `strong-worker`, and the read-only `advisor`.
+Agent definitions retain their sandbox and task boundaries; the coordinator sets
+the GPT-6 model and effort for each assignment using `model-routing`. If Codex
+cannot honor the chosen route, the coordinator reports the failure visibly.
 
 The final-review coordinator runs from the Development System plugin's
 versioned host-local binary installation. Download and verify it with

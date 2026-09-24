@@ -6,7 +6,7 @@
   "targetName": "change-preflight",
   "runner": {
     "type": "codex-cli",
-    "model": "gpt-5.6-terra",
+    "model": "gpt-6-sol",
     "sandbox": "workspace-write",
     "approvalPolicy": "never",
     "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]

@@ -374,7 +374,7 @@ defaultTest:
       text:
         id: openai:codex-sdk
         config:
-          model: "{{ env.CODEX_GRADER_MODEL | default('gpt-5.6-sol') }}"
+          model: "{{ env.CODEX_GRADER_MODEL | default('gpt-6-astra') }}"
           model_reasoning_effort: "{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}"
           working_dir: ${quote(evalWorkspace)}
           sandbox_mode: read-only

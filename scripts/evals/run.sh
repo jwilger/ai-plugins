@@ -64,12 +64,12 @@ Runs provider-backed promptfoo evals through Codex.
 The provider loads the relevant Codex marketplace surface.
 
 Default harness posture:
-  Codex: provider=openai:codex-sdk, model=gpt-5.6-terra, model_reasoning_effort=medium
+  Codex: provider=openai:codex-sdk, model=gpt-6-sol, model_reasoning_effort=medium
 
 Environment overrides:
   CODEX_EVAL_MODEL
   CODEX_EVAL_REASONING_EFFORT
-  CODEX_GRADER_MODEL            (default: gpt-5.6-sol)
+  CODEX_GRADER_MODEL            (default: gpt-6-astra)
   CODEX_GRADER_REASONING_EFFORT (default: high)
   EVAL_SAMPLES
   EVAL_CASE_FILTER

@@ -142,7 +142,7 @@ fn advisory_final_review_resume_rebuilds_deleted_sqlite_projection_from_git_auth
     fs::write(root.path().join("src/review.rs"), "const VALUE: u8 = 1;\n").expect("initial source");
     fs::write(
         root.path().join(".development-system.toml"),
-        "schema_version = 3\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-5.6-sol\"\nlens_review = \"gpt-5.6-terra\"\npost_filter = \"gpt-5.6-luna\"\nverifier = \"gpt-5.6-sol\"\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n",
+        "schema_version = 3\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-6-astra\"\nlens_review = \"gpt-6-sol\"\npost_filter = \"gpt-6-luna\"\nverifier = \"gpt-6-astra\"\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n",
     )
     .expect("configuration");
     git(root.path(), &["add", "."]);
@@ -189,7 +189,7 @@ fn advisory_final_review_resume_rebuilds_deleted_sqlite_projection_from_git_auth
             "commands": ["fixture:verification"],
             "artifact_reference": "fixture://production-resume"
         },
-        "pre_filter_model_role": "gpt-5.6-sol"
+        "pre_filter_model_role": "gpt-6-astra"
     });
     let risk_response = mcp_call_with_environment(
         root.path(),
@@ -353,7 +353,7 @@ fn setup_preview_reports_legacy_configuration_as_migration_required() {
     .expect("Cargo manifest");
     fs::write(
         root.path().join(".development-system.toml"),
-        "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\n\n[features]\ntiber = true\n\n[worktrees]\nroot = \".worktrees\"\n\n[final_review.models.codex]\npre_filter = \"gpt-5.6-sol\"\n",
+        "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\n\n[features]\ntiber = true\n\n[worktrees]\nroot = \".worktrees\"\n\n[final_review.models.codex]\npre_filter = \"gpt-6-astra\"\n",
     )
     .expect("legacy configuration");
 
@@ -387,7 +387,7 @@ fn setup_preview_reports_legacy_configuration_as_migration_required() {
         "[worktrees]",
         "root = \".worktrees\"",
         "[final_review.models.codex]",
-        "pre_filter = \"gpt-5.6-sol\"",
+        "pre_filter = \"gpt-6-astra\"",
         "[scopes.source]",
     ] {
         assert!(
@@ -488,7 +488,7 @@ fn setup_apply_writes_only_codex_project_mcp_configuration() {
     fs::create_dir_all(root.path().join(".codex")).expect("Codex directory");
     fs::write(
         root.path().join(".codex/config.toml"),
-        "model = \"gpt-5.6\"\n",
+        "model = \"gpt-6-sol\"\n",
     )
     .expect("Codex config");
     fs::write(
@@ -509,7 +509,7 @@ fn setup_apply_writes_only_codex_project_mcp_configuration() {
     );
     let codex_config =
         fs::read_to_string(root.path().join(".codex/config.toml")).expect("Codex config");
-    assert!(codex_config.contains("model = \"gpt-5.6\""));
+    assert!(codex_config.contains("model = \"gpt-6-sol\""));
     assert!(codex_config.contains("[mcp_servers.development-discipline]"));
     assert!(codex_config.contains(binaries.path().to_string_lossy().as_ref()));
     assert_eq!(
@@ -532,7 +532,7 @@ fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
     .expect("Cargo manifest");
     fs::write(
         root.path().join(".development-system.toml"),
-        "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-5.6-sol\"\n",
+        "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-6-astra\"\n",
     )
     .expect("legacy configuration");
     let applied = mcp_call(
@@ -554,7 +554,7 @@ fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
         "[features]",
         "tiber = true",
         "[final_review.models.codex]",
-        "pre_filter = \"gpt-5.6-sol\"",
+        "pre_filter = \"gpt-6-astra\"",
         "[scopes.source]",
     ] {
         assert!(
