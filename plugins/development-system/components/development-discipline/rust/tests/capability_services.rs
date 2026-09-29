@@ -80,6 +80,25 @@ fn git(root: &std::path::Path, arguments: &[&str]) {
     }
 }
 
+#[test]
+fn portable_mcp_requires_an_explicit_repository_when_sandbox_metadata_is_absent() {
+    let plugin_root = TempDir::new().expect("plugin root");
+    git(plugin_root.path(), &["init", "--quiet"]);
+    fs::write(plugin_root.path().join("plugin.json"), "{}\n").expect("plugin manifest");
+    let response = mcp_call_with_environment(
+        plugin_root.path(),
+        "workspace-reader.status",
+        json!({}),
+        &[("PLUGIN_ROOT", plugin_root.path())],
+    );
+    assert_eq!(
+        response.pointer("/error/message"),
+        Some(&json!(
+            "development_workflow.project_root_required source=mcp_sandbox_cwd"
+        ))
+    );
+}
+
 fn test_executable(program: &str) -> String {
     std::env::var_os("PATH")
         .and_then(|path| {
@@ -450,7 +469,7 @@ fn setup_requires_confirmation_and_writes_codex_repository_configuration() {
         Some(&json!(true))
     );
     assert!(root.path().join(".development-system.toml").is_file());
-    assert!(root.path().join(".codex/config.toml").is_file());
+    assert!(!root.path().join(".codex/config.toml").exists());
     let lefthook = fs::read_to_string(root.path().join("lefthook.yml")).expect("Lefthook config");
     assert!(lefthook.contains("pre-commit:"));
     assert!(lefthook.contains("pre-push:"));
@@ -510,8 +529,8 @@ fn setup_apply_writes_only_codex_project_mcp_configuration() {
     let codex_config =
         fs::read_to_string(root.path().join(".codex/config.toml")).expect("Codex config");
     assert!(codex_config.contains("model = \"gpt-6-sol\""));
-    assert!(codex_config.contains("[mcp_servers.development-discipline]"));
-    assert!(codex_config.contains(binaries.path().to_string_lossy().as_ref()));
+    assert!(!codex_config.contains("[mcp_servers.development-discipline]"));
+    assert!(!codex_config.contains(binaries.path().to_string_lossy().as_ref()));
     assert_eq!(
         fs::read_to_string(root.path().join(".mcp.json")).expect("unrelated MCP config"),
         r#"{"mcpServers":{"custom":{"command":"custom-mcp"}}}"#
@@ -535,6 +554,20 @@ fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
         "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-6-astra\"\n",
     )
     .expect("legacy configuration");
+    fs::write(
+        root.path().join(".codex/config.toml"),
+        "approval_policy = \"on-request\"\n# >>> development-system MCP servers >>>\n[mcp_servers.tiber]\ncommand = \"/old/tiber\"\n# <<< development-system MCP servers <<<\n",
+    )
+    .expect("legacy MCP configuration");
+    let preview = mcp_call(
+        root.path(),
+        "setup.preview",
+        json!({ "project_root": root.path() }),
+    );
+    assert_eq!(
+        preview.pointer("/result/structuredContent/legacy_mcp_block_removal"),
+        Some(&json!(true))
+    );
     let applied = mcp_call(
         root.path(),
         "setup.apply",
@@ -562,6 +595,11 @@ fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
             "missing retained policy: {retained}"
         );
     }
+    assert_eq!(
+        fs::read_to_string(root.path().join(".codex/config.toml"))
+            .expect("migrated Codex configuration"),
+        "approval_policy = \"on-request\"\n\n"
+    );
     let status = mcp_call(
         root.path(),
         "workspace-reader.status",

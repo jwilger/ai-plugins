@@ -217,12 +217,12 @@ NODE
   FIXTURE_TMP="$(mktemp -d)"
   fixture="$FIXTURE_TMP"
   mkdir -p "$fixture/plugins/example/skills/alpha" "$fixture/evals/fixtures/behavior/example"
-  mkdir -p "$fixture/.agents/plugins" "$fixture/plugins/example/.codex-plugin"
+  mkdir -p "$fixture/.agents/plugins" "$fixture/plugins/example"
   cat >"$fixture/.agents/plugins/marketplace.json" <<'JSON'
 {"plugins":[{"name":"example","source":{"source":"local","path":"./plugins/example"}}]}
 JSON
-  cat >"$fixture/plugins/example/.codex-plugin/plugin.json" <<'JSON'
-{"name":"example","version":"0.1.0"}
+  cat >"$fixture/plugins/example/plugin.json" <<'JSON'
+{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example","version":"0.1.0"}
 JSON
   cat >"$fixture/plugins/example/skills/alpha/SKILL.md" <<'MD'
 ---
@@ -258,12 +258,12 @@ JSON
   FIXTURE_TMP="$(mktemp -d)"
   fixture="$FIXTURE_TMP"
   mkdir -p "$fixture/plugins/example/skills/alpha" "$fixture/evals/fixtures"
-  mkdir -p "$fixture/.agents/plugins" "$fixture/plugins/example/.codex-plugin"
+  mkdir -p "$fixture/.agents/plugins" "$fixture/plugins/example"
   cat >"$fixture/.agents/plugins/marketplace.json" <<'JSON'
 {"plugins":[{"name":"example","source":{"source":"local","path":"./plugins/example"}}]}
 JSON
-  cat >"$fixture/plugins/example/.codex-plugin/plugin.json" <<'JSON'
-{"name":"example","version":"0.1.0"}
+  cat >"$fixture/plugins/example/plugin.json" <<'JSON'
+{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example","version":"0.1.0"}
 JSON
   cat >"$fixture/plugins/example/skills/alpha/SKILL.md" <<'MD'
 ---
@@ -424,7 +424,7 @@ NODE
     [ -d "$eval_home/plugins/cache/ai-plugins/$plugin" ]
   done < <(jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json")
 
-  plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/plugin.json")"
   plugin_cache="$eval_home/plugins/cache/ai-plugins/development-system/$plugin_version"
   [ -d "$plugin_cache/skills" ]
   [ ! -e "$plugin_cache/bin" ]

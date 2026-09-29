@@ -1,72 +1,61 @@
 #!/usr/bin/env bash
-# Validate the Codex marketplace and its public plugin manifests.
+# Validate portable Agent Plugins manifests and the Codex marketplace index.
 set -euo pipefail
 
 root="${1:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
-codex="$root/.agents/plugins/marketplace.json"
-
-fail() { echo "manifest-sync: $*" >&2; exit 1; }
+marketplace="$root/.agents/plugins/marketplace.json"
+fail() { printf 'manifest-sync: %s\n' "$*" >&2; exit 1; }
 is_semver() { [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?(\+([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$ ]]; }
 
-[ -f "$codex" ] || fail "missing-codex-manifest: $codex"
-jq empty "$codex" || fail "invalid-codex-manifest: $codex"
-[ ! -e "$root/CLAUDE.md" ] || fail "unsupported-claude-instructions: CLAUDE.md"
-[ ! -e "$root/.mcp.json" ] || fail "unsupported-claude-root-surface: .mcp.json"
-root_claude_plugin="$(find "$root/.claude-plugin" -mindepth 1 -print -quit 2>/dev/null || true)"
-[ -z "$root_claude_plugin" ] || fail "unsupported-claude-root-surface: ${root_claude_plugin#"$root/"}"
-root_claude="$(find "$root/.claude" -mindepth 1 \( -path "$root/.claude/settings.local.json" -o -path "$root/.claude/worktrees" \) -prune -o -print -quit 2>/dev/null || true)"
-[ -z "$root_claude" ] || fail "unsupported-claude-root-surface: ${root_claude#"$root/"}"
-unsupported_claude="$(find "$root/plugins" \( -path '*/.claude-plugin/*' -o -name '.mcp.json' -o -path '*/hooks/hooks.json' -o -path '*/agents/*.md' -o -name 'CLAUDE.md' \) -print -quit)"
-[ -z "$unsupported_claude" ] || fail "unsupported-claude-surface: ${unsupported_claude#"$root/"}"
-names_codex="$(jq -r '.plugins[].name' "$codex" | sort -u)"
-
-has_name() { grep -qx "$1" <<<"$names_codex"; }
-
-while read -r name; do
-  [ -n "$name" ] || continue
-  [ -d "$root/plugins/$name" ] || fail "manifest-plugin-without-dir: $name"
-  source_kind="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .source.source // empty' "$codex")"
-  source_path="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .source.path // empty' "$codex")"
-  [ "$source_kind" = "local" ] || fail "codex-marketplace-source-mismatch: $name source=$source_kind"
-  [ "$source_path" = "./plugins/$name" ] || fail "codex-marketplace-path-mismatch: $name path=$source_path"
-done <<<"$names_codex"
+[[ -f "$marketplace" ]] || fail "missing-marketplace: $marketplace"
+jq empty "$marketplace" || fail "invalid-marketplace: $marketplace"
+[[ $(jq -r '.plugins | length' "$marketplace") -eq $(jq -r '[.plugins[].name] | unique | length' "$marketplace") ]] || fail "duplicate-marketplace-plugin"
 
 for dir in "$root"/plugins/*/; do
-  [ -d "$dir" ] || continue
+  [[ -d "$dir" ]] || continue
   name="$(basename "$dir")"
-  has_name "$name" || fail "unregistered-plugin: $name"
-
-  cx="${dir}.codex-plugin/plugin.json"
-  [ -f "$cx" ] || fail "missing-codex-plugin-json: $name"
-  jq empty "$cx" || fail "invalid-codex-plugin-json: $name"
-  cx_name="$(jq -r '.name' "$cx")"
-  [ "$cx_name" = "$name" ] || fail "codex-plugin-name-mismatch: dir=$name json=$cx_name"
-  cx_version="$(jq -r '.version // empty' "$cx")"
-  [ -n "$cx_version" ] || fail "missing-codex-plugin-version: $name"
-  is_semver "$cx_version" || fail "invalid-codex-plugin-version: $name version=$cx_version"
-  marketplace_version="$(jq -r --arg name "$name" '.plugins[] | select(.name == $name) | .version // empty' "$codex")"
-  [ -n "$marketplace_version" ] || fail "missing-codex-marketplace-version: $name"
-  [ "$marketplace_version" = "$cx_version" ] || fail "codex-marketplace-version-mismatch: $name marketplace=$marketplace_version plugin=$cx_version"
-
-  mcp_ref="$(jq -r '.mcpServers // empty' "$cx")"
-  codex_default_mcp="${dir}.codex-mcp.json"
-  if [ -f "$codex_default_mcp" ] && [ -z "$mcp_ref" ]; then
-    fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json"
+  manifest="${dir}plugin.json"
+  [[ -f "$manifest" ]] || fail "missing-portable-plugin-json: $name"
+  jq empty "$manifest" || fail "invalid-portable-plugin-json: $name"
+  jq -e --arg name "$name" '
+    ."$schema" == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json" and
+    .name == $name and
+    (.description | type == "string") and
+    (.extensions // {} | type == "object") and
+    ([keys[]] - ["$schema", "name", "version", "description", "author", "homepage", "repository", "license", "keywords", "extensions"] | length == 0)
+  ' "$manifest" >/dev/null || fail "invalid-portable-plugin-schema: $name"
+  version="$(jq -r '.version // empty' "$manifest")"
+  [[ -n "$version" ]] && is_semver "$version" || fail "invalid-plugin-version: $name version=$version"
+  if [[ -f "$root/README.md" ]]; then
+    catalog_version="$(awk -F '|' -v plugin="$name" 'index($2, "[" plugin "](") { gsub(/^[[:space:]]+|[[:space:]]+$/, "", $5); print $5; exit }' "$root/README.md")"
+    [[ "$catalog_version" == "$version" ]] || fail "catalog-version-mismatch: $name catalog=$catalog_version plugin=$version"
   fi
-  if [ -f "$codex_default_mcp" ] && [ -n "$mcp_ref" ] && [ "$mcp_ref" != "./.codex-mcp.json" ]; then
-    fail "codex-mcp-manifest-not-declared: $name path=./.codex-mcp.json declared=$mcp_ref"
-  fi
-  if [ -n "$mcp_ref" ]; then
-    mcp_path="${mcp_ref#./}"
-    mcp_file="$dir$mcp_path"
-    [ -f "$mcp_file" ] || fail "missing-codex-mcp-manifest: $name path=$mcp_ref"
-    if jq -e '.mcpServers | to_entries[] | select(.value.command | type == "string" and startswith("./")) | select(.value.cwd != ".")' "$mcp_file" >/dev/null; then
-      fail "codex-relative-mcp-command-requires-plugin-root-cwd: $name path=$mcp_ref"
-    fi
-    if grep -q "plugins/cache/" "$mcp_file"; then
-      fail "codex-mcp-launcher-must-use-plugin-root: $name path=$mcp_ref"
-    fi
+  jq -e --arg name "$name" --arg version "$version" '
+    [.plugins[] | select(.name == $name and .version == $version and
+      .source.source == "local" and .source.path == ("./plugins/" + $name))] | length == 1
+  ' "$marketplace" >/dev/null || fail "marketplace-plugin-mismatch: $name version=$version"
+  [[ ! -e "${dir}.codex-plugin/plugin.json" ]] || fail "redundant-codex-plugin-json: $name"
+  [[ ! -e "${dir}.codex-mcp.json" ]] || fail "legacy-codex-mcp-json: $name"
+  if [[ -f "${dir}mcp.json" ]]; then
+    jq -e '
+      ."$schema" == "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json" and
+      (.mcpServers | type == "object") and
+      ([keys[]] - ["$schema", "mcpServers"] | length == 0) and
+      ([.mcpServers[] | if .type == "stdio" then
+        (.command | type == "string" and (startswith("./") or (contains("/") | not)))
+      elif .type == "streamable-http" or .type == "sse" then
+        (.url | type == "string")
+      else false end
+      ] | all)
+    ' "${dir}mcp.json" >/dev/null || fail "invalid-portable-mcp-schema: $name"
+    while IFS= read -r command; do
+      [[ -f "${dir}${command#./}" ]] && [[ -x "${dir}${command#./}" ]] || fail "missing-mcp-launcher: $name command=$command"
+    done < <(jq -r '.mcpServers[] | select(.type == "stdio" and (.command | startswith("./"))) | .command' "${dir}mcp.json")
   fi
 done
 
-echo "manifest-sync: ok"
+while IFS= read -r name; do
+  [[ -d "$root/plugins/$name" ]] || fail "marketplace-plugin-without-dir: $name"
+done < <(jq -r '.plugins[].name' "$marketplace")
+
+echo 'manifest-sync: ok'

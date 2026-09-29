@@ -210,7 +210,7 @@ teardown() {
   printf '%s\n' '[features]' 'hooks = false' \
     >"$TEST_ROOT/project/.codex/config.toml"
   local version host installation
-  version="$(jq -r '.version' "$REPO_ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  version="$(jq -r '.version' "$REPO_ROOT/plugins/development-system/plugin.json")"
   host="$(source "$REPO_ROOT/plugins/development-system/lib/installed-binary.sh"; development_system_host)"
   installation="$TEST_ROOT/xdg-data/ai-plugins/development-system/$version/$host"
   mkdir -p "$installation"

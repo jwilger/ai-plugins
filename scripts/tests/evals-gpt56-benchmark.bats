@@ -547,9 +547,9 @@ NODE
     --plugins development-system
 
   [ "$status" -eq 0 ]
-  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/plugin.json")"
   cached_plugin="$plugin_home/$version"
-  [ -f "$cached_plugin/.codex-plugin/plugin.json" ]
+  [ -f "$cached_plugin/plugin.json" ]
   [ -d "$cached_plugin/skills" ]
   [ ! -e "$cached_plugin/.mcp.json" ]
   [ ! -e "$cached_plugin/bin" ]
@@ -1106,7 +1106,7 @@ NODE
   marker="$temp_root/promptfoo-invoked"
   execution_artifact="$temp_root/execution-results.json"
   expected_plugin="development-system"
-  agentic_version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  agentic_version="$(jq -r '.version' "$ROOT/plugins/development-system/plugin.json")"
   write_execution_artifact \
     "$execution_artifact" \
     "$skills_home" \

@@ -15,18 +15,19 @@ On Linux x86_64, the command downloads the exact plugin-version bundle from the
 repository's GitHub Release, verifies its SHA-256 sidecar and fixed archive
 layout, and atomically installs `tiber` and
 `development-discipline-mcp` in
-`$XDG_DATA_HOME/ai-plugins/development-system/<plugin-version>/<host>/`.
-When `XDG_DATA_HOME` is unset, it uses `~/.local/share`. Re-running the command
+`$PLUGIN_DATA/ai-plugins/development-system/<plugin-version>/<host>/`
+under Codex. Direct CLI use falls back to `$XDG_DATA_HOME`, then
+`~/.local/share`. Re-running the command
 is safe; a newer plugin version is installed alongside previous versions.
-Project-local MCP configuration always uses these stable host-directory paths,
-so a same-version reinstall can atomically replace its staging target without
-leaving a project pointed at it.
-The published plugin intentionally carries no bootstrap MCP manifest. During
-project setup, it writes the project's `.codex/config.toml` MCP configuration
-alongside the confirmed Development System and Lefthook project files.
-Those entries launch the installed binaries by their absolute XDG paths; they
-do not launch a plugin-relative shell wrapper. Re-run setup after an upgrade,
-then start a new harness session.
+The plugin root `mcp.json` declares both servers with plugin-relative
+launchers. Each launcher repairs a missing matching binary before starting, so
+consuming projects do not configure MCP servers. Project setup removes only a
+previously managed Development System MCP block from `.codex/config.toml`.
+Signed Tiber operations use the plugin-owned
+`$PLUGIN_DATA/signing-agent-socket` file. Outside a portable harness,
+the launcher uses `$XDG_CONFIG_HOME/ai-plugins/development-system/` (or
+`~/.config`). The root installer captures a valid `SSH_AUTH_SOCK`; update
+the plugin-owned file with an absolute socket path if your agent moves.
 The release bundle contains statically linked Linux x86_64 executables, the
 applicable license, and the exact source tag and commit. To force a locked
 source build for diagnosis:
@@ -38,8 +39,8 @@ just install-development-system-binaries --from-source
 The repository's Nix devshell is optional. If `just` is unavailable, run
 `scripts/install-development-system-binaries.sh` from the marketplace checkout.
 
-The installed `SessionStart` hook verifies the binaries and atomic installation
-marker against the plugin manifest version every time Codex starts. It repairs
+The installed `SessionStart` hook and both MCP launchers verify the binaries
+and atomic installation marker against the plugin manifest version. It repairs
 missing or stale installations automatically: Linux x86_64 uses the verified
 release bundle, while hosts without a prebuilt bundle use the locked Cargo
 build. The `setup` skill performs the same automatic check before configuring a
@@ -93,19 +94,16 @@ remains able to inspect, edit, verify, commit, and push while Tiber is being
 bootstrapped. Tiber, rather than this plugin, will own authoritative identity,
 isolation, workflow, memory, verification, and delivery.
 
-Codex consumes project-local direct binary entries. A global
-`[mcp_servers.*]` compatibility override is neither required nor part of
-supported setup.
+Codex loads the plugin-root `mcp.json` and plugin-relative launchers. Project
+MCP entries and global compatibility overrides are unnecessary. If a signed
+append cannot reach the agent, update the plugin-owned signing socket path.
 
-The project-local MCP entries use the harness's ordinary process environment.
-If a signed append reports that the signing agent is unavailable, upgrade or
-reinstall the plugin before restarting the harness; no signing fallback is
-supported.
-
-The strong recommendation is to install only this plugin. Third-party plugin
-marketplaces add unnecessary supply-chain exposure. The plugin owns its bundled
-MCP integrations; user-added MCPs are warned about for compatibility review,
-not automatically rejected.
+The core workflow requires only this plugin. The root installer offers GitHub
+and CodeRabbit as optional companions. GitHub provides a connector mapping and
+CodeRabbit provides skills backed by its CLI; neither requires a Development
+System MCP dependency. Superpowers is omitted because its workflow overlaps.
+The plugin owns its bundled MCP integrations; user-added MCPs are warned about
+for compatibility review, not automatically rejected.
 
 The plugin root is the active public surface: its manifests, hooks, launchers,
 and `skills/` directory define the installed `development-system` plugin and

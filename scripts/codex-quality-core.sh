@@ -125,7 +125,7 @@ validate_plugin_state_json() {
 expected_plugin_version() {
   local plugin="$1"
 
-  jq -er '.version' "$root/plugins/$plugin/.codex-plugin/plugin.json"
+  jq -er '.version' "$root/plugins/$plugin/plugin.json"
 }
 
 assert_plugins_installed() {

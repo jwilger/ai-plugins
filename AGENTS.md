@@ -4,8 +4,8 @@ Guidance for Codex agents working in this repository.
 
 ## What this repo is
 
-`ai-plugins` is a **Codex plugin marketplace**. It carries Codex marketplace
-metadata and plugin manifests.
+`ai-plugins` is a **portable plugin marketplace** with Codex as its required
+runtime. It carries Codex marketplace metadata and Agent Plugins manifests.
 
 When this repository's marketplace plugins are installed in an agent harness,
 use the relevant installed skills for matching work rather than treating plugin
@@ -176,12 +176,15 @@ limit on worthwhile queued work.
 
 1. Create `plugins/<plugin-name>/` (kebab-case, no spaces — the name is
    public-facing and used for namespacing, e.g. `/<plugin-name>:<skill>`).
-2. Add `plugins/<plugin-name>/.codex-plugin/plugin.json`. Prefer setting
-   `name`, `description`, `version` (semver), `author`, and `license`.
+2. Add `plugins/<plugin-name>/plugin.json` using Agent Plugins 1.0.0. Set
+   `name`, `description`, `version` (semver), `author`, and `license`. Keep
+   Codex-specific hooks and presentation under `extensions.com.openai`.
 3. Put components at the **plugin root**:
    - `skills/<name>/SKILL.md` — adds to defaults; the primary mechanism for new work.
    - `agents/<name>.toml` — Codex subagents.
    - `commands/<name>.md` — legacy flat-file slash commands (prefer `skills/`).
+   - `mcp.json` — portable plugin-owned MCP servers, with plugin-relative
+     launchers under `bin/` when needed.
    - `hooks/codex.json`, `.lsp.json`, `bin/` — as needed.
 4. Register the plugin in `.agents/plugins/marketplace.json` using the
    `{ "source": "local", "path": "./plugins/<plugin-name>" }` object form.
@@ -206,6 +209,7 @@ limit on worthwhile queued work.
 ```shell
 jq empty .agents/plugins/marketplace.json         # Codex manifest is valid JSON
 find plugins -name plugin.json -exec jq empty {} \;  # every plugin manifest valid
+bash scripts/validate-manifests.sh                # portable schema and version sync
 prettier --check "**/*.{json,md}"                 # formatting (use --write to fix)
 ```
 
@@ -324,9 +328,9 @@ better fixtures.
   skill/agent directory and file names).
 - **JSON** is 2-space indented; run `prettier --write` on changed `.json`/`.md`.
 - Component directories (`skills/`, `agents/`, …) live at the plugin root.
-- **Versioning:** every `.codex-plugin/plugin.json` must carry a valid semver
+- **Versioning:** every root `plugin.json` must carry a valid semver
   `version`. Keep each Codex marketplace entry version identical to its plugin
-  manifest version. Bump the
+  manifest version. Use `scripts/bump-plugin-version.sh`. Bump the
   plugin version in the same PR as any plugin behavior, skill, command, hook,
   script, or metadata change. Use semver: patch for fixes/documentation-only
   behavior clarifications, minor for backwards-compatible features or changed
@@ -334,10 +338,10 @@ better fixtures.
 
 ## Codex marketplace notes
 
-- Codex reads `.agents/plugins/marketplace.json` and per-plugin
-  `.codex-plugin/plugin.json`; keep those surfaces synchronized.
-- This repository does not support other agent harnesses. Do not add parallel
-  manifests or compatibility behavior without a new architectural decision.
+- Codex reads `.agents/plugins/marketplace.json`, root `plugin.json`, and root
+  `mcp.json`; keep those surfaces synchronized.
+- Codex and Linux x86_64 are required targets. Other harnesses and ARM64 are
+  welcome when support can be verified, but are not required for this release.
 
 ## Engineering standards (harness-agnostic)
 

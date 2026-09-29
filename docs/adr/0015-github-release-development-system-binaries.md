@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted; supersedes ADR-0013
+Accepted; supersedes ADR-0013; MCP launch path amended by ADR-0016
 
 ## Date
 

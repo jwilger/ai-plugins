@@ -91,7 +91,7 @@ function marketplacePlugins(selectedNames = null) {
     .map((plugin) => {
       const pluginPath = path.resolve(root, plugin.source.path);
       const pluginJson = readJson(
-        path.join(pluginPath, ".codex-plugin/plugin.json"),
+        path.join(pluginPath, "plugin.json"),
       );
 
       return {
@@ -124,7 +124,7 @@ function copyDir(source, target, { skillsOnly = false } = {}) {
       const relative = path.relative(source, entry);
       if (!relative) return true;
       const [rootEntry] = relative.split(path.sep);
-      return rootEntry === ".codex-plugin" || rootEntry === "skills";
+      return rootEntry === "plugin.json" || rootEntry === "skills";
     },
   });
 }

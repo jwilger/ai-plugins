@@ -201,8 +201,8 @@ export function sanitizedPluginManifest(plugin) {
     throw new Error("projected-plugin-manifest-invalid");
   }
   return {
+    $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
     name: plugin.name,
-    skills: "./skills/",
     version: plugin.version,
   };
 }

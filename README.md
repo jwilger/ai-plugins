@@ -13,27 +13,35 @@ worktrees for concurrent mutable work.
 Optional agentic-system and eval-reporting capabilities are selected in
 `.development-system.toml`; the plugin owns its bundled MCP surface.
 
-The strong recommendation is to install only `development-system`. Additional
-plugin marketplaces expand the supply-chain trust surface. The SessionStart
-hook warns about conflicting plugins, incompatible harness settings, and
-user-managed MCPs that need compatibility review.
+The default installation adds only `development-system`. GitHub and CodeRabbit
+are optional companions. The SessionStart hook warns about conflicting plugins,
+incompatible harness settings, and user-managed MCPs that need compatibility
+review.
 
 ## Plugin catalog
 
 | Plugin                                                     | Harness | Description                                                                                          | Version |
 | ---------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.7.0   |
+| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.8.0   |
 
 ## Using the marketplace (Codex)
 
 Codex-facing marketplace metadata lives in
 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), and each
-plugin has a `.codex-plugin/plugin.json` manifest. In a local checkout, install
-or sync the plugin from the matching directory under [`plugins/`](plugins/)
-using the Codex plugin flow available in your Codex environment.
+plugin has a portable root `plugin.json` manifest. `development-system` also
+provides both Rust MCP servers from its root `mcp.json`, so consuming projects
+do not need MCP registrations. Install or update from `main` with:
 
-Install `development-system` from the local marketplace, then start a new
-thread and run its setup skill from the target repository's primary checkout.
+```shell
+curl -fsSL https://raw.githubusercontent.com/jwilger/ai-plugins/main/install.sh | sh
+```
+
+The installer offers optional GitHub and CodeRabbit plugins and stores the
+current SSH agent socket path for signed Tiber operations when available.
+Use `sh install.sh --dry-run` to preview the commands.
+
+After installation, start a new thread and run the setup skill from the target
+repository's primary checkout.
 The installed `SessionStart` hook checks the MCP binary installation against
 the plugin version on every startup and repairs missing or stale binaries. Linux
 x86_64 downloads the checksum-verified release; hosts without a prebuilt

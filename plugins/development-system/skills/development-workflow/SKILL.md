@@ -290,10 +290,8 @@ or review state:
    proceed, but neither is terminal delivery or readiness evidence.
 4. Recover by installing the current-host binaries from the updated marketplace
    checkout with `just install-development-system-binaries` (or
-   `scripts/install-development-system-binaries.sh`), then rerun Development
-   System setup for the current harness so the project-local MCP configuration
-   is rewritten to the newly installed absolute binary path. Restart the
-   harness. Start a new review session only after the same-MCP status call
+   `scripts/install-development-system-binaries.sh`), then update the Development System plugin and restart the harness.
+   Codex loads both MCP servers from the plugin-root `mcp.json`. Start a new review session only after the same-MCP status call
    passes all three predicates; another plan call is never the runtime probe.
 5. After planning, require the returned coordinator-owned
    `required_clean_iterations` to be at least the attested minimum. A lower

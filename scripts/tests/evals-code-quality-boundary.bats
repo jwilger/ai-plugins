@@ -1710,9 +1710,19 @@ const skillPaths = [
   ...availableSection.matchAll(/\(file: ([^)]+\/SKILL\.md)\)/g),
 ].map((match) => match[1]);
 assert.equal(skillPaths.length, discoveredNames.length);
+const skillRoots = new Map(
+  [...skillsBlock.matchAll(/^- `(r[0-9]+)` = `([^`]+)`$/gm)].map((match) => [
+    match[1],
+    match[2],
+  ]),
+);
 for (const skillPath of skillPaths) {
+  const alias = skillPath.match(/^(r[0-9]+)\/(.+)$/);
+  const resolved = alias
+    ? `${skillRoots.get(alias[1]) ?? ""}/${alias[2]}`
+    : skillPath;
   assert.match(
-    skillPath,
+    resolved,
     /^\/runtime\/codex-home\/(?:skills\/\.system\/[a-z0-9-]+|plugins\/cache\/ai-plugins\/[a-z0-9-]+\/[0-9A-Za-z.+-]+\/skills\/[a-z0-9-]+)\/SKILL\.md$/,
   );
 }

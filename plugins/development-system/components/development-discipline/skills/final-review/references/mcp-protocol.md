@@ -13,9 +13,7 @@ current contract requires `contract_version >= 2`,
 a stale skill/runtime pairing: create no review state, accept zero clean
 iterations, and reject delivery. Install the current-host binaries from the
 updated marketplace checkout with `just install-development-system-binaries`
-(or `scripts/install-development-system-binaries.sh`), rerun Development System
-setup for the current harness so its project-local MCP configuration is
-rewritten to the newly installed absolute binary path, restart the harness, and
+(or `scripts/install-development-system-binaries.sh`), update the Development System plugin, restart the harness, and
 start a new session only after the same-MCP attestation passes. A valid
 plan must also return coordinator-owned state whose
 `required_clean_iterations` is at least the attested minimum; otherwise discard

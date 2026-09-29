@@ -5,7 +5,7 @@ bats_require_minimum_version 1.5.0
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd -P)"
   TMPROOT="$BATS_TEST_TMPDIR"
-  VERSION="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  VERSION="$(jq -r '.version' "$ROOT/plugins/development-system/plugin.json")"
   PLATFORM=linux-x86_64
   ARCHIVE="development-system-v${VERSION}-${PLATFORM}.tar.gz"
   RELEASE_DIR="$TMPROOT/release"
@@ -64,6 +64,22 @@ install_release() {
   [ -x "$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/tiber" ]
   [ -x "$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/development-discipline-mcp" ]
   [ "$(<"$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/.plugin-version")" = "$VERSION" ]
+}
+
+@test "portable launcher uses PLUGIN_DATA and restores the plugin-owned signing socket" {
+  local data="$TMPROOT/plugin-data"
+  PLUGIN_DATA="$data" install_release
+  local installed="$data/ai-plugins/development-system/$VERSION/linux-x86_64/tiber"
+  printf '#!/bin/sh\nprintf "%%s\\n" "$SSH_AUTH_SOCK"\n' >"$installed"
+  chmod +x "$installed"
+  python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$TMPROOT/agent.sock"
+  printf '%s\n' "$TMPROOT/agent.sock" >"$data/signing-agent-socket"
+
+  run env -u SSH_AUTH_SOCK PLUGIN_DATA="$data" XDG_DATA_HOME="$TMPROOT/wrong-xdg" \
+    "$ROOT/plugins/development-system/bin/tiber" --help
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TMPROOT/agent.sock" ]
 }
 
 @test "session start repairs stale binaries and leaves matching binaries untouched" {

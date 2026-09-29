@@ -30,6 +30,7 @@ const benchmarkConfig = path.join(benchmarkDirectory, "promptfooconfig.yaml");
 const contractFile = path.join(benchmarkDirectory, "benchmark.json");
 const marketplaceFile = path.join(root, ".agents/plugins/marketplace.json");
 const require = createRequire(import.meta.url);
+const { parse: parseYaml } = require("yaml");
 const { loadPromptfooSurface } = require(
   path.join(benchmarkDirectory, "benchmark-inputs.cjs"),
 );
@@ -204,7 +205,41 @@ function validateSkillTree(snapshot, skillsRoot, namespace, allowedFiles) {
     if (!snapshot.files.has(skillFile)) {
       fail("provenance", "projected-skill-is-missing-skill-md");
     }
-    if (namespace) availableSkills.push(`${namespace}:${skill}`);
+    // Codex keeps explicitly invokable skills on disk but omits them from the injected catalog.
+    const metadataFile = `${skillDirectory}/agents/openai.yaml`;
+    const metadataBytes = snapshot.files.get(metadataFile);
+    let implicitInvocation = true;
+    if (metadataBytes) {
+      let metadata;
+      try {
+        metadata = parseYaml(metadataBytes.toString("utf8"), {
+          uniqueKeys: true,
+        });
+      } catch {
+        fail("provenance", "projected-skill-metadata-invalid");
+      }
+      if (
+        !metadata ||
+        typeof metadata !== "object" ||
+        Array.isArray(metadata)
+      ) {
+        fail("provenance", "projected-skill-metadata-invalid");
+      }
+      const policy = metadata?.policy;
+      if (
+        policy !== undefined &&
+        (typeof policy !== "object" || policy === null || Array.isArray(policy))
+      ) {
+        fail("provenance", "projected-skill-metadata-invalid");
+      }
+      const value = policy?.allow_implicit_invocation;
+      if (value !== undefined && typeof value !== "boolean") {
+        fail("provenance", "projected-skill-metadata-invalid");
+      }
+      implicitInvocation = value !== false;
+    }
+    if (namespace && implicitInvocation)
+      availableSkills.push(`${namespace}:${skill}`);
     for (const file of snapshot.files.keys()) {
       const normalized = slashPath(file);
       if (normalized.startsWith(`${skillDirectory}/`)) {
@@ -271,7 +306,7 @@ function validatePluginProjection(snapshot, plugin, allowedFiles) {
   const sourceRoot = `marketplace/plugins/${plugin.name}`;
   const expectedManifest = sanitizedPluginManifest(plugin);
   for (const projectionRoot of [cacheRoot, sourceRoot]) {
-    const manifestPath = `${projectionRoot}/.codex-plugin/plugin.json`;
+    const manifestPath = `${projectionRoot}/plugin.json`;
     const manifestBytes = snapshot.files.get(manifestPath);
     if (!manifestBytes) {
       fail("operational", "projected-plugin-manifest-unavailable");

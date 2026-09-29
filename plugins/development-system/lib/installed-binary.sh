@@ -3,6 +3,10 @@
 # Shared resolution for Development System's host-local Rust executables.
 
 development_system_data_home() {
+  if [[ "${PLUGIN_DATA:-}" == /* ]]; then
+    printf '%s\n' "$PLUGIN_DATA"
+    return 0
+  fi
   if [[ "${XDG_DATA_HOME:-}" == /* ]]; then
     printf '%s\n' "$XDG_DATA_HOME"
     return 0
@@ -18,7 +22,7 @@ development_system_plugin_version() {
   local plugin_root=$1
   local version
   version="$(sed -nE 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"([^"]+)"[[:space:]]*,?[[:space:]]*$/\1/p' \
-    "$plugin_root/.codex-plugin/plugin.json" | head -n 1)"
+    "$plugin_root/plugin.json" | head -n 1)"
   [[ -n "$version" ]] || return 1
   printf '%s\n' "$version"
 }
@@ -82,10 +86,31 @@ development_system_exec_installed_binary() {
     exit 1
   }
   binary_path="$data_home/ai-plugins/development-system/$version/$host/$binary_name"
+  if ! development_system_installation_matches_plugin "$plugin_root"; then
+    "$plugin_root/scripts/install-development-system-binaries.sh" --auto || {
+      printf '%s\n' "development_system.binary_repair_failed binary=$binary_name version=$version" >&2
+      exit 1
+    }
+  fi
   if [[ ! -x "$binary_path" ]]; then
     printf '%s\n' \
-      "development_system.binary_missing binary=$binary_path remediation='restart Codex to run automatic SessionStart repair, or run the Development System setup skill; manual diagnosis: scripts/install-development-system-binaries.sh --auto'" >&2
+      "development_system.binary_missing binary=$binary_path remediation='run scripts/install-development-system-binaries.sh --auto'" >&2
     exit 1
+  fi
+  if [[ "$binary_name" == tiber ]] && [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+    local config_home socket_file socket
+    config_home="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
+    if [[ "${PLUGIN_DATA:-}" == /* ]]; then
+      socket_file="$PLUGIN_DATA/signing-agent-socket"
+    else
+      socket_file="$config_home/ai-plugins/development-system/signing-agent-socket"
+    fi
+    if [[ -f "$socket_file" ]]; then
+      IFS= read -r socket <"$socket_file" || true
+      if [[ "$socket" == /* ]] && [[ -S "$socket" ]]; then
+        export SSH_AUTH_SOCK="$socket"
+      fi
+    fi
   fi
   exec "$binary_path" "$@"
 }

@@ -14,6 +14,12 @@ setup() {
 
 }
 
+teardown() {
+  if [ -n "${SIGNING_AGENT_PID:-}" ]; then
+    kill "$SIGNING_AGENT_PID" 2>/dev/null || true
+  fi
+}
+
 initialize_server() {
   local command=$1
   shift
@@ -43,15 +49,17 @@ list_server_tools() {
 }
 
 @test "Tiber reports installed-user repair when no binary is installed" {
+  mkdir -p "$TMPROOT/failing-bin"
+  printf '#!/bin/sh\nexit 1\n' >"$TMPROOT/failing-bin/curl"
+  chmod +x "$TMPROOT/failing-bin/curl"
   run env \
+    PATH="$TMPROOT/failing-bin:$PATH" \
     XDG_DATA_HOME="$TMPROOT/empty-xdg-data" \
     HOME="$TMPROOT/home" \
     "$ROOT/plugins/development-system/bin/tiber" --help
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"development_system.binary_missing"* ]]
-  [[ "$output" == *"restart Codex to run automatic SessionStart repair"* ]]
-  [[ "$output" == *"scripts/install-development-system-binaries.sh --auto"* ]]
+  [[ "$output" == *"development_system.binary_repair_failed"* ]]
 }
 
 @test "the host-local bootstrap is safe to rerun" {
@@ -208,7 +216,7 @@ list_server_tools() {
 
   real_mv="$(command -v mv)"
   host="$(source "$ROOT/plugins/development-system/lib/installed-binary.sh"; development_system_host)"
-  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/plugin.json")"
   mkdir -p "$fake_bin"
   printf '%s\n' \
     '#!/usr/bin/env bash' \
@@ -304,7 +312,11 @@ list_server_tools() {
   local stdout_file="$TMPROOT/launcher.stdout"
   local stderr_file="$TMPROOT/launcher.stderr"
 
+  mkdir -p "$TMPROOT/failing-bin"
+  printf '#!/bin/sh\nexit 1\n' >"$TMPROOT/failing-bin/curl"
+  chmod +x "$TMPROOT/failing-bin/curl"
   run env \
+    PATH="$TMPROOT/failing-bin:$PATH" \
     XDG_DATA_HOME="$TMPROOT/missing-xdg-data" \
     HOME="$TMPROOT/home" \
     bash -c '"$1" --help >"$2" 2>"$3"' _ \
@@ -314,7 +326,7 @@ list_server_tools() {
 
   [ "$status" -ne 0 ]
   [ ! -s "$stdout_file" ]
-  [[ "$(<"$stderr_file")" == *"development_system.binary_missing"* ]]
+  [[ "$(<"$stderr_file")" == *"development_system.binary_repair_failed"* ]]
 }
 
 @test "installed launchers start both MCPs without invoking Cargo" {
@@ -336,6 +348,45 @@ list_server_tools() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Repository-local task board"* ]]
   [[ "$output" != *"cargo-must-not-run"* ]]
+}
+
+@test "portable Tiber MCP signs an event from an external repository through plugin data" {
+  local repo="$TMPROOT/signed-repo"
+  local data="$TMPROOT/plugin-data"
+  local version
+  version="$(jq -r .version "$ROOT/plugins/development-system/plugin.json")"
+  mkdir -p "$repo" "$data/ai-plugins/development-system/$version"
+  git init --bare -q "$TMPROOT/origin.git"
+  git init -q "$repo"
+  git -C "$repo" config user.name 'Portable MCP Test'
+  git -C "$repo" config user.email 'portable@example.invalid'
+  git -C "$repo" remote add origin "$TMPROOT/origin.git"
+  ssh-keygen -q -t ed25519 -N '' -f "$TMPROOT/key"
+  ssh-agent -a "$TMPROOT/agent.sock" -D >"$TMPROOT/agent.log" 2>&1 &
+  SIGNING_AGENT_PID=$!
+  for _ in $(seq 1 50); do [ -S "$TMPROOT/agent.sock" ] && break; sleep 0.1; done
+  SSH_AUTH_SOCK="$TMPROOT/agent.sock" ssh-add "$TMPROOT/key" >/dev/null 2>&1
+  git -C "$repo" config gpg.format ssh
+  git -C "$repo" config commit.gpgsign true
+  git -C "$repo" config user.signingkey "$TMPROOT/key.pub"
+  (cd "$repo" && SSH_AUTH_SOCK="$TMPROOT/agent.sock" "$ROOT/plugins/development-system/bin/tiber" init)
+  local before
+  before="$(git -C "$repo" rev-parse refs/remotes/origin/tiber)"
+  ln -s "$XDG_DATA_HOME/ai-plugins/development-system/$version/linux-x86_64" \
+    "$data/ai-plugins/development-system/$version/linux-x86_64"
+  printf '%s\n' "$TMPROOT/agent.sock" >"$data/signing-agent-socket"
+
+  local request
+  request="$(jq -nc --arg cwd "file://$repo" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"tiber.create",arguments:{title:"Portable signed task"},_meta:{"codex/sandbox-state-meta":{sandboxCwd:$cwd}}}}')"
+  run bash -c 'cd "$1"; printf "%s\n" "$2" | env -u SSH_AUTH_SOCK PLUGIN_ROOT="$1" PLUGIN_DATA="$3" "$1/bin/tiber" mcp stdio' _ \
+    "$ROOT/plugins/development-system" "$request" "$data"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'portable-signed-task'* ]]
+  local after
+  after="$(git -C "$repo" rev-parse refs/remotes/origin/tiber)"
+  [ "$after" != "$before" ]
+  git -C "$repo" cat-file -p "$after" | grep -q '^gpgsig '
 }
 
 @test "top-level MCP launchers ignore unrelated global marketplace state" {
@@ -368,14 +419,11 @@ list_server_tools() {
   [[ "$output" == *'"name":"tiber"'* ]]
 }
 
-@test "setup writes stable host-local MCP paths that survive reinstall" {
+@test "setup leaves MCP registration to the plugin and binary paths survive reinstall" {
   local project="$TMPROOT/setup-project"
   local tiber_path
   local discipline_path
   local request
-  local config
-  local expected_discipline
-  local expected_tiber
 
   mkdir -p "$project"
   git -C "$project" init --quiet
@@ -383,22 +431,17 @@ list_server_tools() {
   source "$ROOT/plugins/development-system/lib/installed-binary.sh"
   tiber_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" tiber)"
   discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
-  expected_discipline="$discipline_path"
-  expected_tiber="$tiber_path"
   request="$(jq -cn --arg project_root "$project" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"setup.apply",arguments:{project_root:$project_root,confirmed:true,selected_command_ids:["just-ci"]}}}')"
 
   run bash -c 'printf "%s\\n" "$2" | "$1" --service plugin-advisory' _ "$discipline_path" "$request"
   [ "$status" -eq 0 ]
 
-  config="$(<"$project/.codex/config.toml")"
-  [[ "$config" == *"command = \"$expected_discipline\""* ]]
-  [[ "$config" == *"command = \"$expected_tiber\""* ]]
-  [[ "$config" != *".staging."* ]]
+  [ ! -e "$project/.codex/config.toml" ]
 
   run just --justfile "$ROOT/justfile" install-development-system-binaries --from-source
   [ "$status" -eq 0 ]
-  [ -x "$expected_discipline" ]
-  [ -x "$expected_tiber" ]
+  [ -x "$discipline_path" ]
+  [ -x "$tiber_path" ]
 }
 
 @test "installed direct development-discipline binary exposes advisory coordination" {

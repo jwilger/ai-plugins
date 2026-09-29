@@ -12980,7 +12980,7 @@ fn semantic_tools() -> Vec<Value> {
         }),
         json!({
             "name": "setup.apply",
-            "description": "Apply the exact setup.preview configuration after explicit confirmation, install the approved project Lefthook pre-commit and pre-push jobs, and write Codex's project-local MCP entries. It never stages, commits, or changes global Codex settings.",
+            "description": "Apply the exact setup.preview configuration after explicit confirmation, install the approved project Lefthook pre-commit and pre-push jobs, and remove only legacy managed MCP entries. Portable plugin-root mcp.json owns both servers. It never stages, commits, or changes global Codex settings.",
             "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 }, "pre_commit_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "pre_push_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "replace_lefthook": { "type": "boolean" } }, "required": ["confirmed"], "additionalProperties": false }
         }),
         json!({
@@ -13509,7 +13509,7 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         semantic::ConfigState::Invalid(error) => return Err(error),
     };
     let lefthook = write_project_lefthook_configuration(project_root, &config, arguments)?;
-    let harness_configuration = write_project_mcp_configuration(project_root)?;
+    let harness_configuration = migrate_legacy_project_mcp_configuration(project_root)?;
     Ok(json!({
         "applied": true,
         "configuration_changed": configuration_changed,
@@ -13649,80 +13649,56 @@ fn project_lefthook_configuration(
     Ok((configuration, pre_commit_ids, pre_push_ids))
 }
 
-fn mcp_binary_directory() -> Result<PathBuf, String> {
-    if let Some(path) = env::var_os("DEVELOPMENT_SYSTEM_MCP_BINARY_DIRECTORY") {
-        let path = PathBuf::from(path);
-        if path.is_absolute() {
-            return Ok(path);
+fn legacy_project_mcp_configuration(project_root: &Path) -> Result<Option<String>, String> {
+    let path = project_root.join(".codex/config.toml");
+    let existing = match fs::read_to_string(&path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "development_system.setup_harness_read_failed source={error}"
+            ));
         }
-    }
-    let executable = env::current_exe()
-        .map_err(|error| format!("development_system.mcp_binary_path_unavailable source={error}"))?
-        .parent()
-        .map(Path::to_path_buf)
-        .ok_or_else(|| "development_system.mcp_binary_path_unavailable".to_string())?;
-    Ok(stable_host_binary_directory(executable))
-}
-
-fn stable_host_binary_directory(executable_directory: PathBuf) -> PathBuf {
-    let Some(version_directory) = executable_directory.parent() else {
-        return executable_directory;
     };
-    let Some(staging_name) = executable_directory.file_name().and_then(OsStr::to_str) else {
-        return executable_directory;
-    };
-    let Some(staging_name) = staging_name.strip_prefix('.') else {
-        return executable_directory;
-    };
-    let Some((host, nonce)) = staging_name.split_once(".staging.") else {
-        return executable_directory;
-    };
-    if host.is_empty() || nonce.is_empty() {
-        return executable_directory;
-    }
-
-    let stable_directory = version_directory.join(host);
-    match fs::symlink_metadata(&stable_directory) {
-        Ok(metadata) if metadata.file_type().is_symlink() => stable_directory,
-        _ => executable_directory,
-    }
-}
-
-fn toml_string(value: &str) -> String {
-    toml::Value::String(value.to_string()).to_string()
-}
-
-fn write_project_mcp_configuration(project_root: &Path) -> Result<Value, String> {
-    let binaries = mcp_binary_directory()?;
-    let discipline = binaries.join("development-discipline-mcp");
-    let tiber = binaries.join("tiber");
-    let directory = project_root.join(".codex");
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("development_system.setup_harness_write_failed source={error}"))?;
-    let path = directory.join("config.toml");
-    let existing = fs::read_to_string(&path).unwrap_or_default();
     let begin = "# >>> development-system MCP servers >>>";
     let end = "# <<< development-system MCP servers <<<";
-    let retained = match (existing.find(begin), existing.find(end)) {
-        (Some(start), Some(stop)) if stop >= start => {
+    let (retained, migrated) = match (existing.find(begin), existing.find(end)) {
+        (Some(start), Some(stop)) if stop > start => {
             let after = stop + end.len();
-            format!("{}{}", &existing[..start], &existing[after..])
+            (
+                format!("{}{}", &existing[..start], &existing[after..]),
+                true,
+            )
         }
-        _ => existing,
+        (None, None) => (existing, false),
+        _ => return Err("development_system.setup_legacy_mcp_block_invalid".to_string()),
     };
-    let block = format!(
-        "{begin}\n[mcp_servers.development-discipline]\ncommand = {}\nargs = [\"--service\", \"plugin-advisory\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n\n[mcp_servers.tiber]\ncommand = {}\nargs = [\"mcp\", \"stdio\"]\nenv_vars = [\"SSH_AUTH_SOCK\"]\n{end}\n",
-        toml_string(discipline.to_string_lossy().as_ref()),
-        toml_string(tiber.to_string_lossy().as_ref()),
-    );
-    let separator = if retained.is_empty() || retained.ends_with('\n') {
-        ""
-    } else {
-        "\n"
-    };
-    fs::write(&path, format!("{retained}{separator}\n{block}"))
-        .map_err(|error| format!("development_system.setup_harness_write_failed source={error}"))?;
-    Ok(json!({ "harness": "codex", "path": ".codex/config.toml" }))
+    if !retained.trim().is_empty() {
+        let parsed: toml::Value = retained.parse().map_err(|error| {
+            format!("development_system.setup_harness_configuration_invalid source={error}")
+        })?;
+        if parsed
+            .get("mcp_servers")
+            .and_then(toml::Value::as_table)
+            .is_some_and(|servers| {
+                servers.contains_key("development-discipline") || servers.contains_key("tiber")
+            })
+        {
+            return Err("development_system.setup_duplicate_mcp_registration".to_string());
+        }
+    }
+    Ok(migrated.then_some(retained))
+}
+
+fn migrate_legacy_project_mcp_configuration(project_root: &Path) -> Result<Value, String> {
+    let retained = legacy_project_mcp_configuration(project_root)?;
+    let migrated = retained.is_some();
+    if let Some(retained) = retained {
+        fs::write(project_root.join(".codex/config.toml"), retained).map_err(|error| {
+            format!("development_system.setup_harness_write_failed source={error}")
+        })?;
+    }
+    Ok(json!({ "harness": "codex", "source": "plugin/mcp.json", "legacy_migrated": migrated }))
 }
 
 fn system_diagnostics_status() -> Result<Value, String> {
@@ -13960,6 +13936,7 @@ fn semantic_setup_preview(project_root: &Path, arguments: &Value) -> Result<Valu
             ));
         }
     };
+    let legacy_mcp_block_removal = legacy_project_mcp_configuration(project_root)?.is_some();
     let existing = match semantic::config_at(project_root) {
         semantic::ConfigState::Absent => json!({
             "configuration_state": "absent",
@@ -14008,7 +13985,8 @@ fn semantic_setup_preview(project_root: &Path, arguments: &Value) -> Result<Valu
         "recommended_pre_commit_command_ids": pre_commit_command_ids,
         "recommended_pre_push_command_ids": pre_push_command_ids,
         "requires_confirmation": true,
-        "mutation_policy": "Setup writes the approved repository-local Development System and Lefthook configurations, installs pre-commit and pre-push hooks, and writes owned project-local MCP settings; harness capabilities remain advisory.",
+        "legacy_mcp_block_removal": legacy_mcp_block_removal,
+        "mutation_policy": "Setup writes the approved repository-local Development System and Lefthook configurations, installs pre-commit and pre-push hooks, and removes only legacy managed project MCP settings; portable plugin-root mcp.json owns both servers and harness capabilities remain advisory.",
         "configuration_state": existing["configuration_state"],
         "existing_schema_version": existing["existing_schema_version"],
         "remediation": existing["remediation"],
@@ -14338,6 +14316,15 @@ fn workflow_project_root(arguments: &Value) -> Result<PathBuf, String> {
         Some(Value::String(path)) if !path.trim().is_empty() => Ok(PathBuf::from(path)),
         Some(_) => Err("development_workflow.project_root_invalid".to_string()),
         None => mcp_repository_root().map(Ok).unwrap_or_else(|| {
+            let launched_from_plugin_root = env::var_os("PLUGIN_ROOT").is_some()
+                || env::current_dir()
+                    .map(|directory| directory.join("plugin.json").is_file())
+                    .unwrap_or(false);
+            if launched_from_plugin_root {
+                return Err(
+                    "development_workflow.project_root_required source=mcp_sandbox_cwd".to_string(),
+                );
+            }
             env::current_dir().map_err(|error| {
                 format!("development_workflow.project_root_current_dir_failed source={error}")
             })
@@ -37980,17 +37967,37 @@ pre_filter = "project-pre"
     }
 
     #[test]
-    fn codex_mcp_configuration_forwards_the_ssh_agent_to_git_backed_services() {
+    fn setup_migrates_only_the_legacy_codex_mcp_block() {
         let project_root = test_project_root("codex-mcp-ssh-agent");
-
-        write_project_mcp_configuration(&project_root).expect("write Codex MCP configuration");
+        fs::create_dir_all(project_root.join(".codex")).expect("create Codex directory");
+        fs::write(
+            project_root.join(".codex/config.toml"),
+            "approval_policy = \"on-request\"\n# >>> development-system MCP servers >>>\n[mcp_servers.tiber]\ncommand = \"/old/tiber\"\n# <<< development-system MCP servers <<<\n",
+        )
+        .expect("write legacy configuration");
+        let result = migrate_legacy_project_mcp_configuration(&project_root)
+            .expect("migrate Codex MCP configuration");
         let configuration = fs::read_to_string(project_root.join(".codex/config.toml"))
             .expect("read Codex MCP configuration");
+        assert_eq!(configuration, "approval_policy = \"on-request\"\n\n");
+        assert_eq!(result["legacy_migrated"], true);
+        let _ = fs::remove_dir_all(project_root);
+    }
 
+    #[test]
+    fn setup_rejects_unmanaged_duplicate_mcp_registration() {
+        let project_root = test_project_root("codex-mcp-duplicate");
+        fs::create_dir_all(project_root.join(".codex")).expect("create Codex directory");
+        let existing = "[mcp_servers.tiber]\ncommand = \"other-tiber\"\n";
+        fs::write(project_root.join(".codex/config.toml"), existing)
+            .expect("write unmanaged configuration");
+        let error = migrate_legacy_project_mcp_configuration(&project_root)
+            .expect_err("reject duplicate MCP registration");
+        assert_eq!(error, "development_system.setup_duplicate_mcp_registration");
         assert_eq!(
-            configuration.matches("env_vars = [\"SSH_AUTH_SOCK\"]").count(),
-            2,
-            "Development Discipline and Tiber both need the SSH agent for signed Git EventCore writes"
+            fs::read_to_string(project_root.join(".codex/config.toml"))
+                .expect("read unchanged configuration"),
+            existing
         );
         let _ = fs::remove_dir_all(project_root);
     }

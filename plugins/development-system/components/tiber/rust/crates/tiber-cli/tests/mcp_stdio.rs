@@ -33,16 +33,15 @@ fn mcp_uses_codex_sandbox_metadata_when_started_from_an_installed_plugin_root() 
             .output()
             .expect("initialize plugin-root Tiber board"),
     );
-    std::fs::create_dir_all(plugin_root.path().join(".codex-plugin"))
-        .expect("create Codex plugin manifest directory");
     std::fs::write(
-        plugin_root.path().join(".codex-plugin/plugin.json"),
+        plugin_root.path().join("plugin.json"),
         r#"{"name":"development-system"}"#,
     )
     .expect("write Codex plugin manifest");
     let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
         .args(["mcp", "stdio"])
         .current_dir(plugin_root.path())
+        .env("PLUGIN_ROOT", plugin_root.path())
         .env("PWD", plugin_root.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -63,6 +62,13 @@ fn mcp_uses_codex_sandbox_metadata_when_started_from_an_installed_plugin_root() 
             .is_some(),
         "Tiber must request Codex's per-call sandbox metadata"
     );
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"tiber.list","arguments":{"status":"backlog"}}}"#,
+    );
+    let missing_root = read_message(&mut stdout);
+    assert!(missing_root.contains("tiber.repository_root_required"));
 
     let repository_uri = format!("file://{}", repo.path().display());
     write_message(
@@ -641,11 +647,9 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     let codex_setup_tool = read_message(&mut stdout);
     assert!(codex_setup_tool.contains(r#""id":91"#));
     assert!(codex_setup_tool.contains("Couldn't get agent socket?"));
-    assert!(codex_setup_tool.contains("SSH_AUTH_SOCK"));
-    assert!(codex_setup_tool.contains("env_vars = [\\\"SSH_AUTH_SOCK\\\"]"));
-    assert!(codex_setup_tool.contains("project-local [mcp_servers.tiber] registration"));
-    assert!(codex_setup_tool.contains("preserve the absolute installed launcher"));
-    assert!(codex_setup_tool.contains("Never forward SSH_AUTH_SOCK to a PATH-resolved"));
+    assert!(codex_setup_tool.contains("signing-agent-socket"));
+    assert!(codex_setup_tool.contains("root mcp.json"));
+    assert!(codex_setup_tool.contains("Never send a signing agent socket to a PATH-resolved"));
     assert!(codex_setup_tool.contains("publish event transactions to origin/tiber"));
     assert!(codex_setup_tool.contains(
         "Persist approval only when the harness can scope it to the exact Tiber-internal operation"

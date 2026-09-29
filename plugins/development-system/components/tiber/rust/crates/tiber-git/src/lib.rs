@@ -9911,6 +9911,19 @@ impl GitRepository {
             });
         }
 
+        let launched_from_plugin_root = std::env::var_os("PLUGIN_ROOT").is_some()
+            || std::env::current_dir()
+                .map(|directory| directory.join("plugin.json").is_file())
+                .unwrap_or(false);
+        if launched_from_plugin_root {
+            if let Some(configured_root) = std::env::var_os("TIBER_REPOSITORY_ROOT") {
+                return Self::discover_from(Some(&PathBuf::from(configured_root)));
+            }
+            return Err(Error::Usage(
+                "tiber.repository_root_required source=mcp_sandbox_cwd".to_string(),
+            ));
+        }
+
         let current_directory_error = match Self::discover_from(None) {
             Ok(repository) => return Ok(repository),
             Err(error) => error,
@@ -9923,21 +9936,6 @@ impl GitRepository {
                     "tiber.repository_root_invalid source=TIBER_REPOSITORY_ROOT error={error}"
                 ))
             });
-        }
-
-        let launched_from_plugin_root = std::env::current_dir()
-            .map(|directory| directory.join(".codex-plugin/plugin.json").is_file())
-            .unwrap_or(false);
-        if launched_from_plugin_root {
-            if let Some(inherited_working_directory) = std::env::var_os("PWD") {
-                let inherited_working_directory = PathBuf::from(inherited_working_directory);
-                if inherited_working_directory.is_absolute() {
-                    if let Ok(repository) = Self::discover_from(Some(&inherited_working_directory))
-                    {
-                        return Ok(repository);
-                    }
-                }
-            }
         }
 
         Err(current_directory_error)

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "development-discipline": {
+      "type": "stdio",
+      "command": "./bin/development-discipline-mcp",
+      "args": ["--service", "plugin-advisory"]
+    },
+    "tiber": {
+      "type": "stdio",
+      "command": "./bin/tiber",
+      "args": ["mcp", "stdio"]
+    }
+  }
+}

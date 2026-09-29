@@ -12,7 +12,7 @@ setup() {
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$FAKE_CODEX_LOG"
-version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+version="$(jq -er '.version' "$FAKE_MARKETPLACE_ROOT/plugins/development-system/plugin.json")"
 
 case "$*" in
   "plugin marketplace list --json")

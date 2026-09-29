@@ -80,7 +80,7 @@ setup() {
   local cargo_log="$TMPROOT/cargo.log"
   local version
   local archive
-  version="$(jq -r '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  version="$(jq -r '.version' "$ROOT/plugins/development-system/plugin.json")"
   archive="$output_dir/development-system-v${version}-linux-x86_64.tar.gz"
 
   run env PATH="$FAKE_BIN:$PATH" CARGO_LOG="$cargo_log" \

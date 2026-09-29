@@ -14,7 +14,7 @@ for dependency in cargo file git jq readelf sha256sum tar; do
   }
 done
 
-version="$(jq -er '.version' "$plugin_root/.codex-plugin/plugin.json")"
+version="$(jq -er '.version' "$plugin_root/plugin.json")"
 marketplace_version="$(jq -er '.plugins[] | select(.name == "development-system") | .version' "$root/.agents/plugins/marketplace.json")"
 if [[ "$version" != "$marketplace_version" ]]; then
   printf '%s\n' "development_system.release_version_mismatch plugin=$version marketplace=$marketplace_version" >&2

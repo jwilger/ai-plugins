@@ -27,6 +27,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       archive: ${{ steps.version.outputs.archive }}
       commit: ${{ steps.commit.outputs.sha }}
+      existing: ${{ steps.existing.outputs.existing }}
+      stale: ${{ steps.commit.outputs.stale }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -41,17 +43,20 @@ jobs:
         run: |
           git fetch --no-tags origin refs/heads/main
           main_sha="$(git rev-parse FETCH_HEAD)"
-          [ "$main_sha" = "$GREEN_SHA" ] || {
+          if [ "$main_sha" != "$GREEN_SHA" ]; then
             echo "Green commit $GREEN_SHA is no longer the main tip ($main_sha); skipping stale release." >&2
-            exit 1
-          }
+            echo "stale=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "stale=false" >>"$GITHUB_OUTPUT"
           [ "$(git rev-parse HEAD)" = "$GREEN_SHA" ]
           echo "sha=$GREEN_SHA" >>"$GITHUB_OUTPUT"
 
       - name: Derive synchronized release identity
         id: version
+        if: steps.commit.outputs.stale != 'true'
         run: |
-          plugin_version="$(jq -er '.version' plugins/development-system/.codex-plugin/plugin.json)"
+          plugin_version="$(jq -er '.version' plugins/development-system/plugin.json)"
           marketplace_version="$(jq -er '.plugins[] | select(.name == "development-system") | .version' .agents/plugins/marketplace.json)"
           [ "$plugin_version" = "$marketplace_version" ]
           tag="development-system-v$plugin_version"
@@ -61,16 +66,39 @@ jobs:
             echo "archive=$tag-linux-x86_64.tar.gz"
           } >>"$GITHUB_OUTPUT"
 
+      - name: Check for an existing versioned release
+        id: existing
+        if: steps.commit.outputs.stale != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+        run: |
+          if release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null)"; then
+            [ "$(jq -r '.draft' <<<"$release_json")" = false ] || exit 1
+            for asset in "$ARCHIVE" "$ARCHIVE.sha256"; do
+              jq -e --arg asset "$asset" '.assets | any(.name == $asset)' <<<"$release_json" >/dev/null || exit 1
+            done
+            echo "existing=true" >>"$GITHUB_OUTPUT"
+            echo "Versioned release $TAG already exists; no rebuild is needed."
+          else
+            echo "existing=false" >>"$GITHUB_OUTPUT"
+          fi
+
       - name: Install pinned Rust target and musl linker
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install --yes musl-tools
           rustup target add --toolchain 1.96.0 x86_64-unknown-linux-musl
 
       - name: Build and inspect release assets
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
         run: scripts/build-development-system-release.sh dist
 
       - name: Generate GitHub build provenance
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
@@ -78,6 +106,7 @@ jobs:
             dist/${{ steps.version.outputs.archive }}.sha256
 
       - name: Preserve assets for isolated publication
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: development-system-release-${{ steps.commit.outputs.sha }}
@@ -90,6 +119,7 @@ jobs:
   publish:
     name: Publish immutable release
     needs: build
+    if: needs.build.outputs.stale != 'true' && needs.build.outputs.existing != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -19,7 +19,7 @@ case "$mode" in
     ;;
 esac
 
-allowed_plugins='^plugins/[^/]+/(skills/[^/]+/(SKILL\.md|references/.*)|README\.md|\.codex-plugin/plugin\.json)$'
+allowed_plugins='^plugins/[^/]+/(skills/[^/]+/(SKILL\.md|references/.*)|README\.md|plugin\.json|mcp\.json)$'
 allowed_evals='^(evals/|scripts/evals/|scripts/tests/evals-|site/evals/|\.github/workflows/(ci|live-evals)\.yml$|justfile$|package(-lock)?\.json$)'
 
 cached_file="$(mktemp)"

@@ -32,8 +32,9 @@ incomplete.
    download, verification, extraction, or source compilation fails, stop with
    the installer's diagnostic; do not configure a repository whose MCPs cannot
    start.
-2. From the primary checkout, invoke the installed `development-discipline-mcp`
-   binary directly for `setup.preview`, then `setup.apply`. The preview detects
+2. From the primary checkout, use the plugin-provided Development Discipline
+   MCP for `setup.preview`, then `setup.apply`. Its root `mcp.json` starts the
+   bundled launcher without a project MCP registration. The preview detects
    manifests, lockfiles, source/test/documentation directories, build outputs,
    the repository's Nix wrapper, and stack-native test runners; it emits only
    project-supported scopes and named direct-argv command candidates. Do not
@@ -50,14 +51,17 @@ incomplete.
    require explicit `replace_lefthook: true` approval; never silently replace
    it. Call `setup.apply` with `confirmed: true`. It writes schema-v3
    `.development-system.toml`, the approved `lefthook.yml`, installs both Git
-   hooks with Lefthook, and writes the owned local `.codex/config.toml` MCP
-   settings. It never stages or commits, and never changes global Codex,
-   marketplace, shell, or SSH configuration.
+   hooks with Lefthook, and removes only the old managed Development System MCP block from a
+   project `.codex/config.toml` when present. The plugin root `mcp.json` owns
+   both server definitions. If unmanaged duplicate Tiber or Development
+   Discipline entries exist, stop and show the conflict. Setup never stages
+   or commits, and never changes global Codex, marketplace, shell, or SSH
+   configuration.
 4. Tell the user to restart Codex. The restarted session starts
-   both MCP servers from the concrete absolute XDG binary paths in that project's
-   configuration. Do not add a global `mcp_servers` override to compensate for
-   startup failure. From a working directory outside the plugin checkout,
-   verify both installed executables through those versioned absolute paths:
+   both MCP servers from the plugin-root `mcp.json` through plugin-relative
+   launchers, which repair missing versioned binaries. Do not add project or
+   global `mcp_servers` entries to compensate for startup failure. From a
+   working directory outside the plugin checkout, verify both launchers:
    initialize `development-discipline-mcp` and initialize Tiber's MCP stdio
    server. A status response from only one server is not complete startup
    evidence.

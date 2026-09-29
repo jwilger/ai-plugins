@@ -36,9 +36,7 @@ review state, call `workspace-reader.status` and require
 response. If any field is absent or weaker, accept zero clean iterations and
 reject delivery. Install the current-host binaries from the updated marketplace
 checkout with `just install-development-system-binaries` (or the installer
-script), rerun Development System setup for the current harness so its
-project-local MCP binding points at the new absolute binary path, restart the
-harness, and begin a new review session only after the same-MCP attestation
+script), update the Development System plugin, restart the harness, and begin a new review session only after the same-MCP attestation
 passes. Do not call
 `final_review.assess_risk` or `final_review.plan` merely to test a mismatched
 runtime. After a valid plan, independently require the returned

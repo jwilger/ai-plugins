@@ -392,7 +392,7 @@ function pluginProjection(plugin) {
     throw new Error(`plugin source binding is invalid: ${plugin.name}`);
   }
   assertRegularDirectory(sourceRoot, `plugin source ${plugin.name}`);
-  const manifestFile = path.join(sourceRoot, ".codex-plugin/plugin.json");
+  const manifestFile = path.join(sourceRoot, "plugin.json");
   const sourceManifest = readJsonRegular(
     manifestFile,
     `Codex plugin manifest ${plugin.name}`,
@@ -562,12 +562,9 @@ function materializeSystemSkills(stagingRoot, executionSurface) {
 }
 
 function writePluginProjection(destination, projection) {
-  fs.mkdirSync(path.join(destination, ".codex-plugin"), {
-    mode: 0o700,
-    recursive: true,
-  });
+  fs.mkdirSync(destination, { mode: 0o700, recursive: true });
   fs.writeFileSync(
-    path.join(destination, ".codex-plugin/plugin.json"),
+    path.join(destination, "plugin.json"),
     projection.manifest,
     { mode: 0o600 },
   );

@@ -145,7 +145,7 @@ teardown() {
   [ "$targeted_plugins" = "development-system" ]
 
   workflow_reference="skills/development-workflow/references/workflow-rules.md"
-  plugin_version="$(jq -er '.version' "$ROOT/plugins/development-system/.codex-plugin/plugin.json")"
+  plugin_version="$(jq -er '.version' "$ROOT/plugins/development-system/plugin.json")"
   cmp -s \
     "$ROOT/plugins/development-system/$workflow_reference" \
     "$targeted_home/plugins/cache/ai-plugins/development-system/$plugin_version/$workflow_reference"
@@ -166,8 +166,8 @@ teardown() {
     projected_entries="$(
       find "$version_root" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort
     )"
-    [ "$projected_entries" = $'.codex-plugin\nskills' ]
-    [ "$(find "$version_root/.codex-plugin" -mindepth 1 -maxdepth 1 -printf '%f\n')" = plugin.json ]
+    [ "$projected_entries" = $'plugin.json\nskills' ]
+    [ -f "$version_root/plugin.json" ]
   done < <(
     find "$targeted_home/plugins/cache/ai-plugins" "$all_home/plugins/cache/ai-plugins" \
       -mindepth 2 -maxdepth 2 -type d | sort

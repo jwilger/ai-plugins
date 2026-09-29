@@ -371,16 +371,13 @@ the active call's local `sandboxCwd`, so the authoritative board belongs to the
 caller's repository rather than the plugin cache. A later call from another
 workspace replaces the process-local repository selection.
 
-The Codex MCP registration forwards `SSH_AUTH_SOCK` so Git SSH signing can use
-the user's existing agent, including 1Password SSH agent setups. If an older
-installed plugin still reports `Couldn't get agent socket?` during
-`git commit-tree -S`, reinstall Tiber or replace the plugin-provided server with
-an equivalent top-level `[mcp_servers.tiber]` registration that preserves the
-absolute installed launcher and includes `env_vars = ["SSH_AUTH_SOCK"]`. Do not
-forward `SSH_AUTH_SOCK` to `command = "tiber"`, repo-relative launchers, or any
-project-controlled executable. Codex plugin MCP policy overlays under
-`[plugins."tiber@ai-plugins".mcp_servers.tiber]` cannot change transport
-environment variables; they only control enablement and tool policy.
+Codex loads Tiber from the plugin-root `mcp.json`. Codex filters the MCP
+process environment, so the bundled launcher reads a user-owned absolute
+socket path from `$PLUGIN_DATA/signing-agent-socket`. Outside a portable harness it uses
+`$XDG_CONFIG_HOME/ai-plugins/development-system/` (or `~/.config`). The root
+installer records the current valid `SSH_AUTH_SOCK`; update this plugin-owned
+file if the agent socket moves.
+Never pass the signing socket to a project-controlled executable.
 
 The manifest's `./bin/tiber` command is resolved only against the installed
 plugin root, never the caller checkout. Reinstall or upgrade the plugin if Codex
