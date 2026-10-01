@@ -410,7 +410,7 @@ post_filter = "bounded-helper"
 verifier = "strong-reviewer"
 
 # Optional concrete Codex overrides belong in project-local configuration.
-# Select their GPT-6 models and efforts per assignment using model-routing.
+# Resolve each assignment’s concrete route using model-routing.
 
 ```
 

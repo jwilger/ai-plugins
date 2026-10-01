@@ -75,7 +75,7 @@ and retrying the submission cannot preserve an earlier clean streak.
 Codex consumes the canonical routing policy from the installed plugin root `skills/model-routing/`. The plugin root packages these task-local agents:
 `bounded-helper`, `substantive-worker`, `strong-reviewer`, `strong-worker`, and the read-only `advisor`.
 Agent definitions retain their sandbox and task boundaries; the coordinator sets
-the GPT-6 model and effort for each assignment using `model-routing`. If Codex
+each assignment’s concrete route using `model-routing`. If Codex
 cannot honor the chosen route, the coordinator reports the failure visibly.
 
 The final-review coordinator runs from the Development System plugin's
