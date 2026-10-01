@@ -74,14 +74,14 @@ delete require.cache[require.resolve('./evals/promptfoo/load-harness-cases.cjs')
 const forced = require('./evals/promptfoo/load-harness-cases.cjs')().find(
   (testCase) => testCase.vars.case_id === fixture.case_id,
 );
-const expectedPrefix = 'Apply $development-system:development-workflow and read its instructions before answering.\n\n';
+const expectedPrefix = 'Apply $development-system:development-workflow, $development-system:model-routing and read its instructions before answering.\n\n';
 if (forced.vars.scenario_prompt !== `${expectedPrefix}${fixture.prompt}`) {
   throw new Error(`forced prompt did not inject the resolved skill once: ${forced.vars.scenario_prompt}`);
 }
 if (forced.vars.skill_invocation_mode !== 'forced') {
   throw new Error('forced mode was not recorded');
 }
-if (JSON.stringify(forced.vars.skill_references) !== JSON.stringify(['$development-system:development-workflow'])) {
+if (JSON.stringify(forced.vars.skill_references) !== JSON.stringify(['$development-system:development-workflow', '$development-system:model-routing'])) {
   throw new Error(`unexpected forced skill references: ${JSON.stringify(forced.vars.skill_references)}`);
 }
 NODE
