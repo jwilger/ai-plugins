@@ -129,3 +129,21 @@ do not install the retained component as a separate marketplace plugin.
 
 Skill descriptions are narrow routing indexes. Detailed workflow context is
 loaded only after a matching skill routes.
+
+## Model routing
+
+The coordinator assigns bounded, standard, or strong capability according to the
+task's eligibility and risk, then selects a concrete model and supported
+reasoning setting from current runtime evidence. The plugin does not prescribe
+model generations or provider-specific effort labels. Availability alone does
+not establish fitness, and mappings cannot grant tool authority.
+
+Optional string-valued `[model_routing]` entries in
+`.development-system.toml` supply operator preferences.
+`DEVELOPMENT_SYSTEM_MODEL_ROUTING_FILE` can select an absolute path to a
+machine-specific TOML mapping instead. These are coordinator-read preferences,
+not native spawn configuration; explicitly selected invalid mappings and
+unconfirmed routes are reported visibly. See the [routing
+skill](skills/model-routing/SKILL.md) and [mapping
+contract](skills/model-routing/references/runtime-mappings.md) for keys, precedence,
+examples, and fallback rules.
