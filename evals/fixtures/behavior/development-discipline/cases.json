@@ -2526,5 +2526,31 @@
         "Invent high effort or block the assignment because every spawn requires an explicit effort."
       ]
     }
+  },
+  {
+    "case_id": "model-routing-advisor-fixed-reasoning",
+    "behavior": "Advisor delegation preserves an evidenced fixed-reasoning route and records it without an effort argument.",
+    "prompt": "I need an advisor to challenge a load-bearing architecture decision. Trusted runtime evidence confirms fixed-advisor-v1 is suitable for this strong planning task and its fixed reasoning meets deeper scrutiny. The harness can select it explicitly but exposes no effort parameter. Explain how the parent should delegate and what route footer the advisor should report; this is an advisory question, do not actually spawn or inspect a repository.",
+    "tags": ["development-discipline", "model-routing", "optional-mapping"],
+    "plugins": ["development-system"],
+    "skills": ["advisor", "model-routing"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "close-boundary"]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "This is an advisory fixture: pass when the response describes the required delegation and evidence; do not require actual spawning, repository inspection or route verification. Pass if it explains that the parent should delegate to a read-only advisor using fixed-advisor-v1 explicitly, omit the unavailable effort parameter, preserve strong capability/deeper scrutiny and confirm the actual route before relying on it. An illustrative advisor footer should record the confirmed model and fixed/not configurable reasoning plus actually inspected context. Fail if it forces an effort, blocks a proven eligible model solely for lacking an effort parameter, claims a delegation actually ran, or performs the full advisor planning loop in the parent.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Delegate read-only advisor with explicit fixed-advisor-v1, omit effort, confirm actual route and report fixed/not configurable with actual context."
+      ],
+      "fail": [
+        "Pass high effort because advisor requires both parameters or block an eligible fixed-reasoning model."
+      ]
+    }
   }
 ]

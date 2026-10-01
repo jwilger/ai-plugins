@@ -12,7 +12,7 @@ If you are already running as a subagent, do the advisor work directly from the 
 ## Parent-Agent Protocol
 
 1. Spawn an advisor subagent. Do not run the full advisor loop in the main thread.
-   - Use the custom `advisor` agent when available. Select the model and effort for this task from the canonical `model-routing` skill and pass both when spawning; the agent file supplies the read-only boundary.
+   - Use the custom `advisor` agent when available. Resolve and confirm this task’s concrete route using the canonical `model-routing` skill, passing the model explicitly and a reasoning setting only when configurable; the agent file supplies the read-only boundary.
    - If the custom agent or selected route is unavailable, report that failure and follow the `model-routing` availability contract.
    - Do not use `agent_type: worker` for advisor work.
 2. Pass a compact brief: the user's request, the current repo/path if relevant,
@@ -49,7 +49,7 @@ Return:
 3. scope to cut or defer
 4. risks/prereqs to verify
 5. final artifact outline, if requested
-6. footer: `route=<actual model>/<actual effort>; playbook=<yes|no>; context=<repo/docs/web/none checked>`. For context, report only sources actually inspected; if you did not inspect repo files, docs, or web sources, use `none checked`.
+6. footer: `route=<actual model>/<actual reasoning setting or fixed/not configurable>; playbook=<yes|no>; context=<repo/docs/web/none checked>`. Use `fixed/not configurable` for an evidenced fixed-reasoning route. For context, report only sources actually inspected; if you did not inspect repo files, docs, or web sources, use `none checked`.
 ```
 
 ## Subagent Protocol
