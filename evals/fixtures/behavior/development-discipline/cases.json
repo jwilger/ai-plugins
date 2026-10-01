@@ -1637,11 +1637,11 @@
       "baselineLiftThreshold": 0
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if Reject bounded eligibility because ambiguity and authorization analysis cannot be independently verified by this scanner. Require strong-reviewer with deeper scrutiny and evidence of strong model fitness; mapping never overrides eligibility. If no suitable confirmed route or parent exists, visibly block affected analysis with evidence and enable/transfer/restart action. Reject picking cheap-v8 because files are few or just increasing its effort.",
+    "semanticRubric": "Pass if the response rejects bounded eligibility because ambiguity and authorization analysis cannot be independently verified by this scanner. Require strong-reviewer with deeper scrutiny and evidence of strong model fitness; mapping never overrides eligibility. A potential breach or verification gap alone is not evidence of interacting failure paths justifying maximum scrutiny. If no suitable confirmed route or parent exists, visibly block affected analysis with gathered evidence and a concrete enable, transfer, or restart action. Reject choosing cheap-v8 because the files are few, simply increasing its effort, automatically maximizing scrutiny, or a blocked result without actionable recovery.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "This is strong-reviewer analysis with deeper scrutiny. Three files and a scanner do not make the security conclusion deterministic. cheap-v8 is ineligible; resolve an evidenced strong route or block the analysis visibly."
+        "This needs a read-only strong-reviewer with deeper scrutiny and confirmed fitness. The scanner cannot establish the credential boundary, so cheap-v8 is ineligible. If no eligible route is available, block this analysis, retain the scanner limit as evidence, and transfer the review to a harness where an evidenced strong reviewer and supported reasoning setting can be selected."
       ],
       "fail": [
         "The bounded mapping authorizes cheap-v8 because there are only three files."
@@ -2415,11 +2415,12 @@
       "baselineLiftThreshold": 0
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if Use environment file as whole optional mapping override and select confirmed host-builder/normal for standard task. Do not silently merge missing entries from project or rewrite final-review/global defaults. For missing strong entry use trusted current capability evidence/confirmed suitable parent or visibly block when unresolved. Record source and actual route.",
+    "semanticRubric": "Pass if the response identifies the environment file as the whole mapping override and host-builder/normal as the standard route supported by the scenario evidence. It may condition actual execution on confirming the harness selection; this advisory question does not require spawning an agent or claiming a route actually ran. Do not silently merge missing strong fields from the project or rewrite final-review/global defaults. A strong entry can remain unmapped until a strong assignment is needed, when it must be resolved from trusted evidence or a confirmed suitable parent, otherwise visibly blocked. Name the mapping source; reject silent merging, fixed provider defaults, or claiming unsupported execution.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Use environment mapping host-builder/normal and record source. Missing strong mapping is unmapped, not project-judge; resolve fitness from runtime evidence or a confirmed suitable parent. No global or phase config rewrite."
+        "Use environment mapping host-builder/normal and record source. Missing strong mapping is unmapped, not project-judge; resolve fitness from runtime evidence or a confirmed suitable parent. No global or phase config rewrite.",
+        "The environment mapping selects host-builder/normal for standard work, subject to actual spawn confirmation. The missing strong mapping must be resolved from trusted runtime evidence when needed; project-judge is not silently inherited. This changes neither explicit final-review phase choices nor global defaults."
       ],
       "fail": [
         "Merge the project strong route with environment standard route and change the global default."
