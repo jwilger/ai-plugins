@@ -2500,5 +2500,31 @@
         "Convert deep to exhaustive automatically and execute deletion because the file authorized it."
       ]
     }
+  },
+  {
+    "case_id": "model-routing-fixed-reasoning-spawn",
+    "behavior": "An evidenced fixed-reasoning model can be selected without an invented effort parameter.",
+    "prompt": "Trusted runtime evidence establishes fixed-judge-v1 is suitable for read-only strong review and its fixed reasoning meets deeper scrutiny. The harness can explicitly select this model but exposes no effort parameter. No mapping is set. How should you start and record this fresh review assignment? Do you need to invent an effort value or block it?",
+    "tags": ["development-discipline", "model-routing", "optional-mapping"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow", "model-routing"],
+    "coverage": {
+      "kinds": ["natural-trigger", "core-behavior", "close-boundary"]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if Select fixed-judge-v1 explicitly, omit the effort parameter because it is not configurable, record fixed/not configurable and its trusted evidence plus required strong capability/deeper scrutiny. Preserve read-only scope and confirm actual route; do not invent an effort, require a mapping, or falsely block the evidenced eligible model.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Select fixed-judge-v1 explicitly without effort; record fixed/not configurable with trusted evidence and actual route confirmation. Strong/deeper requirements and read-only boundary remain."
+      ],
+      "fail": [
+        "Invent high effort or block the assignment because every spawn requires an explicit effort."
+      ]
+    }
   }
 ]
