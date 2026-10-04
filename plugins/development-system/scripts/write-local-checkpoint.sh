@@ -186,19 +186,26 @@ if [[ -e $target ]]; then
       (passing("lightweight-review") and
        $proposed.gates.lightweight_review_receipt == null and
        $proposed.gates.fast_gate_receipt == null);
+    def gate_failure($kind):
+      $proposed.state == "failing" and
+      $proposed.snapshot.head_oid == $current.snapshot.head_oid and
+      $proposed.test.outcome == "fail" and
+      $proposed.test.failure_kind == $kind;
     if ($current.next_action | test("^(causal-edit|rewrite-invalid-test): \\S")) then
       remediation_result
     elif $current.next_action == "lightweight-review" then
-      (passing("fast-gate") or passing("commit-through-pre-commit-hook")) and
-      $proposed.test == $current.test and
-      ($proposed.gates.lightweight_review_receipt | type == "string") and
-      $proposed.gates.fast_gate_receipt == null
+      gate_failure("lightweight-review") or
+      ((passing("fast-gate") or passing("commit-through-pre-commit-hook")) and
+       $proposed.test == $current.test and
+       ($proposed.gates.lightweight_review_receipt | type == "string") and
+       $proposed.gates.fast_gate_receipt == null)
     elif $current.next_action == "commit-through-pre-commit-hook" then
-      $proposed.state == "committed" and
-      $proposed.next_action == "verify-exact-commit" and
-      $proposed.test == $current.test and
-      $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
-      ($proposed.gates.fast_gate_receipt | type == "string")
+      gate_failure("pre-commit-hook") or
+      ($proposed.state == "committed" and
+       $proposed.next_action == "verify-exact-commit" and
+       $proposed.test == $current.test and
+       $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
+       ($proposed.gates.fast_gate_receipt | type == "string"))
     elif $current.next_action == "fast-gate" then
       passing("commit-or-record-local-snapshot") and
       $proposed.test == $current.test and

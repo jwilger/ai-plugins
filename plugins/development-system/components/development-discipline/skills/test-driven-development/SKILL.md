@@ -137,8 +137,11 @@ GREEN.
 
 At `passing-awaiting-gates-or-review`, stop all implementation and test editing:
 
-1. Run the lightweight review below. Any remediation is a causal edit and
-   returns immediately to the focused-test boundary.
+1. Run the lightweight review below. Before required remediation, publish a
+   canonical `failing` checkpoint with the actual review identity and failure
+   evidence, `failure_kind: lightweight-review`, cleared gate receipts, null
+   delivery, and the sole `causal-edit: <repair>` action. Then make that causal
+   edit and return immediately to the focused-test boundary.
 2. When the selected mode authorizes or requires a commit, use
    `rationale-commit-messages` and create the signed commit. That Git operation
    must trigger Lefthook's repository fast pre-commit gate; never run the same
@@ -146,6 +149,14 @@ At `passing-awaiting-gates-or-review`, stop all implementation and test editing:
    `committed` together. Local-only verification therefore requires an
    authorized local commit; withheld commit authority blocks completion rather
    than replacing the mechanical hook with a manual gate.
+   If pre-commit fails and no commit was created, first publish `failing` with
+   the actual failed Git command and hook evidence, `failure_kind:
+pre-commit-hook`, cleared gate receipts, null delivery, unchanged HEAD, and
+   the sole causal repair. Commit and push are prohibited while failing. After
+   repair, require fresh focused tests and fresh lightweight review before
+   another normal hook-backed commit attempt. Use the public
+   `development-workflow` recovery helper for a stranded pending-gate record;
+   preserve staged work and never replace checkpoint files manually.
 3. Complete the authorized delivery-mode checkpoint immediately and record
    `pushed-or-delivery-mode-equivalent`. Direct-to-trunk pushes normally; PR
    mode pushes only the already-authorized branch and does not infer permission

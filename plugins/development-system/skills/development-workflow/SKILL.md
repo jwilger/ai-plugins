@@ -97,6 +97,11 @@ only where the following exact shapes permit it. `snapshot` is exactly
 `{"head_oid":string,"tracked_sha256":string,"untracked_sha256":string}`.
 `test` is either `null` or exactly
 `{"command":string,"receipt_ref":string,"outcome":"pass"|"fail","failure_kind":string|null}`.
+It records the immediate test or, when a pending gate fails, that gate's actual
+command and bounded failure evidence. A failed pre-commit hook uses
+`failure_kind:"pre-commit-hook"`; a lightweight review requiring remediation
+uses `failure_kind:"lightweight-review"`. These are truthful failed gate
+receipts, not claims that the preceding focused test failed.
 `gates` is exactly
 `{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_identity_verification_receipt":{"receipt_ref":string,"outcome":"pass"|"fail"}|null}`.
 `delivery` is either `null` or exactly
@@ -152,6 +157,46 @@ canonical action from its state and receipts, append the next generation through
 the bundled writer, and reconcile that successor before acting. Any other
 schema, identity, or lineage mismatch remains a recovery hold.
 
+### Failed pending gates and stranded-checkpoint recovery
+
+When `next_action` is `commit-through-pre-commit-hook` and the actual Git
+operation fails in pre-commit without creating a commit, publish a `failing`
+successor before any repair. Likewise, a `lightweight-review` finding requiring
+remediation first publishes a `failing` successor. Record `test.outcome:"fail"`,
+the matching failure kind above, the failed command or review identity, and a
+bounded reference to the actual failure evidence. Keep HEAD unchanged, retain
+the immutable baseline and CI history, clear every gate receipt, set `delivery`
+to `null`, and use `causal-edit: <specific repair>` as the sole next action.
+Never fabricate a commit, a passing hook receipt, or a passing review. Commit
+and push remain prohibited while failing. After the causal repair, run fresh
+focused testing immediately, then fresh lightweight review, then a new normal
+commit attempt through the installed pre-commit hook. Exact identity
+verification, authorized delivery, exact-SHA CI, and terminal review remain
+required; failed or pre-repair receipts cannot satisfy the repaired snapshot.
+
+For records already stranded at either pending gate, use the bundled
+`<plugin-root>/scripts/record-checkpoint-failure.sh CHECKPOINT_ID EXPECTED_GENERATION EXPECTED_PREDECESSOR FAILURE_KIND COMMAND RECEIPT_FILE CAUSAL_REPAIR`.
+Load the authoritative predecessor, use its generation plus one and its exact
+SHA-256 digest, and supply a readable, nonempty retained failure-evidence file
+outside the worktree. This helper copies the predecessor, records the evidence
+path and digest, computes the current canonical snapshot, and publishes only
+through `write-local-checkpoint.sh`. It preserves staged, unstaged, and
+untracked work, including previously untracked files now staged; it never
+changes the index, edits source, runs the failed action, or writes `.latest`
+directly. A stale caller or changed HEAD is rejected without publication.
+
+First reconcile Git and the failed action's actual evidence. Staging can change
+the tracked/untracked snapshot partition without changing source; hook-made
+changes must be identified and included in the actual failing snapshot. An
+unexplained source change, missing evidence, malformed predecessor, or commit
+already created is still a recovery hold. Do not restore an old snapshot or
+discard staged work to make hashes match. If failure evidence is unavailable,
+recover it from the blocked session; otherwise the still-pending normal commit
+action may be retried with captured output, recording its actual success or
+failure. A commit that succeeds follows the normal committed transition and
+cannot be relabeled as a failed pre-commit attempt. Recovery records evidence;
+the helper cannot attest that a caller's supplied failure report is truthful.
+
 - `failing`: commit and push are prohibited. Permit only the next causal edit
   needed to address that failure, reject unrelated or convenience changes, and
   immediately test again. `test` is required and `delivery` is `null`.
@@ -164,8 +209,9 @@ schema, identity, or lineage mismatch remains a recovery hold.
   Other failing records use `causal-edit: <specific causal change>` so the
   exact RED evidence, diagnosis, and next edit survive interruption.
 - `passing-awaiting-gates-or-review`: freeze further implementation and test
-  edits. Run the bounded lightweight review; any remediation is a new causal
-  edit and therefore triggers another immediate focused test. `test` is
+  edits. Run the bounded lightweight review; any required remediation must
+  first enter the failed-gate transition above, then permit its causal edit and
+  another immediate focused test. `test` is
   required and `delivery` is `null`. Then create the authorized signed commit.
   Git must trigger the Lefthook pre-commit gate during that operation; do not
   run the gate separately. Record the hook receipt and commit together, using

@@ -63,6 +63,80 @@ verification: `git commit` triggers the fast pre-commit checks and `git push`
 triggers the pre-push checks. Agents must not run the same gate commands
 separately unless the user explicitly requests a diagnostic run.
 
+## Recover a failed checkpoint gate
+
+Version 6.9.5 supports recording a failed pre-commit attempt or a lightweight
+review that requires remediation without pretending a commit or passing gate
+exists. Both become canonical `failing` checkpoints; only the recorded causal
+repair and immediate fresh testing may follow. Fresh lightweight review and a
+new normal hook-backed commit are then required before exact verification and
+authorized delivery. Full terminal review and exact-SHA CI requirements remain
+unchanged.
+
+For a session stranded by an older plugin, update and reinstall:
+
+```shell
+codex plugin marketplace upgrade ai-plugins
+codex plugin add development-system@ai-plugins
+codex plugin list --json
+```
+
+Verify the installed version is 6.9.5 or newer. Restart the harness and resume
+the work in a fresh thread with its original request, immutable baseline, and
+checkpoint ID. The startup hook repairs version-matched host binaries; verify
+both MCP servers use the new plugin root and call `workspace-reader.status`
+through the connected Development Discipline MCP. Its final-review attestation
+must report `contract_version >= 2`, `minimum_clean_iterations >= 3`, and
+`durable_pending_assignment_recovery: true` before terminal review.
+If the release is not yet available, use the marketplace checkout's
+`nix develop -c just install-development-system-binaries --from-source` and
+verify the runtime after restart. A stale explicitly configured project MCP
+binding requires the separately previewed and approved setup migration.
+
+Before changing source, reconcile the retained failed command/review evidence
+with Git. HEAD must still equal the checkpoint's HEAD: if a commit exists,
+recover its normal committed transition instead. Keep the real failure
+evidence in a readable, nonempty file outside the worktree and retain that file
+for handoffs. Include the failed command or review identity, actual failed
+checks/findings, exit status when available, and causal diagnosis; avoid secrets.
+The helper records a bounded path and SHA-256 reference, not raw log content.
+If evidence is missing, recover it from the original session, or retry the
+still-pending normal commit with captured output and record the actual result.
+
+Run from the target repository; resolve the installed root rather than using
+the old session's cached path:
+
+```shell
+plugin_root=$(codex -C /tmp mcp list --json | jq -er '.[] | select(.name == "development-discipline") | .transport.env.PLUGIN_ROOT')
+checkpoint_id=YOUR_CHECKPOINT_ID
+checkpoint="$(git rev-parse --path-format=absolute --git-common-dir)/development-system/checkpoints/$checkpoint_id.latest"
+generation=$(sed -n 's/^checkpoint-v1 //p' "$checkpoint" | jq -er '.generation + 1')
+predecessor=$(sha256sum "$checkpoint" | cut -d ' ' -f 1)
+"$plugin_root/scripts/record-checkpoint-failure.sh" \
+  "$checkpoint_id" "$generation" "$predecessor" pre-commit-hook \
+  'THE ACTUAL FAILED GIT COMMAND' /absolute/path/to/retained-failure-evidence \
+  'THE SPECIFIC CAUSAL REPAIR'
+cat "$checkpoint"
+```
+
+For a failed review, substitute `lightweight-review` and the actual review
+identity/evidence. The helper uses the validated writer's lock and
+generation/predecessor compare-and-swap. It recomputes the current snapshot,
+retains the immutable baseline and CI history, clears gate receipts and
+delivery, and records `causal-edit: <repair>`. It rejects stale callers,
+incompatible pending actions, changed HEAD, and missing/empty/in-worktree
+evidence. It never edits source, stages, unstages, commits, pushes, or replaces
+the checkpoint directly.
+
+Staged work can remain staged, including newly staged previously untracked
+files. Staging changes snapshot partitioning; reconcile source identity rather
+than discarding work to reproduce old hashes. Include identified hook-made
+changes in the actual failing snapshot. Unexplained source changes or a
+malformed predecessor remain a recovery hold. Read back and reconcile the
+published failing record before performing its causal repair. Never manually
+replace `.latest`, fabricate evidence, or use the helper to skip testing,
+review, commit hooks, or delivery gates.
+
 The plugin-wide Development Discipline MCP surface provides bounded repository
 inspection, deterministic setup, and multi-agent final review. Those services
 and the Codex hooks are advisory: they

@@ -75,6 +75,18 @@ planned increment; do not start terminal review early.
 A metadata-only revision change stays in delivery verification and does not
 reopen source review.
 
+If a pre-commit hook fails without creating a commit, first record its actual
+failed command and evidence as canonical `failing`, with unchanged HEAD,
+`failure_kind: pre-commit-hook`, cleared gate receipts, null delivery, and one
+causal repair. A lightweight review requiring remediation uses the same
+failure transition with `failure_kind: lightweight-review`. Follow the public
+`development-workflow` schema and stranded-checkpoint helper; never fabricate
+a commit, reuse passing gate receipts, discard staged work, or replace the
+checkpoint manually. Only the recorded causal repair is permitted while
+failing; fresh focused testing and fresh lightweight review must precede
+another normal hook-backed commit attempt. Exact verification and the
+configured delivery/CI/final-review gates still apply.
+
 Keep checkpoint CI bounded per pushed ref. Prefer the forge or repository's
 existing coalescing of superseded non-terminal runs; cancel an obsolete run
 only when cancellation is authorized. If neither is available, wait for

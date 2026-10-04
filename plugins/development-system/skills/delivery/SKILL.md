@@ -25,6 +25,13 @@ the user knows what evidence is missing.
   the Lefthook pre-commit gate and return both its gate receipt and a signed
   commit receipt when signing is required. Never run the same gate separately
   before committing.
+- A failed pre-commit attempt that created no commit, or a lightweight review
+  requiring remediation, must first record canonical `failing` with actual
+  failure evidence through the public `development-workflow` state machine.
+  Commit and push are prohibited while failing. Preserve staged work; permit
+  only the causal repair followed by fresh tests, review, and a new normal
+  hook-backed commit attempt. Use its recovery helper for a stranded record,
+  never manual checkpoint replacement or fabricated passing receipts.
 - A semantic tag operation is separate from an increment commit: it consumes
   the repository-authorized delivered revision and release evidence required
   by policy, and returns a tag receipt when signing is required.
