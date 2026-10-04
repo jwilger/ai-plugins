@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "development-system",
-  "version": "6.9.5",
+  "version": "6.9.6",
   "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
   "author": {
     "name": "John Wilger",

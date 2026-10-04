@@ -81,16 +81,23 @@ codex plugin add development-system@ai-plugins
 codex plugin list --json
 ```
 
-Verify the installed version is 6.9.5 or newer. Restart the harness and resume
+Verify the installed version is 6.9.6 or newer. Restart the harness and resume
 the work in a fresh thread with its original request, immutable baseline, and
 checkpoint ID. The startup hook repairs version-matched host binaries; verify
 both MCP servers use the new plugin root and call `workspace-reader.status`
 through the connected Development Discipline MCP. Its final-review attestation
 must report `contract_version >= 2`, `minimum_clean_iterations >= 3`, and
 `durable_pending_assignment_recovery: true` before terminal review.
-If the release is not yet available, use the marketplace checkout's
-`nix develop -c just install-development-system-binaries --from-source` and
-verify the runtime after restart. A stale explicitly configured project MCP
+If the release is not yet available, build from the updated marketplace
+checkout into the installed MCP's exact data directory:
+
+```shell
+plugin_data=$(codex -C /tmp mcp list --json | jq -er '.[] | select(.name == "development-discipline") | .transport.env.PLUGIN_DATA | select(type == "string" and startswith("/"))')
+PLUGIN_DATA="$plugin_data" nix develop -c just install-development-system-binaries --from-source
+```
+
+Verify the checkout version matches the installed plugin version, and verify
+the runtime after restart. A stale explicitly configured project MCP
 binding requires the separately previewed and approved setup migration.
 
 Before changing source, reconcile the retained failed command/review evidence
