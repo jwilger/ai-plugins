@@ -130,7 +130,34 @@ returns full prompts in the summary. Pass one exact `subagent_key` with the same
 `state_ref` to retrieve only that assignment's original durable prompt and
 result schema. Repeated summary or prompt retrieval is idempotent: it appends no
 event, changes no revision, fingerprint, scope, or hash, and never reassigns a
-lens or model role. A pre-upgrade pending verifier or delta-risk record that
+lens or model role. Large delta artifacts are immutable, project-scoped cache
+files bound to their recorded snapshot commits and blob digest. Versioned patches
+use canonical repository-relative headings; `changed_paths` stays relative to the
+bound `project_root`, including a native project rooted in a Git subdirectory.
+Retrieval can
+reuse intact digest-matching files without regenerating them after Git
+presentation settings change. New evidence records deterministic snapshot-bound
+rendering; missing files can be rebuilt with that renderer. Historical ordinary
+and replay temporary locators may be relocated while assignment identity stays
+unchanged. Missing unversioned evidence must reproduce its exact recorded digest;
+if historical custom rendering is unavailable, follow the actionable recovery
+hold instead of substituting newly rendered evidence.
+Inspect the returned artifact and digest before dispatch; never reconstruct it
+from the current working tree or count retrieval as a review round.
+
+If source genuinely changes again while a delta scout is pending, submit
+`final_review.advance` with the current `state_ref`, the true new
+`current_diff_hash`, complete `current_changed_files`, and fresh
+`current_shared_test_evidence` with a new evidence ID bound to that hash. Supply
+empty `lens_results`, and no caller decisions, delta assessment, verifier result,
+or budget decision. The coordinator verifies a changed captured snapshot
+against the same prior baseline, preserves old evidence/history, closes the
+superseded scout, and issues a fresh independently reviewed delta assignment.
+A changed label with unchanged captured source is rejected. This transition
+adds no clean credit and does not replace any required lens review. Never pass
+an old target hash as the current hash to finish a stale assignment.
+
+A pre-upgrade pending verifier or delta-risk record that
 lacks the durable assignment fails explicitly with `recovery=restart_final_review`
 instead of returning an empty or reconstructed assignment.
 

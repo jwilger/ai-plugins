@@ -136,7 +136,8 @@ fn run(cli: &[String], child: bool) -> Result<i32, String> {
     // Validate every state mount before preparing any directory. Resolve existing
     // ancestors so aliases such as an external path containing `..` cannot hide
     // source overlap; missing final directories need not be created to do this.
-    for path in [projection, snapshot.as_path()] {
+    let delta_artifacts = delta_artifacts::directory(&root)?;
+    for path in [projection, snapshot.as_path(), delta_artifacts.as_path()] {
         let resolved = prospective_directory(path)?;
         if resolved.starts_with(&root) || root.starts_with(&resolved) {
             return Err("phase=scope replay_state_inside_source_forbidden=true retryable=configure_external_XDG_STATE_HOME".into());
@@ -149,6 +150,7 @@ fn run(cli: &[String], child: bool) -> Result<i32, String> {
         common.join("plugin-advisory-final-review"),
         projection.to_path_buf(),
         snapshot,
+        delta_artifacts,
     ];
     for path in &writable {
         ensure_directory(path, "scope")?;
@@ -286,7 +288,7 @@ fn failure(phase: &str, path: &Path, error: impl std::fmt::Display) -> String {
     )
 }
 
-fn prospective_directory(path: &Path) -> Result<PathBuf, String> {
+pub(super) fn prospective_directory(path: &Path) -> Result<PathBuf, String> {
     let mut ancestor = path;
     let mut missing = Vec::new();
     loop {
@@ -316,7 +318,7 @@ fn prospective_directory(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn ensure_directory(path: &Path, phase: &str) -> Result<(), String> {
+pub(super) fn ensure_directory(path: &Path, phase: &str) -> Result<(), String> {
     // Reject symlinks at every existing component before creating anything.
     // The supported threat model is cooperative local processes, not a hostile
     // same-uid mount race against the approved host invocation.

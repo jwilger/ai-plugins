@@ -18,6 +18,7 @@
 //! Catalog retirement removes only logical projection membership; immutable
 //! historical events remain in SQLite.
 
+mod delta_artifacts;
 mod review_budget;
 mod review_recovery;
 mod review_resolution;
@@ -309,6 +310,8 @@ struct ReviewDeltaEvidenceFacts {
     summary: String,
     prior_snapshot_commit: String,
     current_snapshot_commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    patch_rendering: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     inline_patch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3340,6 +3343,19 @@ fn decide_record_delta_risk_assessment(
         &intent.current_changed_files,
     )
     .map_err(CommandError::ValidationError)?;
+    let bound = expected_assignment
+        .bound_delta_evidence
+        .as_ref()
+        .ok_or_else(|| {
+            CommandError::ValidationError(
+                "pending_delta_snapshot_binding_missing=true recovery=restart_final_review".into(),
+            )
+        })?;
+    if delta_evidence.prior_snapshot_commit != bound.prior_snapshot_commit
+        || delta_evidence.current_snapshot_commit != bound.current_snapshot_commit
+    {
+        return Err(CommandError::ValidationError("pending_delta_source_changed=true recovery=final_review.advance_with_new_scope_and_evidence_without_old_assessment".into()));
+    }
     let assessment = PlanRiskAssessmentInput {
         assignment_id: intent.assessment.assignment_id.clone(),
         subagent_key: intent.assessment.subagent_key.clone(),
@@ -4154,6 +4170,18 @@ impl ModelCommandLogic for RecordDeltaRiskAssessment {
             }
             FinalReviewEvent::DeltaRiskRequested(DeltaRiskRequestedEvent { facts, .. }) => {
                 state.pending = facts.delta_expectation.as_deref().cloned();
+                if let Some(pending) = state
+                    .pending
+                    .as_mut()
+                    .filter(|pending| pending.bound_delta_evidence.is_none())
+                {
+                    pending.bound_delta_evidence = facts
+                        .iteration_response
+                        .as_ref()
+                        .and_then(|response| response.delta_risk_assignment.as_ref())
+                        .and_then(|assignment| assignment.get("delta_evidence"))
+                        .and_then(|evidence| serde_json::from_value(evidence.clone()).ok());
+                }
             }
             FinalReviewEvent::VerifierRequested(_)
             | FinalReviewEvent::ScopeSplitHeld(_)
@@ -6088,6 +6116,8 @@ mapping! { SubmitReviewIterationRequestToIntent: SubmitReviewIterationRequest.in
 #[derive(Clone, ModelState)]
 struct SubmitReviewIterationState {
     #[model(default)]
+    pending_delta: Option<PendingRequestFacts>,
+    #[model(default)]
     material: Option<SubmitReviewIterationMaterial>,
     #[model(default)]
     revision: Option<u64>,
@@ -6235,6 +6265,7 @@ impl SubmitReviewIterationMaterial {
 
 #[derive(Clone)]
 struct SubmitReviewIterationDecisionContext {
+    pending_delta: Option<PendingRequestFacts>,
     material: Option<SubmitReviewIterationMaterial>,
     revision: Option<u64>,
     catalog: ReviewCatalogRetention,
@@ -6246,11 +6277,13 @@ struct SubmitReviewIterationDecisionOutput {
 }
 
 fn submit_review_iteration_decision_context(
+    pending_delta: &Option<PendingRequestFacts>,
     material: &Option<SubmitReviewIterationMaterial>,
     revision: &Option<u64>,
     catalog: &ReviewCatalogRetention,
 ) -> SubmitReviewIterationDecisionContext {
     SubmitReviewIterationDecisionContext {
+        pending_delta: pending_delta.clone(),
         material: material.clone(),
         revision: *revision,
         catalog: catalog.clone(),
@@ -6260,6 +6293,7 @@ fn submit_review_iteration_decision_context(
 mapping! {
     SubmitReviewIterationStateToDecisionContext:
         (
+            SubmitReviewIterationState.pending_delta,
             SubmitReviewIterationState.material,
             SubmitReviewIterationState.revision,
             SubmitReviewIterationState.catalog
@@ -9416,6 +9450,7 @@ fn decide_review_iteration(
             .to_string();
         let mut expectation: PendingDeltaRiskExpectation =
             parse_expected_plan_risk_assignment(&assignment)?.into();
+        expectation.bound_delta_evidence = Some(delta_evidence.clone());
         expectation.expected_current_diff_hash = current_diff_hash.to_string();
         expectation.expected_current_changed_files = files.to_vec();
         expectation.expected_shared_test_evidence = evidence.clone();
@@ -9992,13 +10027,47 @@ fn build_submit_review_iteration_events(
         .transpose()
         .map_err(CommandError::ValidationError)?;
     let effective_state = reopened_state.as_ref().unwrap_or(authoritative_state);
-    let iteration = decide_review_iteration(
+    let mut iteration = decide_review_iteration(
         effective_state,
         &intent.submission,
         None,
         intent.now_epoch_seconds,
     )
     .map_err(CommandError::ValidationError)?;
+    if let Some(pending) = &decision.pending_delta {
+        let expectation = pending.delta_expectation.as_deref().ok_or_else(|| {
+            CommandError::ValidationError("pending_delta_supersession_binding_missing=true".into())
+        })?;
+        if !delta_supersession_submission(
+            expectation,
+            &intent.submission,
+            &effective_state.contract.scope.diff_hash,
+        ) {
+            return Err(CommandError::ValidationError(
+                "pending_delta_risk_assessment_required=true".into(),
+            ));
+        }
+        let old_evidence=pending.iteration_response.as_ref().and_then(|response|response.delta_risk_assignment.as_ref())
+            .and_then(|assignment|assignment.get("delta_evidence")).ok_or_else(||CommandError::ValidationError("pending_delta_supersession_snapshot_missing=true recovery=restart_final_review".into()))?;
+        let new_evidence = iteration
+            .delta_risk_assignment
+            .as_ref()
+            .and_then(|assignment| assignment.get("delta_evidence"))
+            .ok_or_else(|| {
+                CommandError::ValidationError(
+                    "pending_delta_supersession_requires_new_scout=true".into(),
+                )
+            })?;
+        if new_evidence["current_snapshot_commit"] == old_evidence["current_snapshot_commit"]
+            || new_evidence["prior_snapshot_commit"] != old_evidence["prior_snapshot_commit"]
+        {
+            return Err(CommandError::ValidationError(
+                "pending_delta_supersession_source_unchanged_or_baseline_mismatch=true".into(),
+            ));
+        }
+        iteration.subagent_shutdown.push(json!({"subagent_key":expectation.subagent_key,"action":"close","reason":"superseded_by_changed_source"}));
+        iteration.filtered["superseded_delta_assignment_id"] = json!(expectation.assignment_id);
+    }
     let metadata = EventMetadata {
         revision: revision.saturating_add(1),
         updated_at: intent.now_epoch_seconds,
@@ -10302,6 +10371,32 @@ impl ModelCommandLogic for SubmitReviewIteration {
             return Modeled::from_built(state);
         }
         match event {
+            FinalReviewEvent::DeltaRiskRequested(DeltaRiskRequestedEvent { facts, .. }) => {
+                state.pending_delta = Some(facts.clone())
+            }
+            FinalReviewEvent::DeltaRiskResolved(_)
+            | FinalReviewEvent::ReviewPlanned(_)
+            | FinalReviewEvent::IterationAccepted(_)
+            | FinalReviewEvent::ReviewReopened(_) => state.pending_delta = None,
+            FinalReviewEvent::LegacyReviewImported(LegacyReviewImportedEvent { facts, .. }) => {
+                state.pending_delta =
+                    facts
+                        .pending_delta_risk
+                        .as_ref()
+                        .map(|pending| PendingRequestFacts {
+                            assignment_id: pending.assignment_id.clone(),
+                            request_fingerprint: pending.request_fingerprint.clone(),
+                            legacy_arguments: pending.legacy_arguments.clone(),
+                            verifier_expectation: None,
+                            verifier_continuation: None,
+                            delta_expectation: pending.delta_expectation.clone(),
+                            iteration_response: None,
+                            metadata: facts.metadata.clone(),
+                        });
+            }
+            _ => {}
+        }
+        match event {
             FinalReviewEvent::ReviewPlanned(ReviewPlannedEvent { facts, .. }) => {
                 set_submit_review_iteration_session(
                     &mut state,
@@ -10397,6 +10492,7 @@ impl ModelCommandLogic for SubmitReviewIteration {
     ) -> Result<ModeledEvents<Self::Event>, CommandError> {
         let decision = SubmitReviewIterationDecisionOutput::model_builder()
             .context(SubmitReviewIterationStateToDecisionContext::apply((
+                state.as_ref(),
                 state.as_ref(),
                 state.as_ref(),
                 state.as_ref(),
@@ -12509,7 +12605,7 @@ impl ReviewCoordinator {
                 error
             }
         })?;
-        let assignment = match pending_phase {
+        let mut assignment = match pending_phase {
             "verifier" => response.verifier_assignment,
             "delta-risk" => response.delta_risk_assignment,
             _ => None,
@@ -12540,6 +12636,13 @@ impl ReviewCoordinator {
             return Err(format!(
                 "review_pending_assignment_identity_mismatch=true pending_phase={pending_phase} recovery=restart_final_review"
             ));
+        }
+        if pending_phase == "delta-risk" {
+            let root = state
+                .pointer("/scope/project_root")
+                .and_then(Value::as_str)
+                .ok_or("delta_artifact_project_root_required=true")?;
+            delta_artifacts::recover_assignment(Path::new(root), &mut assignment)?;
         }
         Ok(assignment)
     }
@@ -12742,38 +12845,53 @@ impl ReviewCoordinator {
                 }
             }
             if let Some(pending) = self.pending_delta_risks.get(session_id) {
-                let assessment = arguments
-                    .get("delta_risk_assessment")
-                    .ok_or_else(|| "pending_delta_risk_assessment_required=true".to_string())?;
-                if assessment.get("assignment_id").and_then(Value::as_str)
-                    != Some(pending.assignment_id.as_str())
-                {
-                    return Err("pending_delta_risk_assignment_mismatch=true".to_string());
-                }
                 let parsed = parse_advance_review_input(arguments)?;
-                let current_changed_files =
-                    parsed.current_changed_files.as_deref().ok_or_else(|| {
-                        "current_changed_files_required_when_diff_changes=true".to_string()
-                    })?;
-                let current_shared_test_evidence = parsed
-                    .current_shared_test_evidence
-                    .as_ref()
-                    .ok_or_else(|| {
-                        "current_shared_test_evidence_required_when_diff_changes=true".to_string()
-                    })?;
-                let current_diff_hash = parsed
-                    .delta_risk_assessment
-                    .as_ref()
-                    .map(|assessment| assessment.current_diff_hash.as_str())
-                    .ok_or_else(|| "pending_delta_risk_assessment_required=true".to_string())?;
-                if !pending_delta_resubmission_matches(
-                    pending,
-                    current_diff_hash,
-                    current_changed_files,
-                    current_shared_test_evidence,
-                    &parsed.caller_decisions,
-                ) {
-                    return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
+                let superseding = parsed.delta_risk_assessment.is_none()
+                    && parsed.verifier_result.is_none()
+                    && parsed.review_budget_decision.is_none()
+                    && delta_supersession_submission(
+                        pending,
+                        &review_iteration_submission(&parsed),
+                        state
+                            .pointer("/scope/diff_hash")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                    );
+                if !superseding {
+                    let assessment = arguments
+                        .get("delta_risk_assessment")
+                        .ok_or_else(|| "pending_delta_risk_assessment_required=true".to_string())?;
+                    if assessment.get("assignment_id").and_then(Value::as_str)
+                        != Some(pending.assignment_id.as_str())
+                    {
+                        return Err("pending_delta_risk_assignment_mismatch=true".to_string());
+                    }
+                    let parsed = parse_advance_review_input(arguments)?;
+                    let current_changed_files =
+                        parsed.current_changed_files.as_deref().ok_or_else(|| {
+                            "current_changed_files_required_when_diff_changes=true".to_string()
+                        })?;
+                    let current_shared_test_evidence = parsed
+                        .current_shared_test_evidence
+                        .as_ref()
+                        .ok_or_else(|| {
+                            "current_shared_test_evidence_required_when_diff_changes=true"
+                                .to_string()
+                        })?;
+                    let current_diff_hash = parsed
+                        .delta_risk_assessment
+                        .as_ref()
+                        .map(|assessment| assessment.current_diff_hash.as_str())
+                        .ok_or_else(|| "pending_delta_risk_assessment_required=true".to_string())?;
+                    if !pending_delta_resubmission_matches(
+                        pending,
+                        current_diff_hash,
+                        current_changed_files,
+                        current_shared_test_evidence,
+                        &parsed.caller_decisions,
+                    ) {
+                        return Err("pending_delta_risk_resubmission_mismatch=true".to_string());
+                    }
                 }
             }
         }
@@ -15926,6 +16044,81 @@ fn create_scope_snapshot_commit(
     Ok(commit)
 }
 
+fn write_delta_snapshot_patch(
+    project_root: &Path,
+    prior: &str,
+    current: &str,
+    paths: &[String],
+    rendering: Option<&str>,
+    file: fs::File,
+) -> Result<(), String> {
+    if !valid_git_object_id(prior) || !valid_git_object_id(current) {
+        return Err("delta_artifact_snapshot_invalid=true".into());
+    }
+    let renderer = match rendering {
+        None => None,
+        Some("git-snapshot-v1") => Some(delta_artifacts::SnapshotRenderer::new(project_root, current)?),
+        Some(_) => return Err("delta_artifact_rendering_version_unsupported=true recovery=use_compatible_review_binary".into()),
+    };
+    let mut args = vec![
+        "diff".into(),
+        "--binary".into(),
+        "--full-index".into(),
+        "--no-color".into(),
+        "--no-ext-diff".into(),
+        "--no-textconv".into(),
+        "--no-renames".into(),
+        "--relative".into(),
+        prior.into(),
+        current.into(),
+        "--".into(),
+    ];
+    for path in paths {
+        if normalize_review_path(path, None).as_deref() != Some(path.as_str()) {
+            return Err("delta_artifact_snapshot_path_invalid=true".into());
+        }
+        args.push(match renderer.as_ref() {
+            Some(renderer) => renderer.pathspec(path)?,
+            None => format!(":(literal){path}"),
+        });
+    }
+    if renderer.is_some() {
+        args.retain(|arg| arg != "--relative");
+        args.splice(
+            1..1,
+            [
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--unified=3",
+                "--inter-hunk-context=0",
+                "--diff-algorithm=myers",
+                "--no-indent-heuristic",
+                "--submodule=short",
+                "--ignore-submodules=none",
+                "--no-relative",
+            ]
+            .map(str::to_string),
+        );
+    }
+    let mut command = match renderer.as_ref() {
+        Some(renderer) => renderer.command(project_root)?,
+        None => snapshot_git_command(project_root)?,
+    };
+    let output = command
+        .args(&args)
+        .stdout(Stdio::from(file))
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| format!("delta_evidence_diff_failed source={error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "delta_evidence_diff_failed detail={}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
 fn generated_delta_evidence(
     scope: &ReviewScopeFacts,
     prior_diff_hash: &str,
@@ -15947,51 +16140,27 @@ fn generated_delta_evidence(
     snapshot_paths.dedup();
     let current_snapshot_commit =
         create_scope_snapshot_commit(project_root, baseline_commit, &snapshot_paths)?;
-    let mut range_args = vec![
-        "diff".to_string(),
-        "--binary".to_string(),
-        "--full-index".to_string(),
-        "--no-color".to_string(),
-        "--no-ext-diff".to_string(),
-        "--no-textconv".to_string(),
-        "--no-renames".to_string(),
-        "--relative".to_string(),
-        prior_snapshot_commit.to_string(),
-        current_snapshot_commit.clone(),
-        "--".to_string(),
-    ];
-    range_args.extend(
-        snapshot_paths
-            .iter()
-            .map(|path| format!(":(literal){path}")),
-    );
-    let counter = SNAPSHOT_INDEX_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let evidence_dir = env::temp_dir().join("development-discipline-delta-evidence");
-    fs::create_dir_all(&evidence_dir)
-        .map_err(|error| format!("delta_evidence_directory_failed source={error}"))?;
-    let patch_path = evidence_dir.join(format!("{}-{counter}.patch", std::process::id()));
-    let patch_file = fs::File::create(&patch_path)
-        .map_err(|error| format!("delta_evidence_create_failed source={error}"))?;
-    let mut command = snapshot_git_command(project_root)?;
-    let output = command
-        .args(&range_args)
-        .stdout(Stdio::from(patch_file))
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("delta_evidence_diff_failed source={error}"))?;
-    if !output.status.success() {
-        let _ = fs::remove_file(&patch_path);
-        return Err(format!(
-            "delta_evidence_diff_failed detail={}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
+    let (candidate, patch_file) = delta_artifacts::Candidate::create(project_root)?;
+    let patch_path = &candidate.path;
+    write_delta_snapshot_patch(
+        project_root,
+        prior_snapshot_commit,
+        &current_snapshot_commit,
+        &snapshot_paths,
+        Some("git-snapshot-v1"),
+        patch_file,
+    )?;
+    let renderer = delta_artifacts::SnapshotRenderer::new(project_root, &current_snapshot_commit)?;
     let mut changed_path_args = vec![
         "diff".to_string(),
         "--name-only".to_string(),
         "-z".to_string(),
         "--no-renames".to_string(),
-        "--relative".to_string(),
+        "--no-relative".to_string(),
+        "--no-ext-diff".to_string(),
+        "--no-textconv".to_string(),
+        "--submodule=short".to_string(),
+        "--ignore-submodules=none".to_string(),
         prior_snapshot_commit.to_string(),
         current_snapshot_commit.clone(),
         "--".to_string(),
@@ -15999,27 +16168,35 @@ fn generated_delta_evidence(
     changed_path_args.extend(
         snapshot_paths
             .iter()
-            .map(|path| format!(":(literal){path}")),
+            .map(|path| renderer.pathspec(path))
+            .collect::<Result<Vec<_>, _>>()?,
     );
-    let changed_paths_output = run_snapshot_git(
-        project_root,
-        &changed_path_args,
-        None,
-        None,
-        "delta_evidence_changed_paths",
-    )?;
+    // Inventory and patch must use the same isolated attributes/configuration
+    // and submodule policy: omitted gitlinks would make recovery lossy.
+    let changed_paths_output = renderer
+        .command(project_root)?
+        .args(&changed_path_args)
+        .output()
+        .map_err(|error| format!("delta_evidence_changed_paths_failed source={error}"))?;
+    if !changed_paths_output.status.success() {
+        return Err(format!(
+            "delta_evidence_changed_paths_failed detail={}",
+            String::from_utf8_lossy(&changed_paths_output.stderr).trim()
+        ));
+    }
     let mut changed_paths = changed_paths_output
+        .stdout
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
         .map(|path| {
             std::str::from_utf8(path)
-                .map(str::to_string)
                 .map_err(|error| format!("delta_evidence_path_utf8_failed source={error}"))
+                .and_then(|path| renderer.project_path(path))
         })
         .collect::<Result<Vec<_>, _>>()?;
     changed_paths.sort();
     changed_paths.dedup();
-    let patch_size = fs::metadata(&patch_path)
+    let patch_size = fs::metadata(patch_path)
         .map_err(|error| format!("delta_evidence_metadata_failed source={error}"))?
         .len() as usize;
     let summary = format!(
@@ -16027,6 +16204,7 @@ fn generated_delta_evidence(
         changed_paths.len()
     );
     let mut normalized = json!({
+        "patch_rendering": "git-snapshot-v1",
         "prior_diff_hash": prior_diff_hash,
         "current_diff_hash": current_diff_hash,
         "changed_paths": changed_paths,
@@ -16035,35 +16213,12 @@ fn generated_delta_evidence(
         "current_snapshot_commit": current_snapshot_commit
     });
     if patch_size <= MAX_DELTA_INLINE_PATCH_BYTES {
-        let patch = fs::read_to_string(&patch_path)
+        let patch = fs::read_to_string(patch_path)
             .map_err(|error| format!("delta_evidence_read_failed source={error}"))?;
         normalized["inline_patch"] = json!(patch);
-        let _ = fs::remove_file(&patch_path);
+        let _ = fs::remove_file(patch_path);
     } else {
-        let digest = git_text(
-            project_root,
-            &[
-                "hash-object".to_string(),
-                patch_path.to_string_lossy().to_string(),
-            ],
-            None,
-            None,
-            "delta_evidence_digest",
-        )?;
-        if !valid_git_object_id(&digest) {
-            let _ = fs::remove_file(&patch_path);
-            return Err("delta_evidence_digest_invalid=true".to_string());
-        }
-        let content_addressed_path = evidence_dir.join(format!("{digest}.patch"));
-        match fs::hard_link(&patch_path, &content_addressed_path) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => {
-                let _ = fs::remove_file(&patch_path);
-                return Err(format!("delta_evidence_persist_failed source={error}"));
-            }
-        }
-        let _ = fs::remove_file(&patch_path);
+        let (content_addressed_path, digest) = candidate.publish(project_root, None)?;
         normalized["artifact_reference"] = json!(content_addressed_path);
         normalized["artifact_digest"] = json!(digest);
     }
@@ -16760,6 +16915,8 @@ struct ExpectedPlanSharedTestEvidence {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PendingDeltaRiskExpectation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bound_delta_evidence: Option<ReviewDeltaEvidenceFacts>,
     assignment_id: String,
     subagent_key: String,
     model_role: String,
@@ -16800,6 +16957,27 @@ impl PendingDeltaRiskExpectation {
     }
 }
 
+fn delta_supersession_submission(
+    pending: &PendingDeltaRiskExpectation,
+    input: &ReviewIterationSubmission,
+    prior_hash: &str,
+) -> bool {
+    !pending.expected_current_diff_hash.is_empty()
+        && !input.current_diff_hash.is_empty()
+        && input.current_diff_hash != pending.expected_current_diff_hash
+        && input.current_diff_hash != prior_hash
+        && input.lens_results.is_empty()
+        && input.caller_decisions.is_empty()
+        && input.current_changed_files.is_some()
+        && input
+            .current_shared_test_evidence
+            .as_ref()
+            .is_some_and(|evidence| {
+                evidence.diff_hash == input.current_diff_hash
+                    && evidence.id != pending.expected_shared_test_evidence.id
+            })
+}
+
 fn pending_delta_resubmission_matches(
     pending: &PendingDeltaRiskExpectation,
     current_diff_hash: &str,
@@ -16817,6 +16995,7 @@ fn pending_delta_resubmission_matches(
 impl From<ExpectedPlanRiskAssignment> for PendingDeltaRiskExpectation {
     fn from(expected: ExpectedPlanRiskAssignment) -> Self {
         Self {
+            bound_delta_evidence: None,
             assignment_id: expected.assignment_id,
             subagent_key: expected.subagent_key,
             model_role: expected.model_role,
@@ -26909,7 +27088,9 @@ mod tests {
         let required: Value = serde_json::from_str(
             required_response["result"]["content"][0]["text"]
                 .as_str()
-                .expect("delta scout text"),
+                .unwrap_or_else(|| {
+                    panic!("delta scout text missing from response: {required_response}")
+                }),
         )
         .expect("delta scout json");
         assert_eq!(
@@ -42599,6 +42780,7 @@ pre_filter = "project-pre"
             },
         };
         let empty = SubmitReviewIterationState {
+            pending_delta: None,
             material: None,
             revision: None,
             catalog: ReviewCatalogRetention::default(),
@@ -43876,5 +44058,151 @@ pre_filter = "project-pre"
             "rejected"
         );
         assert_eq!(outcome.resolved_blockers[0].remediation_path, "src/lib.rs");
+    }
+    #[test]
+    fn delta_artifact_rendering_uses_snapshot_attributes_not_worktree_attributes() {
+        let root = test_project_root("delta-pinned-attributes");
+        let paths = vec![".gitattributes".into(), "source.txt".into()];
+        let baseline = git_text(
+            &root,
+            &["rev-parse".into(), "HEAD".into()],
+            None,
+            None,
+            "fixture_baseline",
+        )
+        .unwrap();
+        fs::write(root.join(".gitattributes"), "source.txt -diff\n").unwrap();
+        fs::write(root.join("source.txt"), "old line\n").unwrap();
+        let prior = create_scope_snapshot_commit(&root, &baseline, &paths).unwrap();
+        fs::write(root.join("source.txt"), "new line\n").unwrap();
+        let current = create_scope_snapshot_commit(&root, &baseline, &paths).unwrap();
+        let (candidate, file) = delta_artifacts::Candidate::create(&root).unwrap();
+        write_delta_snapshot_patch(
+            &root,
+            &prior,
+            &current,
+            &paths,
+            Some("git-snapshot-v1"),
+            file,
+        )
+        .unwrap();
+        let bytes = fs::read(&candidate.path).unwrap();
+        assert!(
+            String::from_utf8_lossy(&bytes).contains("GIT binary patch"),
+            "pinned -diff attribute must control rendering"
+        );
+        drop(candidate);
+        fs::write(root.join(".gitattributes"), "source.txt diff\n").unwrap();
+        fs::write(root.join(".git/info/attributes"), "source.txt diff\n").unwrap();
+        let (candidate, file) = delta_artifacts::Candidate::create(&root).unwrap();
+        write_delta_snapshot_patch(
+            &root,
+            &prior,
+            &current,
+            &paths,
+            Some("git-snapshot-v1"),
+            file,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&candidate.path).unwrap(), bytes);
+    }
+    #[test]
+    fn delta_artifact_legacy_locator_rebuild_binds_snapshots_digest_and_literal_path() {
+        let root = test_project_root("legacy-delta-artifact-cache");
+        fs::write(root.join("source.txt"), "old line\n".repeat(20_000)).unwrap();
+        let baseline = git_text(
+            &root,
+            &["rev-parse".into(), "HEAD".into()],
+            None,
+            None,
+            "fixture_baseline",
+        )
+        .unwrap();
+        let prior = create_scope_snapshot_commit(&root, &baseline, &["source.txt".into()]).unwrap();
+        let scope:ReviewScopeFacts=serde_json::from_value(json!({"kind":"uncommitted","review_lifecycle":"unlanded","split_lineage":null,"base":baseline,"baseline_commit":baseline,"snapshot_commit":prior,"project_root":root,"changed_files":["source.txt"],"diff_hash":"old"})).unwrap();
+        fs::write(root.join("source.txt"), "new line\n".repeat(20_000)).unwrap();
+        let mut evidence =
+            generated_delta_evidence(&scope, "old", "new", &["source.txt".into()]).unwrap();
+        // Produce the exact unversioned pre-upgrade Git rendering, then load
+        // a serialized old assignment through the production recovery helper.
+        evidence.patch_rendering = None;
+        let (candidate, file) = delta_artifacts::Candidate::create(&root).unwrap();
+        write_delta_snapshot_patch(
+            &root,
+            &prior,
+            &evidence.current_snapshot_commit,
+            &evidence.changed_paths,
+            None,
+            file,
+        )
+        .unwrap();
+        let (legacy_artifact, legacy_digest) = candidate.publish(&root, None).unwrap();
+        drop(candidate);
+        evidence.artifact_reference = Some(legacy_artifact.to_str().unwrap().into());
+        evidence.artifact_digest = Some(legacy_digest);
+        let artifact = evidence.artifact_reference.as_ref().unwrap();
+        let bytes = fs::read(artifact).unwrap();
+        let digest = evidence.artifact_digest.as_ref().unwrap();
+        let mut legacy = serde_json::to_value(&evidence).unwrap();
+        legacy["artifact_reference"] = json!(format!(
+            "/tmp/development-discipline-delta-evidence/{digest}.patch"
+        ));
+        let mut assignment = json!({"assignment_id":"unchanged-assignment-id","subagent_key":"unchanged-key","delta_evidence":legacy,"prompt":json!({"current_review":{"delta_evidence":legacy}}).to_string()});
+        fs::remove_file(artifact).unwrap();
+        fs::write(root.join("source.txt"), "later worktree state\n").unwrap();
+        delta_artifacts::recover_assignment(&root, &mut assignment).unwrap();
+        assert_eq!(assignment["assignment_id"], "unchanged-assignment-id");
+        assert_eq!(fs::read(artifact).unwrap(), bytes);
+        let prompt: Value = serde_json::from_str(assignment["prompt"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            prompt["current_review"]["delta_evidence"],
+            assignment["delta_evidence"]
+        );
+        // The replay scratch form is also accepted without following that path.
+        fs::remove_file(artifact).unwrap();
+        assignment["delta_evidence"]["artifact_reference"] = json!(format!("/tmp/development-review-replay-12345-0/development-discipline-delta-evidence/{digest}.patch"));
+        delta_artifacts::recover_assignment(&root, &mut assignment).unwrap();
+        assert_eq!(fs::read(artifact).unwrap(), bytes);
+        let mut aliased = assignment.clone();
+        aliased["delta_evidence"]["artifact_reference"] = json!(format!(
+            "{}/./{digest}.patch",
+            Path::new(artifact).parent().unwrap().display()
+        ));
+        assert!(delta_artifacts::recover_assignment(&root, &mut aliased)
+            .unwrap_err()
+            .contains("reference_alias"));
+        fs::remove_file(artifact).unwrap();
+        let mut tampered = assignment.clone();
+        tampered["delta_evidence"]["current_snapshot_commit"] = json!(prior);
+        assert!(delta_artifacts::recover_assignment(&root, &mut tampered)
+            .unwrap_err()
+            .contains("snapshot_digest_mismatch"));
+        assert!(
+            !Path::new(artifact).exists(),
+            "mismatched snapshots never publish evidence"
+        );
+        delta_artifacts::recover_assignment(&root, &mut assignment).unwrap();
+        assert_eq!(fs::read(artifact).unwrap(), bytes);
+        git_text(
+            &root,
+            &["config".into(), "diff.noprefix".into(), "true".into()],
+            None,
+            None,
+            "legacy_config_change",
+        )
+        .unwrap();
+        delta_artifacts::recover_assignment(&root, &mut assignment).unwrap();
+        assert_eq!(
+            fs::read(artifact).unwrap(),
+            bytes,
+            "intact legacy evidence is reusable without historical rendering settings"
+        );
+        fs::remove_file(artifact).unwrap();
+        let error = delta_artifacts::recover_assignment(&root, &mut assignment).unwrap_err();
+        assert!(error.contains("legacy_rendering_unavailable"), "{error}");
+        assert!(
+            !Path::new(artifact).exists(),
+            "unreproducible legacy bytes are never fabricated"
+        );
     }
 }

@@ -510,6 +510,14 @@ policy.
    never reconstruct assignment keys, roles, or schemas from memory. The
    summary is read-only and stable. Pass one exact `subagent_key` back to the
    same tool only when its full prompt and result schema are needed.
+   Inspect the returned delta artifact and bound digest before dispatch. Missing
+   cached evidence is recovered from recorded snapshots by that tool. A legacy
+   rendering hold requires its supported recovery; never replace the recorded
+   digest or rebuild evidence from current source. If source changes again while a delta scout
+   is pending, use the supported changed-scope advance described in the protocol:
+   true new hash, full inventory, fresh bound test evidence, empty lens results,
+   and no assessment or caller decision. Close the superseded scout and review
+   the fresh assignment; this grants no clean credit or lens waiver.
    `final_review.plan` rejects any call that omits
    the bound scout assessment, baseline, or shared evidence.
 

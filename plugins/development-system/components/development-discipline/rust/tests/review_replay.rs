@@ -883,3 +883,454 @@ fn native_pruning_persists_retained_window_coverage_across_restart() {
         );
     }
 }
+
+#[test]
+fn delta_artifact_native_subdirectory_preserves_project_scope_and_recovers() {
+    let fixture = Fixture::new();
+    let project = fixture.root.join(" package with spaces [literal]");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(
+        project.join("source.txt"),
+        "old project line\n".repeat(20_000),
+    )
+    .unwrap();
+    let native = |name: &str, arguments: &Value| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_development-discipline-mcp"));
+        fixture.configure(&mut command);
+        command
+            .current_dir(&project)
+            .env("DEVELOPMENT_SYSTEM_SERVICE", "plugin-advisory");
+        payload(run(
+            command,
+            &json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":arguments}}),
+        ))
+    };
+    let mut args = json!({"session_id":"native-subdirectory", "baseline_commit":fixture.baseline,
+        "scope":"uncommitted", "project_root":project, "changed_files":["source.txt"],
+        "diff_hash":"before", "shared_test_evidence":{"id":"before-tests", "diff_hash":"before", "status":"passed", "summary":"fixture tests", "commands":["fixture:before"]}});
+    let assessed = native("final_review.assess_risk", &args);
+    let risk = &assessed["assignments"][0];
+    let dimensions = risk["review_dimensions"].as_array().unwrap().iter().enumerate().map(|(index,lens)| json!({"lens":lens,"risk":if index==0 {"low"} else {"none"},"evidence":"Bounded subdirectory fixture.","plausible_failure":if index==0 {"Evidence omits source"} else {"none"},"material_impact":if index==0 {"Review receives incomplete evidence"} else {"none"},"uncertain":false})).collect::<Vec<_>>();
+    args["risk_assessment"] = json!({"assignment_id":risk["assignment_id"],"subagent_key":risk["subagent_key"],"shared_test_evidence_id":risk["shared_test_evidence"]["id"],"overall_risk":"low","dimensions":dimensions,"exceptional_triggers":[],"split_required":false,"plan_assumptions":[],"findings":[],"caller_attestation":{"model_role":risk["model_role"],"fresh_context":true,"closed_after_result":true}});
+    let planned = native("final_review.plan", &args);
+    std::fs::write(
+        project.join("source.txt"),
+        "new project line\n".repeat(20_000),
+    )
+    .unwrap();
+    std::fs::write(
+        fixture.root.join("source.txt"),
+        "UNRELATED ROOT CONTENT MUST STAY OUT\n",
+    )
+    .unwrap();
+    let pending = native(
+        "final_review.advance",
+        &json!({"state_ref":planned["state_ref"],"lens_results":[],"current_diff_hash":"subdirectory-delta","current_changed_files":["source.txt"],"current_shared_test_evidence":{"id":"subdirectory-tests","diff_hash":"subdirectory-delta","status":"passed","summary":"fixture tests","commands":["fixture:subdirectory"]}}),
+    );
+    let assignment = &pending["delta_risk_assignments"][0];
+    assert_eq!(
+        assignment["delta_evidence"]["changed_paths"],
+        json!(["source.txt"]),
+        "native subdirectory evidence must not silently omit the actual project delta"
+    );
+    let artifact = assignment["delta_evidence"]["artifact_reference"]
+        .as_str()
+        .unwrap();
+    let bytes = std::fs::read(artifact).unwrap();
+    let patch = String::from_utf8_lossy(&bytes);
+    assert!(patch.contains(" package with spaces [literal]/source.txt"));
+    assert!(patch.contains("-old project line"));
+    assert!(patch.contains("+new project line"));
+    assert!(!patch.contains("UNRELATED ROOT CONTENT"));
+    std::fs::remove_file(artifact).unwrap();
+    std::fs::write(project.join("source.txt"), "newer worktree content\n").unwrap();
+    std::fs::write(project.join(".gitattributes"), "source.txt -diff\n").unwrap();
+    std::fs::write(fixture.common().join("info/attributes"), "* -diff\n").unwrap();
+    let recovered = native(
+        "final_review.pending_assignments",
+        &json!({"state_ref":pending["state_ref"],"subagent_key":assignment["subagent_key"]}),
+    );
+    assert_eq!(recovered["assignment"], *assignment);
+    assert_eq!(std::fs::read(artifact).unwrap(), bytes);
+}
+
+#[test]
+fn delta_artifact_recovers_gitlink_ignored_by_source_configuration() {
+    let mut fixture = Fixture::new();
+    let dependency = fixture.root.join("dependency");
+    std::fs::create_dir(&dependency).unwrap();
+    git(&dependency, &["init", "--quiet"]);
+    git(&dependency, &["config", "user.name", "Replay Fixture"]);
+    git(
+        &dependency,
+        &["config", "user.email", "replay@example.invalid"],
+    );
+    git(&dependency, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(dependency.join("lib.txt"), "old dependency\n").unwrap();
+    git(&dependency, &["add", "lib.txt"]);
+    git(&dependency, &["commit", "--quiet", "-m", "old dependency"]);
+    let old_commit = git(&dependency, &["rev-parse", "HEAD"]);
+    git(
+        &fixture.root,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("160000,{old_commit},dependency"),
+        ],
+    );
+    git(
+        &fixture.root,
+        &["commit", "--quiet", "-m", "include gitlink"],
+    );
+    fixture.baseline = git(&fixture.root, &["rev-parse", "HEAD"]);
+    git(&fixture.root, &["config", "diff.ignoreSubmodules", "all"]);
+    std::fs::write(fixture.root.join("source.txt"), "old line\n".repeat(20_000)).unwrap();
+    let planned = fixture.call("final_review.plan", &fixture.plan_args());
+    std::fs::write(dependency.join("lib.txt"), "new dependency\n").unwrap();
+    git(&dependency, &["add", "lib.txt"]);
+    git(&dependency, &["commit", "--quiet", "-m", "new dependency"]);
+    let new_commit = git(&dependency, &["rev-parse", "HEAD"]);
+    std::fs::write(fixture.root.join("source.txt"), "new line\n".repeat(20_000)).unwrap();
+    let pending = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"lens_results":[],"current_diff_hash":"gitlink-delta", "current_changed_files":["source.txt","dependency"],"current_shared_test_evidence":{"id":"gitlink-tests","diff_hash":"gitlink-delta","status":"passed","summary":"fixture tests","commands":["fixture:gitlink"]}}));
+    let assignment = &pending["delta_risk_assignments"][0];
+    let artifact = assignment["delta_evidence"]["artifact_reference"]
+        .as_str()
+        .unwrap();
+    let bytes = std::fs::read(artifact).unwrap();
+    let patch = String::from_utf8_lossy(&bytes);
+    assert!(patch.contains(&format!("-Subproject commit {old_commit}")));
+    assert!(patch.contains(&format!("+Subproject commit {new_commit}")));
+    std::fs::remove_file(artifact).unwrap();
+    let rebuilt = fixture.call(
+        "final_review.pending_assignments",
+        &json!({"state_ref":pending["state_ref"],"subagent_key":assignment["subagent_key"]}),
+    );
+    assert_eq!(rebuilt["assignment"], *assignment);
+    assert_eq!(std::fs::read(artifact).unwrap(), bytes);
+    assert_eq!(
+        assignment["delta_evidence"]["changed_paths"],
+        json!(["dependency", "source.txt"])
+    );
+}
+
+#[test]
+fn delta_artifact_intact_cache_survives_git_presentation_changes() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.root.join("source.txt"), "old line\n".repeat(20_000)).unwrap();
+    let planned = fixture.call("final_review.plan", &fixture.plan_args());
+    std::fs::write(fixture.root.join("source.txt"), "new line\n".repeat(20_000)).unwrap();
+    let pending = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"lens_results":[],"current_diff_hash":"render-delta", "current_changed_files":["source.txt"],"current_shared_test_evidence":{"id":"render-tests","diff_hash":"render-delta","status":"passed","summary":"fixture tests","commands":["fixture:render"]}}));
+    let assignment = &pending["delta_risk_assignments"][0];
+    let artifact = assignment["delta_evidence"]["artifact_reference"]
+        .as_str()
+        .unwrap();
+    let bytes = std::fs::read(artifact).unwrap();
+    git(&fixture.root, &["config", "diff.noprefix", "true"]);
+    git(&fixture.root, &["config", "diff.context", "19"]);
+    let retrieved = fixture.call(
+        "final_review.pending_assignments",
+        &json!({"state_ref":pending["state_ref"],"subagent_key":assignment["subagent_key"]}),
+    );
+    assert_eq!(retrieved["assignment"], *assignment);
+    assert_eq!(std::fs::read(artifact).unwrap(), bytes);
+    // Missing cache must rebuild from pinned inputs, not current worktree
+    // attributes, local custom drivers, or changed presentation configuration.
+    std::fs::remove_file(artifact).unwrap();
+    std::fs::write(fixture.root.join(".gitattributes"), "source.txt -diff\n").unwrap();
+    std::fs::write(
+        fixture.common().join("info/attributes"),
+        "source.txt -diff\n",
+    )
+    .unwrap();
+    git(&fixture.root, &["config", "diff.algorithm", "histogram"]);
+    git(&fixture.root, &["config", "diff.mnemonicPrefix", "true"]);
+    git(&fixture.root, &["config", "diff.sourcePrefix", "before/"]);
+    git(&fixture.root, &["config", "diff.dstPrefix", "after/"]);
+    let rebuilt = fixture.call(
+        "final_review.pending_assignments",
+        &json!({"state_ref":pending["state_ref"],"subagent_key":assignment["subagent_key"]}),
+    );
+    assert_eq!(rebuilt["assignment"], *assignment);
+    assert_eq!(std::fs::read(artifact).unwrap(), bytes);
+    assert_eq!(
+        assignment["delta_evidence"]["patch_rendering"],
+        "git-snapshot-v1"
+    );
+}
+
+#[test]
+fn delta_artifact_survives_one_operation_replay_and_recovers_from_recorded_snapshots() {
+    let fixture = Fixture::new();
+    std::fs::write(fixture.root.join("source.txt"), "old line\n".repeat(20_000)).unwrap();
+    let planned = fixture.call("final_review.plan", &fixture.plan_args());
+    std::fs::write(fixture.root.join("source.txt"), "new line\n".repeat(20_000)).unwrap();
+    let arguments = json!({"state_ref":planned["state_ref"],"lens_results":[],"current_diff_hash":"large-delta", "current_changed_files":["source.txt"],"current_shared_test_evidence":{"id":"large-delta-tests","diff_hash":"large-delta","status":"passed","summary":"fixture tests","commands":["fixture:delta"]}});
+    let pending = fixture.call("final_review.advance", &arguments);
+    let assignment = &pending["delta_risk_assignments"][0];
+    let evidence = &assignment["delta_evidence"];
+    let artifact = std::path::PathBuf::from(evidence["artifact_reference"].as_str().unwrap());
+    assert!(
+        artifact.is_file(),
+        "successful replay returned deleted artifact: {}",
+        artifact.display()
+    );
+    assert!(
+        artifact.starts_with(&fixture.state),
+        "artifact must be in durable per-project state"
+    );
+    let bytes = std::fs::read(&artifact).unwrap();
+    let digest = git(&fixture.root, &["hash-object", artifact.to_str().unwrap()]);
+    assert_eq!(digest, evidence["artifact_digest"].as_str().unwrap());
+    let reference = pending["state_ref"].clone();
+    let retrieve = json!({"state_ref":reference,"subagent_key":assignment["subagent_key"]});
+    let restarted = fixture.call("final_review.pending_assignments", &retrieve);
+    assert_eq!(restarted["assignment"], *assignment);
+    let authority_before = fixture.authority();
+    let mut unchanged_source = arguments.clone();
+    unchanged_source["state_ref"] = reference.clone();
+    unchanged_source["current_diff_hash"] = json!("caller-only-change");
+    unchanged_source["current_shared_test_evidence"]["diff_hash"] = json!("caller-only-change");
+    unchanged_source["current_shared_test_evidence"]["id"] = json!("caller-only-evidence");
+    assert!(
+        !fixture
+            .run("final_review.advance", &unchanged_source)
+            .status
+            .success(),
+        "caller hash changes cannot supersede unchanged captured source"
+    );
+    assert_eq!(fixture.authority(), authority_before);
+    // A later working-tree edit cannot alter or replace the pending assignment.
+    std::fs::write(
+        fixture.root.join("source.txt"),
+        "third unrelated working state\n",
+    )
+    .unwrap();
+    let mut stale_resolution = arguments.clone();
+    stale_resolution["state_ref"] = reference.clone();
+    let dimensions=assignment["review_dimensions"].as_array().unwrap().iter().enumerate().map(|(index,lens)|json!({"lens":lens,"risk":if index==0 {"low"} else {"none"},"evidence":"Inspected the original pinned snapshots.","plausible_failure":if index==0 {"The source can alter the result."} else {"none"},"material_impact":if index==0 {"The result can be incorrect."} else {"none"},"uncertain":false,"affected":index==0})).collect::<Vec<_>>();
+    stale_resolution["delta_risk_assessment"] = json!({"assignment_id":assignment["assignment_id"],"subagent_key":assignment["subagent_key"],"shared_test_evidence_id":assignment["shared_test_evidence"]["id"],"prior_diff_hash":assignment["prior_diff_hash"],"current_diff_hash":assignment["current_diff_hash"],"overall_risk":"low","dimensions":dimensions,"exceptional_triggers":[],"split_required":false,"plan_assumptions":[],"findings":[],"caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true}});
+    let stale = fixture.run("final_review.advance", &stale_resolution);
+    assert!(
+        !stale.status.success(),
+        "old assessment must not authorize newly changed source"
+    );
+
+    std::fs::remove_file(&artifact).unwrap();
+    let rebuilt = fixture.call("final_review.pending_assignments", &retrieve);
+    assert_eq!(rebuilt["assignment"], *assignment);
+    assert_eq!(std::fs::read(&artifact).unwrap(), bytes);
+    let resumed = fixture.call(
+        "final_review.resume_latest",
+        &json!({"project_root":fixture.root,"session_id":"replay-persistence"}),
+    );
+    assert_eq!(resumed["state_ref"], reference);
+    assert_eq!(std::fs::read(&artifact).unwrap(), bytes);
+    // Concurrent recovery converges without replacing another complete artifact.
+    std::fs::remove_file(&artifact).unwrap();
+    std::thread::scope(|scope| {
+        let calls = (0..4)
+            .map(|_| scope.spawn(|| fixture.call("final_review.pending_assignments", &retrieve)))
+            .collect::<Vec<_>>();
+        for call in calls {
+            assert_eq!(call.join().unwrap()["assignment"], *assignment);
+        }
+    });
+    assert_eq!(std::fs::read(&artifact).unwrap(), bytes);
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&artifact, std::fs::Permissions::from_mode(0o600)).unwrap();
+    std::fs::write(&artifact, b"tampered cached evidence").unwrap();
+    let tampered = fixture.run("final_review.pending_assignments", &retrieve);
+    assert!(!tampered.status.success());
+    assert!(
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&tampered.stderr),
+            String::from_utf8_lossy(&tampered.stdout)
+        )
+        .contains("existing_digest_mismatch"),
+        "{}{}",
+        String::from_utf8_lossy(&tampered.stderr),
+        String::from_utf8_lossy(&tampered.stdout)
+    );
+    assert_eq!(
+        std::fs::read(&artifact).unwrap(),
+        b"tampered cached evidence"
+    );
+    std::fs::remove_file(&artifact).unwrap();
+    let unrelated = fixture.directory.path().join("unrelated.patch");
+    std::fs::write(&unrelated, &bytes).unwrap();
+    std::os::unix::fs::symlink(&unrelated, &artifact).unwrap();
+    assert!(!fixture
+        .run("final_review.pending_assignments", &retrieve)
+        .status
+        .success());
+    assert_eq!(std::fs::read(&unrelated).unwrap(), bytes);
+    std::fs::remove_file(&artifact).unwrap();
+    assert!(Command::new("mkfifo")
+        .arg(&artifact)
+        .status()
+        .unwrap()
+        .success());
+    let mut bounded = Command::new("timeout");
+    bounded.args([
+        "2s",
+        env!("CARGO_BIN_EXE_development-discipline-mcp"),
+        "--replay-review-operation",
+        fixture.root.to_str().unwrap(),
+        "final_review.pending_assignments",
+    ]);
+    fixture.configure(&mut bounded);
+    let fifo = run(bounded, &retrieve);
+    assert_ne!(
+        fifo.status.code(),
+        Some(124),
+        "FIFO cache tamper must fail immediately rather than block reading"
+    );
+    assert!(!fifo.status.success());
+    std::fs::remove_file(&artifact).unwrap();
+    std::fs::create_dir(&artifact).unwrap();
+    assert!(!fixture
+        .run("final_review.pending_assignments", &retrieve)
+        .status
+        .success());
+    std::fs::remove_dir(&artifact).unwrap();
+    std::os::unix::fs::symlink(fixture.directory.path().join("missing-evidence"), &artifact)
+        .unwrap();
+    assert!(!fixture
+        .run("final_review.pending_assignments", &retrieve)
+        .status
+        .success());
+    std::fs::remove_file(&artifact).unwrap();
+    std::fs::hard_link(&unrelated, &artifact).unwrap();
+    assert!(!fixture
+        .run("final_review.pending_assignments", &retrieve)
+        .status
+        .success());
+    std::fs::remove_file(&artifact).unwrap();
+    let repaired = fixture.call("final_review.pending_assignments", &retrieve);
+    assert_eq!(repaired["assignment"], *assignment);
+    // A genuinely new scope requests a fresh bound scout, without claiming the
+    // pending old scope matches current source or inventing an assessment.
+    let mut superseding = arguments.clone();
+    superseding["state_ref"] = reference;
+    superseding["current_diff_hash"] = json!("third-scope");
+    superseding["current_shared_test_evidence"]["diff_hash"] = json!("third-scope");
+    superseding["current_shared_test_evidence"]["id"] = json!("third-tests");
+    let replacement = fixture.call("final_review.advance", &superseding);
+    assert_eq!(
+        replacement["transition_status"],
+        "delta_risk_assessment_required"
+    );
+    assert_ne!(
+        replacement["delta_risk_assignments"][0]["assignment_id"],
+        assignment["assignment_id"]
+    );
+    assert_eq!(
+        replacement["state"]["clean_streak"],
+        planned["state"]["clean_streak"]
+    );
+    assert_eq!(
+        std::fs::read(&artifact).unwrap(),
+        bytes,
+        "old immutable evidence survives supersession"
+    );
+    assert!(replacement["subagent_shutdown"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["subagent_key"] == assignment["subagent_key"]));
+    let latest=fixture.call("final_review.pending_assignments",&json!({"state_ref":replacement["state_ref"],"subagent_key":replacement["delta_risk_assignments"][0]["subagent_key"]}));
+    assert_eq!(
+        latest["assignment"],
+        replacement["delta_risk_assignments"][0]
+    );
+    let authority_after = fixture.authority();
+    stale_resolution["state_ref"] = replacement["state_ref"].clone();
+    assert!(
+        !fixture
+            .run("final_review.advance", &stale_resolution)
+            .status
+            .success(),
+        "superseded scout results remain invalid"
+    );
+    assert_eq!(fixture.authority(), authority_after);
+}
+
+#[test]
+fn delta_artifact_interrupted_generation_retries_without_publishing_partial_bytes() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    std::fs::write(fixture.root.join("source.txt"), "old line\n".repeat(20_000)).unwrap();
+    let planned = fixture.call("final_review.plan", &fixture.plan_args());
+    std::fs::write(fixture.root.join("source.txt"), "new line\n".repeat(20_000)).unwrap();
+    let arguments = json!({"state_ref":planned["state_ref"],"lens_results":[],"current_diff_hash":"large-delta", "current_changed_files":["source.txt"],"current_shared_test_evidence":{"id":"large-delta-tests","diff_hash":"large-delta","status":"passed","summary":"fixture tests","commands":["fixture:delta"]}});
+    let bin = fixture.directory.path().join("paused-bin");
+    std::fs::create_dir(&bin).unwrap();
+    let git_location = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real_git = String::from_utf8(git_location.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let wrapper = bin.join("git");
+    std::fs::write(&wrapper,format!("#!/usr/bin/env python3\nimport os,sys,time\nif '--binary' in sys.argv:\n sys.stdout.write('partial interrupted patch');sys.stdout.flush();time.sleep(60)\nos.execv({real_git:?},[{real_git:?}]+sys.argv[1:])\n")).unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let cache_parent = fixture
+        .state
+        .join("development-discipline/final-review-delta-evidence");
+    let cache = std::fs::read_dir(&cache_parent)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let candidate = cache.join(".candidate.patch");
+    let mut command = fixture.command("final_review.advance");
+    command.env(
+        "PATH",
+        format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+    );
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(arguments.to_string().as_bytes())
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut partial_bytes_observed = false;
+    while std::time::Instant::now() < deadline {
+        if std::fs::metadata(&candidate).is_ok_and(|metadata| metadata.len() > 0) {
+            partial_bytes_observed = true;
+            break;
+        }
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // Reap even when readiness fails: an assertion must not leak the sleeping
+    // renderer or its namespace. The test still requires actual partial bytes.
+    let interrupted = child.kill();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        partial_bytes_observed,
+        "partial patch was not observed before interruption: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    interrupted.expect("interrupt the live partial-patch renderer");
+    let resumed = fixture.call("final_review.advance", &arguments);
+    let artifact = resumed["delta_risk_assignments"][0]["delta_evidence"]["artifact_reference"]
+        .as_str()
+        .unwrap();
+    let bytes = std::fs::read(artifact).unwrap();
+    assert!(!bytes.starts_with(b"partial interrupted"));
+    assert_eq!(
+        git(&fixture.root, &["hash-object", artifact]),
+        resumed["delta_risk_assignments"][0]["delta_evidence"]["artifact_digest"]
+    );
+    assert!(!candidate.exists());
+}

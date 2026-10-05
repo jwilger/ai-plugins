@@ -166,6 +166,7 @@ fn completed_ship_replay_retains_valid_contract_material() {
         },
     };
     let mut folded = Modeled::from_built(SubmitReviewIterationState {
+        pending_delta: None,
         material: None,
         revision: None,
         catalog: ReviewCatalogRetention::default(),

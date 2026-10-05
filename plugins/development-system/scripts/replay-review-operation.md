@@ -20,7 +20,27 @@ and isolates the IP network. The writable set is fixed:
   `plugin-advisory-final-review` directories.
 - The exact repository/work-item report directory and repository snapshot
   object directory under the existing XDG state root.
+- The exact canonical repository’s immutable delta-evidence cache directory
+  under that XDG state root. Other repositories’ caches remain read-only.
 - One private temporary scratch directory.
+
+Large delta patches live in the project cache, outside temporary replay scratch.
+They are derived from the recorded prior/current Git snapshots, published under
+their Git blob digest, and retained across process exits. Pending-assignment
+retrieval verifies the digest and can rebuild missing evidence from those same
+snapshots. It preserves the assignment identity; it never substitutes current
+working-tree content for the recorded evidence. An intact digest-matching cache
+file is reused even if Git presentation settings changed. New artifacts record
+a deterministic rendering version, with configuration isolated and attributes
+bound to the recorded snapshot. Historical ordinary `/tmp` and replay-scratch
+locators are relocated without following the old path or changing review credit.
+A missing unversioned historical artifact still requires an exact recorded
+digest: if its old custom rendering cannot be reproduced, recovery returns an
+actionable hold rather than inventing equivalent evidence.
+Tampered or aliased cache files fail with an actionable diagnostic.
+Published digest artifacts are retained. One unpublished staging file is cleaned
+after interruption while holding the project lock; recovery never deletes active
+evidence as a cache-size shortcut.
 
 SQLite requires a per-binding report directory to create and remove WAL files.
 Existing flat projections rebuild from authoritative Git events. A genuine old
