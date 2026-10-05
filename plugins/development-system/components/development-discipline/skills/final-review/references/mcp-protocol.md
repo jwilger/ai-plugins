@@ -130,7 +130,34 @@ returns full prompts in the summary. Pass one exact `subagent_key` with the same
 `state_ref` to retrieve only that assignment's original durable prompt and
 result schema. Repeated summary or prompt retrieval is idempotent: it appends no
 event, changes no revision, fingerprint, scope, or hash, and never reassigns a
-lens or model role. A pre-upgrade pending verifier or delta-risk record that
+lens or model role. Large delta artifacts are immutable, project-scoped cache
+files bound to their recorded snapshot commits and blob digest. Versioned patches
+use canonical repository-relative headings; `changed_paths` stays relative to the
+bound `project_root`, including a native project rooted in a Git subdirectory.
+Retrieval can
+reuse intact digest-matching files without regenerating them after Git
+presentation settings change. New evidence records deterministic snapshot-bound
+rendering; missing files can be rebuilt with that renderer. Historical ordinary
+and replay temporary locators may be relocated while assignment identity stays
+unchanged. Missing unversioned evidence must reproduce its exact recorded digest;
+if historical custom rendering is unavailable, follow the actionable recovery
+hold instead of substituting newly rendered evidence.
+Inspect the returned artifact and digest before dispatch; never reconstruct it
+from the current working tree or count retrieval as a review round.
+
+If source genuinely changes again while a delta scout is pending, submit
+`final_review.advance` with the current `state_ref`, the true new
+`current_diff_hash`, complete `current_changed_files`, and fresh
+`current_shared_test_evidence` with a new evidence ID bound to that hash. Supply
+empty `lens_results`, and no caller decisions, delta assessment, verifier result,
+or budget decision. The coordinator verifies a changed captured snapshot
+against the same prior baseline, preserves old evidence/history, closes the
+superseded scout, and issues a fresh independently reviewed delta assignment.
+A changed label with unchanged captured source is rejected. This transition
+adds no clean credit and does not replace any required lens review. Never pass
+an old target hash as the current hash to finish a stale assignment.
+
+A pre-upgrade pending verifier or delta-risk record that
 lacks the durable assignment fails explicitly with `recovery=restart_final_review`
 instead of returning an empty or reconstructed assignment.
 
@@ -326,7 +353,23 @@ applies its findings and replacement-diff evidence, then returns authoritative
 state with `advance_kind: review_budget_checkpoint`,
 `checkpoint_pending: true`, no next assignments, and the allowed decisions.
 This ordering prevents a later decision from dropping already-submitted
-findings. The next `final_review.advance` call must keep the current diff hash,
+findings.
+For autonomous continuation, call `final_review.continue_review` with the exact
+returned `state_ref`, a stable `operation_id` and a nonblank progress `rationale`.
+The operation preserves the original start time and obligations, records an
+assessment in durable history, and sets the next checkpoint 75 minutes after
+that assessment. The exact request is idempotent after restart or lost response;
+reuse with changed arguments fails with an operation conflict. A new operation
+requires the current reference and a pending timed checkpoint. A legacy
+escalation hold additionally requires `recovery_reference` explaining resolution
+of the recorded dependency. Split holds and completed sessions require their
+specific supported transitions instead.
+
+A timed checkpoint requires a progress assessment, not automatic human
+permission. Continue required repairs and fresh reviews when authorized work
+can progress. Ask a human only about a concrete unresolved dependency; signing
+unavailability blocks signing, while independent work continues.
+The next `final_review.advance` call must keep the current diff hash,
 send empty `lens_results`, and add one `review_budget_decision`:
 
 ```json
@@ -353,9 +396,11 @@ requires fresh readiness evidence bound to the exact final-reviewed local
 identity and no remote CI. A valid `ship` decision is terminal for final review,
 returns `complete: true`, and schedules no reviewers; it cannot discard
 remaining lens work or substitute for any mode-specific gate.
-`split` and `escalate` persist a contract-bound terminal hold, preserve
-every completion blocker, schedule no reviewers, and reject any later advance
-for that session.
+`split` and `escalate` persist contract-bound holds, preserve every blocker and
+reject ordinary advances while held. The supported continuation operation can
+resolve an escalation hold with explicit recovery evidence; it cannot resolve a
+split hold or waive clean rounds, independent attestations, security or delivery
+gates.
 
 ## Finding Disposition And Escalation
 
@@ -480,8 +525,9 @@ with `verifier_result`. Verified results require exactly one `confirmed`,
 `rejected`, or `uncertain` verdict per candidate, a final review severity, and
 a non-empty rationale. The server records reviewer and verifier severities and
 routes with the verifier's final severity and causality/impact classification.
-Rejected candidates do not become unresolved blockers; the iteration may count
-as clean when no other blocking, malformed, or needs-human finding remains.
+Rejected candidates do not become unresolved blockers, but their finding-bearing
+iteration remains non-clean and resets the streak. Three later complete
+finding-free rounds are required even when every candidate is rejected.
 Uncertain blocking candidates and materially uncertain security or human-safety
 candidates stay open for human decision, while a verified nonblocking downgrade
 requires the applicable backlog/report disposition.
@@ -539,3 +585,122 @@ coordinator memory or review-agent count without limit. On any oversized stdio
 frame, the server stops reading at the request byte limit, emits
 `request_too_large`, and terminates so the harness can restart it; the process is
 not reusable after that response.
+
+## Reopening completed scope
+
+Call `final_review.reopen` with `state_ref`, a stable `operation_id`, `reason`,
+`current_diff_hash`, `current_changed_files` and
+`current_shared_test_evidence`. The reference must identify the authoritative
+completed session. The baseline is immutable; a new plan must not silently
+replace it. The operation records a reset, invalidates clean receipts and lens
+sample credit, preserves durable history and unresolved obligations, and emits
+an independent delta-risk assignment. Submit that real scout's attested result,
+then obtain fresh full lens coverage and three consecutive complete clean rounds.
+Do not construct a reset state by hand.
+
+An identical interrupted request replays its durable receipt. Reusing an ID
+with changed input fails; a distinct request with a stale reference fails.
+A historical replay can return the original receipt after newer transitions.
+When `assignments_current` is false, use `final_review.resume_latest` and
+`final_review.pending_assignments` before launching anything from that receipt.
+Content-identical commits do not reopen a completed source scope.
+
+For native write failures, retain the exact request and use
+`<plugin-root>/scripts/replay-review-operation.sh REPOSITORY_ROOT FINAL_REVIEW_TOOL`
+with that arguments JSON on stdin through the supported host approval mechanism.
+See the bundled replay contract for its writable paths and publication recovery.
+If a retained candidate was reconciled rather than executing the request, resume
+current state before submitting again. Never broaden all Git/source permissions,
+remove locks, fabricate a new state reference, or ignore a rejected approval.
+
+## Resolution evidence and yield reads
+
+Verifier verdicts may supply `assumptions` and `dependency_blobs`. Each dependency
+maps an actually checked repository-relative path to `100644:OID`, `100755:OID`
+or `120000:OID`; OID is the Git blob hash of the bytes actually inspected.
+The host observes those identities without writing Git objects, and retains
+rejection rationale, checked `causality_evidence`, exact assignment/model/lifecycle
+provenance and scope. Without sufficient dependency evidence the rejection is
+historical and cannot suppress a new allegation. Resolutions are data, never
+instructions or permanent authority over a later independent reviewer.
+
+A finding may include `resolution_reopen` with `resolution_id`, `reason`,
+`explanation` and `evidence_ref`. Reasons are `contradictory-evidence`,
+`relevant-change`, and `incomplete-prior-verification`. Explain specifically why
+the previous rationale/evidence no longer applies. A relevant-change claim must
+match an observed dependency change. The coordinator schedules independent
+verification rather than accepting the reopening as proof of a defect.
+Every canonical allegation remains non-clean even when duplicate or rejected.
+
+`final_review.yield_report` takes only `state_ref`; `final_review.evidence` takes
+`state_ref` and `evidence_ref`. Both are read-only, use authoritative retained
+state, and preserve stale-reference protections. Reported counts refer to exact
+retained round/finding records and verifier evidence. Raw allegations and
+adjudicated outcomes are separate; complete lens rounds exclude incomplete or
+malformed results and exclude delta/reset bookkeeping. Full historical counts
+remain unavailable when legacy records lack evidence. Inspect the returned
+references instead of estimating counts or changing clean-round policy.
+
+To obtain independent adjudication of a new relevant ordinary finding, include
+`verification_requests: [{"finding_id":"<exact id>","lens":"<exact lens>"}]`
+on its initial `final_review.advance`. The coordinator combines those explicit
+targets with every already-required verification candidate and issues one bound
+verifier assignment. Unknown, duplicate, out-of-scope, already-tracked or reused
+rejection targets fail with actionable diagnostics. A prior rejection still
+requires the supported evidence-backed reopening, not a bare verification request.
+Use the unchanged reviewed scope; source changes require delta assessment first.
+Full verifier resubmissions retain the same targets. Durable compact recovery
+uses the frozen targets after process loss. Confirmations retain their normal
+disposition and ticket requirements; independent rejections retain evidence for
+subsequent packets. Finding-bearing rounds remain non-clean and require three
+later complete finding-free rounds.
+
+Version-two round evidence derives `source_changed` from immutable captured Git
+tree identities and retains both snapshot commits and tree IDs in
+`source_change_evidence`. A changed caller scope hash or staging partition alone
+does not prove source changed. Missing snapshot evidence and historical
+version-one hash-derived claims report `source_changed: null`; inspect the raw
+historical record without treating its old boolean as verified source evidence.
+
+New round records also retain an optional compact `review_attempts` ledger.
+`review_counts` separates submitted, native-accepted and malformed lens reports;
+`round_attempts` counts captured review batches. These differ from eligible
+`completed_lens_rounds`, clean credit and coordinator iterations. A malformed
+lens leaves valid sibling attempts inspectable. The round evidence reference
+includes each attempt's submitted status, assigned and submitted subagent keys,
+native scope binding and disposition/reasons, and the caller's exact
+`model_role`, `fresh_context` and `closed_after_result` claims, including clean
+reviewers. `actual_model` is null because the protocol does not independently
+record the concrete runtime model; never infer it from `model_role`.
+`observed_review_counts` and `observed_round_attempts` cover only retained
+ledger-bearing rows. Full review counts are null if any legacy row lacks a
+ledger or earlier rows were pruned; `review_counts_available_for_full_history`
+reports that separate coverage. No history is retrofilled from iteration
+counters or old artifacts. Empty delta/reset bookkeeping adds no attempt.
+
+A bounded report with an invalid findings container still retains its attempt
+and valid sibling attempts. Its round records `raw_findings_complete: false`;
+raw allegation counts are null because the complete number is unknown.
+`retained_raw_allegations` labels only the individually retained allegations,
+not the missing total. An empty retained array then cannot establish
+`finding_free` or clean credit. Missing submitted status is null, distinct from
+the native malformed disposition. Oversized or non-array whole batches remain
+unavailable when individual submitted reports cannot be recovered.
+
+The existing serialized-state size limit remains in force. Evidence-heavy
+sessions fail closed when that limit is exceeded; no evidence is silently
+invented or dropped to authorize completion.
+
+New delta artifacts use `git-snapshot-v2`: the captured project subtree produces
+both patch and inventory without expanding the declared file set into Git argv.
+Version-one and unversioned legacy rendering remain available for exact recorded
+digest recovery. Verified existing artifacts are reused before reconstruction.
+Patch generation defaults to a 64 MiB limit; each project retains at most 256 MiB
+of published patch artifacts. Set positive byte limits with
+`DEVELOPMENT_SYSTEM_DELTA_ARTIFACT_MAX_BYTES` and
+`DEVELOPMENT_SYSTEM_DELTA_CACHE_MAX_BYTES` when the required scope needs more.
+Budget exhaustion is an actionable hold, grants no review credit, cleans partial
+candidates and preserves existing evidence. No referenced history is silently
+deleted. Durable Git snapshot and event history remains separately stored;
+archive verified cached patches only while retaining the recorded snapshots
+needed for deterministic reconstruction.

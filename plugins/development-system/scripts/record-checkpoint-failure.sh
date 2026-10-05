@@ -41,6 +41,20 @@ target="$git_common_dir/development-system/checkpoints/$checkpoint_id.latest"
 umask 077
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
+script_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# Stable identity derives from the generation and predecessor, not mutable evidence.
+# The typed writer owns locking, CAS, request conflict checks and crash recovery.
+operation_id="compat-failure-$expected_generation-$expected_predecessor"
+route=$(node "$script_root/checkpoint-operations.mjs" compatibility-route "$target" "$expected_predecessor" "$operation_id")
+if [[ $route == typed ]]; then
+  operation=hook-failure
+  [[ $failure_kind != lightweight-review ]] || operation=lightweight-review-fail
+  jq -cn --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" \
+    --arg command "$failed_command" --arg receipt "$receipt_absolute" --arg repair "$causal_repair" \
+    '{expected_generation:$generation,expected_predecessor:$predecessor,command:$command,receipt_file:$receipt,causal_repair:$repair}' >"$scratch/request.json"
+  "$script_root/transition-local-checkpoint.sh" "$checkpoint_id" "$operation_id" "$operation" "$scratch/request.json"
+  exit 0
+fi
 # Read one immutable copy. The writer checks the same digest under its lock.
 cp -- "$target" "$scratch/predecessor"
 [[ $(sha256sum "$scratch/predecessor" | cut -d ' ' -f 1) == "$expected_predecessor" ]] || { echo 'stale checkpoint predecessor' >&2; exit 3; }
@@ -77,23 +91,9 @@ jq -e --argjson generation "$expected_generation" --arg action "$predecessor_act
   echo 'failure recovery requires the expected pending gate and unchanged HEAD' >&2
   exit 3
 }
-tracked_sha256=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
-while IFS= read -r -d '' path; do
-  absolute_path="$worktree_root/$path"
-  if [[ -L $absolute_path ]]; then mode=120000
-  elif [[ -f $absolute_path && -x $absolute_path ]]; then mode=100755
-  elif [[ -f $absolute_path ]]; then mode=100644
-  else echo "unsupported untracked file type: $path" >&2; exit 2
-  fi
-  if [[ -L $absolute_path ]]; then
-    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$absolute_path" | git -C "$worktree_root" hash-object --stdin)
-  else
-    oid=$(git -C "$worktree_root" hash-object -- "$path")
-  fi
-  printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$scratch/untracked"
-done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
-touch "$scratch/untracked"
-untracked_sha256=$(sha256sum "$scratch/untracked" | cut -d ' ' -f 1)
+snapshot=$(node "$script_root/checkpoint-operations.mjs" snapshot "$target")
+tracked_sha256=$(jq -r '.tracked_sha256' <<<"$snapshot")
+untracked_sha256=$(jq -r '.untracked_sha256' <<<"$snapshot")
 receipt_digest=$(sha256sum "$receipt_absolute" | cut -d ' ' -f 1)
 record=$(jq -c --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" \
   --arg head "$head_oid" --arg tracked "$tracked_sha256" --arg untracked "$untracked_sha256" \
@@ -107,6 +107,5 @@ record=$(jq -c --argjson generation "$expected_generation" --arg predecessor "$e
   .next_action = ("causal-edit: " + $repair)
 ' <<<"$current_record")
 printf 'checkpoint-v1 %s\n' "$record" >"$scratch/proposal"
-script_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 "$script_root/write-local-checkpoint.sh" "$checkpoint_id" "$expected_generation" "$expected_predecessor" "$scratch/proposal"
 printf 'Recorded %s failure at checkpoint %s generation %s; only the causal repair and fresh testing may follow.\n' "$failure_kind" "$checkpoint_id" "$expected_generation"

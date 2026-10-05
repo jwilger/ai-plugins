@@ -6,11 +6,24 @@ usage() {
   exit 2
 }
 
-[[ $# -eq 4 ]] || usage
-checkpoint_id=$1
-expected_generation=$2
-expected_predecessor=$3
-record_file=$4
+script_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+operation_mode=false
+if [[ ${1:-} == --operation ]]; then
+  [[ $# -eq 5 ]] || usage
+  operation_mode=true
+  checkpoint_id=$2
+  operation_id=$3
+  operation=$4
+  record_file=$5
+  expected_generation=0
+  expected_predecessor=null
+else
+  [[ $# -eq 4 ]] || usage
+  checkpoint_id=$1
+  expected_generation=$2
+  expected_predecessor=$3
+  record_file=$4
+fi
 
 [[ $checkpoint_id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "invalid checkpoint id" >&2; exit 2; }
 [[ $expected_generation =~ ^(0|[1-9][0-9]*)$ ]] || usage
@@ -41,16 +54,28 @@ if ! flock -x -w 30 "$lock_fd"; then
   exit 3
 fi
 
+# Reconcile an interrupted operation before either public entry point advances.
+node "$script_root/checkpoint-operations.mjs" recover "$target"
+if $operation_mode; then
+  operation_result=$(node "$script_root/checkpoint-operations.mjs" prepare "$target" "$operation_id" "$operation" "$record_file")
+  if [[ $(jq -r '.replayed' <<<"$operation_result") == true ]]; then
+    jq -c '.receipt' <<<"$operation_result"
+    exit 0
+  fi
+  expected_generation=$(jq -r '.record.generation' <<<"$operation_result")
+  expected_predecessor=$(jq -r '.record.predecessor_sha256' <<<"$operation_result")
+fi
+
 candidate=$(mktemp "$checkpoint_dir/.$checkpoint_id.candidate.XXXXXX")
-untracked_stream=
-final_untracked_stream=
 cleanup() {
   [[ -z $candidate ]] || rm -f -- "$candidate"
-  [[ -z $untracked_stream ]] || rm -f -- "$untracked_stream"
-  [[ -z $final_untracked_stream ]] || rm -f -- "$final_untracked_stream"
 }
 trap cleanup EXIT
-cp -- "$record_file" "$candidate"
+if $operation_mode; then
+  printf 'checkpoint-v1 %s\n' "$(jq -c '.record' <<<"$operation_result")" >"$candidate"
+else
+  cp -- "$record_file" "$candidate"
+fi
 chmod 600 "$candidate"
 sync -f "$candidate"
 
@@ -58,104 +83,12 @@ sync -f "$candidate"
 cmp -s "$candidate" <(tr -d '\000' <"$candidate") || { echo "record must not contain NUL bytes" >&2; exit 2; }
 [[ $(head -c 14 "$candidate") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
 
-current_head=$(git -C "$worktree_root" rev-parse HEAD)
-current_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
-untracked_stream=$(mktemp)
-while IFS= read -r -d '' path; do
-  absolute_path="$worktree_root/$path"
-  if [[ -L $absolute_path ]]; then mode=120000
-  elif [[ -f $absolute_path && -x $absolute_path ]]; then mode=100755
-  elif [[ -f $absolute_path ]]; then mode=100644
-  else echo "unsupported untracked file type: $path" >&2; exit 2
-  fi
-  if [[ -L $absolute_path ]]; then
-    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$absolute_path" | git -C "$worktree_root" hash-object --stdin)
-  else
-    oid=$(git -C "$worktree_root" hash-object -- "$path")
-  fi
-  printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$untracked_stream"
-done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
-current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)
+current_snapshot=$(node "$script_root/checkpoint-operations.mjs" snapshot "$target")
+current_head=$(jq -r '.head_oid' <<<"$current_snapshot")
+current_tracked=$(jq -r '.tracked_sha256' <<<"$current_snapshot")
+current_untracked=$(jq -r '.untracked_sha256' <<<"$current_snapshot")
 
-if ! tail -c +15 "$candidate" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" '
-  def exact_keys($expected): (keys | sort) == ($expected | sort);
-  def string_or_null: type == "string" or . == null;
-  def nonblank: type == "string" and test("\\S");
-  def nonblank_or_null: . == null or nonblank;
-  def oid: type == "string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
-  def sha256: type == "string" and test("^[0-9a-f]{64}$");
-  . as $record |
-  exact_keys(["generation", "predecessor_sha256", "baseline_oid", "snapshot", "state", "test", "gates", "delivery", "ci", "next_action"]) and
-  .generation == $generation and
-  (if $generation == 0 then .predecessor_sha256 == null else .predecessor_sha256 == $predecessor end) and
-  (.baseline_oid | oid) and
-  (.snapshot | exact_keys(["head_oid", "tracked_sha256", "untracked_sha256"]) and (.head_oid | oid) and (.tracked_sha256 | sha256) and (.untracked_sha256 | sha256)) and
-  .snapshot.head_oid == $current_head and .snapshot.tracked_sha256 == $current_tracked and .snapshot.untracked_sha256 == $current_untracked and
-  (.state | IN("failing", "passing-awaiting-gates-or-review", "committed", "pushed-or-delivery-mode-equivalent")) and
-  (.test == null or (.test | exact_keys(["command", "receipt_ref", "outcome", "failure_kind"]) and (.command | nonblank) and (.receipt_ref | nonblank) and (.outcome | IN("pass", "fail")) and (.failure_kind | string_or_null))) and
-  (.gates | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"]) and
-    (.lightweight_review_receipt | nonblank_or_null) and (.fast_gate_receipt | nonblank_or_null) and
-    (.exact_identity_verification_receipt == null or
-      (.exact_identity_verification_receipt | exact_keys(["receipt_ref", "outcome"]) and
-       (.receipt_ref | nonblank) and (.outcome | IN("pass", "fail"))))) and
-  (.delivery == null or (.delivery | exact_keys(["mode", "commit_oid", "pushed_oid", "local_snapshot"]) and (.mode | IN("local-only", "direct-to-trunk", "pull-request")) and (.commit_oid | . == null or oid) and (.pushed_oid | . == null or oid) and (.local_snapshot | nonblank_or_null))) and
-  (.ci | exact_keys(["runs", "terminal_success_run_id"]) and (.runs | type == "array") and all(.runs[]; exact_keys(["provider", "run_id", "commit_oid", "status"]) and (.provider | nonblank) and (.run_id | nonblank) and (.commit_oid | oid) and (.status | IN("queued", "running", "success", "failure"))) and (.terminal_success_run_id | nonblank_or_null)) and
-  (.next_action | nonblank) and
-  ($generation != 0 or .state == "pushed-or-delivery-mode-equivalent") and
-  (.ci.terminal_success_run_id == null or
-   ((.ci.runs | length) > 0 and .ci.runs[-1].run_id == .ci.terminal_success_run_id and
-    .ci.runs[-1].status == "success" and .ci.runs[-1].commit_oid == $record.delivery.pushed_oid)) and
-  (if .state == "failing" then
-     .test != null and .delivery == null and all(.gates[]; . == null) and
-     (if .test.outcome == "pass" then
-        .test.failure_kind == "invalid-test" and (.next_action | test("^rewrite-invalid-test: \\S"))
-      else
-        (.test.failure_kind | nonblank) and (.next_action | test("^causal-edit: \\S"))
-      end)
-   elif .state == "passing-awaiting-gates-or-review" then
-     .test != null and .test.outcome == "pass" and .delivery == null and .gates.exact_identity_verification_receipt == null and
-     (if .gates.lightweight_review_receipt == null then
-        .gates.fast_gate_receipt == null and .next_action == "lightweight-review"
-      elif .gates.fast_gate_receipt == null then
-        (.next_action | IN("fast-gate", "commit-through-pre-commit-hook"))
-      else .next_action == "commit-or-record-local-snapshot" end)
-   elif .state == "committed" then
-     .test != null and .test.outcome == "pass" and .delivery != null and .delivery.commit_oid == .snapshot.head_oid and
-     (.gates.lightweight_review_receipt | type == "string") and
-     (.gates.fast_gate_receipt | type == "string") and
-     ((.gates.exact_identity_verification_receipt == null and .next_action == "verify-exact-commit") or
-      (.gates.exact_identity_verification_receipt.outcome == "pass" and
-       (if .delivery.mode == "local-only" then .next_action == "record-local-delivery" else .next_action == "push" end)) or
-      (.gates.exact_identity_verification_receipt.outcome == "fail" and .next_action == "repair-exact-identity-verification"))
-   elif .state == "pushed-or-delivery-mode-equivalent" and .generation == 0 then
-     .baseline_oid == .snapshot.head_oid and
-     .snapshot.tracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
-     .snapshot.untracked_sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" and
-     .test == null and all(.gates[]; . == null) and .delivery != null and
-     (.next_action | test("^causal-edit: \\S")) and
-     (if .delivery.mode == "local-only" then
-        .delivery.pushed_oid == null and (.delivery.local_snapshot | type == "string") and
-        (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null
-      else .delivery.local_snapshot == null and .delivery.pushed_oid == .snapshot.head_oid end)
-   else
-     .test != null and .test.outcome == "pass" and .delivery != null and
-     (.gates.lightweight_review_receipt | type == "string") and
-     (.gates.fast_gate_receipt | type == "string") and
-     .gates.exact_identity_verification_receipt.outcome == "pass" and
-     (if .delivery.mode == "local-only" then
-        .delivery.pushed_oid == null and (.delivery.local_snapshot | type == "string") and
-        (.ci.runs | length) == 0 and .ci.terminal_success_run_id == null and .next_action == "terminal-review"
-      else
-        .delivery.local_snapshot == null and .delivery.commit_oid == .snapshot.head_oid and
-        .delivery.pushed_oid == .snapshot.head_oid and
-        ((.ci.runs | map(select(.commit_oid == $record.delivery.pushed_oid))) as $current_runs |
-         if ($current_runs | length) == 0 then .next_action == "register-exact-sha-ci-monitor"
-         elif .ci.terminal_success_run_id != null then .next_action == "terminal-review"
-         elif any($current_runs[]; .status == "failure") then .next_action == "enter-ci-recovery"
-         else .next_action == "monitor-exact-sha-ci" end)
-      end)
-   end)
-  ' >/dev/null; then
+if ! tail -c +15 "$candidate" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" -f "$script_root/checkpoint-record.jq" >/dev/null; then
   echo "checkpoint record failed schema, snapshot, or state validation" >&2
   exit 2
 fi
@@ -177,6 +110,11 @@ if [[ -e $target ]]; then
       echo "checkpoint CI observations do not preserve predecessor history" >&2
       exit 3
     }
+  jq -en --argjson current "$current_record" --argjson proposed "$proposed_record" \
+    '($proposed.ci.recoveries // [])[0:(($current.ci.recoveries // []) | length)] == ($current.ci.recoveries // [])' >/dev/null || {
+      echo "checkpoint CI diagnosis history does not preserve predecessor" >&2
+      exit 3
+    }
   jq -en --argjson current "$current_record" --argjson proposed "$proposed_record" '
     def passing($action):
       $proposed.state == "passing-awaiting-gates-or-review" and
@@ -191,7 +129,19 @@ if [[ -e $target ]]; then
       $proposed.snapshot.head_oid == $current.snapshot.head_oid and
       $proposed.test.outcome == "fail" and
       $proposed.test.failure_kind == $kind;
-    if ($current.next_action | test("^(causal-edit|rewrite-invalid-test): \\S")) then
+    if ($proposed.next_action != "complete" or $current.next_action == "complete") and
+       (($proposed | del(.generation, .predecessor_sha256, .next_action, .ci)) == ($current | del(.generation, .predecessor_sha256, .next_action, .ci))) and
+       (($proposed.ci.runs | length) > ($current.ci.runs | length) or
+        ($current.next_action == "enter-ci-recovery" and
+         (($proposed.ci.recoveries // []) | length) > (($current.ci.recoveries // []) | length))) and
+       (($proposed.ci.recoveries // [])[0:(($current.ci.recoveries // []) | length)] == ($current.ci.recoveries // [])) then true
+    elif $proposed.state == "awaiting-causal-edit" then
+      $current.state == "pushed-or-delivery-mode-equivalent" and
+      ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "terminal-review", "complete")) and
+      $current.gates.exact_identity_verification_receipt.outcome == "pass" and
+      $proposed.snapshot == $current.snapshot and
+      $proposed.ci.runs == $current.ci.runs
+    elif ($current.next_action | test("^(causal-edit|rewrite-invalid-test): \\S")) then
       remediation_result
     elif $current.next_action == "lightweight-review" then
       gate_failure("lightweight-review") or
@@ -207,10 +157,11 @@ if [[ -e $target ]]; then
        $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
        ($proposed.gates.fast_gate_receipt | type == "string"))
     elif $current.next_action == "fast-gate" then
-      passing("commit-or-record-local-snapshot") and
+      gate_failure("fast-gate") or
+      (passing("commit-or-record-local-snapshot") and
       $proposed.test == $current.test and
       $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
-      ($proposed.gates.fast_gate_receipt | type == "string")
+      ($proposed.gates.fast_gate_receipt | type == "string"))
     elif $current.next_action == "commit-or-record-local-snapshot" then
       $proposed.test == $current.test and
       $proposed.gates.lightweight_review_receipt == $current.gates.lightweight_review_receipt and
@@ -234,7 +185,15 @@ if [[ -e $target ]]; then
         ($proposed.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review"))) or
        remediation_result)
     elif $current.next_action == "terminal-review" then
-      remediation_result
+      gate_failure("terminal-review") or
+      (($proposed.next_action | IN("monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review")) and
+       ($proposed.ci.runs | length) > ($current.ci.runs | length) and
+       ($proposed | del(.generation, .predecessor_sha256, .next_action, .ci)) ==
+       ($current | del(.generation, .predecessor_sha256, .next_action, .ci))) or
+      ($proposed.next_action == "complete" and
+       ($proposed | del(.generation, .predecessor_sha256, .next_action)) ==
+       ($current | del(.generation, .predecessor_sha256, .next_action)))
+    elif $current.next_action == "complete" then false
     else
       ($proposed | del(.generation, .predecessor_sha256, .next_action)) ==
       ($current | del(.generation, .predecessor_sha256, .next_action)) and
@@ -248,31 +207,25 @@ else
   [[ $expected_generation -eq 0 && $expected_predecessor == null ]] || { echo "missing checkpoint predecessor" >&2; exit 3; }
 fi
 
-final_head=$(git -C "$worktree_root" rev-parse HEAD)
-final_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
-final_untracked_stream=$(mktemp)
-while IFS= read -r -d '' path; do
-  absolute_path="$worktree_root/$path"
-  if [[ -L $absolute_path ]]; then mode=120000
-  elif [[ -f $absolute_path && -x $absolute_path ]]; then mode=100755
-  elif [[ -f $absolute_path ]]; then mode=100644
-  else echo "unsupported untracked file type: $path" >&2; exit 2
-  fi
-  if [[ -L $absolute_path ]]; then
-    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$absolute_path" | git -C "$worktree_root" hash-object --stdin)
-  else
-    oid=$(git -C "$worktree_root" hash-object -- "$path")
-  fi
-  printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$final_untracked_stream"
-done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
-final_untracked=$(sha256sum "$final_untracked_stream" | cut -d ' ' -f 1)
+final_snapshot=$(node "$script_root/checkpoint-operations.mjs" snapshot "$target")
+final_head=$(jq -r '.head_oid' <<<"$final_snapshot")
+final_tracked=$(jq -r '.tracked_sha256' <<<"$final_snapshot")
+final_untracked=$(jq -r '.untracked_sha256' <<<"$final_snapshot")
+
 if [[ $final_head != "$current_head" || $final_tracked != "$current_tracked" || $final_untracked != "$current_untracked" ]]; then
   echo "worktree changed while publishing checkpoint" >&2
   exit 3
 fi
 
+if $operation_mode; then
+  printf '%s\n' "$operation_result" | node "$script_root/checkpoint-operations.mjs" stage "$target" "$candidate"
+fi
 mv -f -- "$candidate" "$target"
 candidate=
 sync -f "$checkpoint_dir"
+if $operation_mode; then
+  node "$script_root/checkpoint-operations.mjs" recover "$target"
+  node "$script_root/checkpoint-operations.mjs" read "$target" "$operation_id"
+fi
 cleanup
 trap - EXIT
