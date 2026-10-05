@@ -246,23 +246,27 @@ local_delivery() {
   [ "$(sha256sum "$target")" = "$before" ]
 }
 
-remote_committed() {
+remote_reviewed() {
   remote="$BATS_TEST_TMPDIR/remote.git"
   git init --bare -q "$remote"
   git -C "$repo" remote add origin "$remote"
   git -C "$repo" push -q origin HEAD:refs/heads/main
-  invoke initialize '{"mode":"direct-to-trunk","causal_edit":"implement remote fixture","remote":"origin","ref":"refs/heads/main"}'
+  invoke initialize "$(jq -cn --arg mode "${remote_initialize_mode:-direct-to-trunk}" '{mode:$mode,causal_edit:"implement remote fixture",remote:"origin",ref:"refs/heads/main"}')"
   accepted
   printf 'remote implementation\n' >"$repo/source"
   invoke edit-pass "$(evidence_fields)"
   accepted
   invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
   accepted
+}
+
+remote_committed() {
+  remote_reviewed
   printf '#!/bin/sh\necho real-hook-pass\n' >"$repo/.git/hooks/pre-commit"
   chmod +x "$repo/.git/hooks/pre-commit"
   git -C "$repo" add source
   git -C "$repo" commit -m 'remote fixture' >"$evidence" 2>&1
-  invoke commit-success "$(evidence_fields '{"mode":"direct-to-trunk"}')"
+  invoke commit-success "$(evidence_fields "$(jq -cn --arg mode "${remote_commit_mode:-direct-to-trunk}" '{mode:$mode}')")"
   accepted
   invoke exact-verify-pass "$(evidence_fields)"
   accepted
@@ -489,4 +493,179 @@ SHIM
   invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
   [ "$status" -ne 0 ]
   [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "explicit remote delivery mode rebind preserves required verification and push gates" {
+  remote_commit_mode=pull-request
+  remote_committed
+  [ "$(jq -r '.delivery.mode' <<<"$record")" = pull-request ]
+  [ "$(jq -r '.next_action' <<<"$record")" = push ]
+  [ "$(jq -r '.baseline_oid' <<<"$record")" = "$baseline" ]
+}
+
+@test "explicit PR to trunk rebind retains remote delivery gates" {
+  remote_initialize_mode=pull-request
+  remote_commit_mode=direct-to-trunk
+  remote_committed
+  [ "$(jq -r '.delivery.mode' <<<"$record")" = direct-to-trunk ]
+  [ "$(jq -r '.next_action' <<<"$record")" = push ]
+}
+
+@test "delivery mode rebind cannot cross local and remote gate families" {
+  reviewed
+  git -C "$repo" add source
+  git -C "$repo" commit -m 'actual local fixture' >"$evidence" 2>&1
+  before=$(sha256sum "$target")
+  invoke commit-success "$(evidence_fields '{"mode":"pull-request"}')"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "begin edit from pending CI clears credits preserves history and permits the next gated increment" {
+  remote_committed
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  accepted
+  invoke ci-register "$(ci_fields pending-build running)"
+  accepted
+  first=$(jq -c '.ci.runs' <<<"$record")
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"repair reproduced delivery helper gap"}')" causal-increment
+  accepted
+  [ "$(jq -r '.state' <<<"$record")" = awaiting-causal-edit ]
+  [ "$(jq -r '.next_action' <<<"$record")" = 'causal-edit: repair reproduced delivery helper gap' ]
+  [ "$(jq -r '.baseline_oid' <<<"$record")" = "$baseline" ]
+  [ "$(jq -c '.ci.runs' <<<"$record")" = "$first" ]
+  [ "$(jq '[.test,.delivery,.ci.terminal_success_run_id,.gates[]] | all(. == null)' <<<"$record")" = true ]
+  cp "$records/request.json" "$records/begin-request.json"
+  before=$(sha256sum "$target")
+  run bash -c 'cd "$1" && exec "$2" task causal-increment begin-edit "$3"' _ "$repo" "$transition" "$records/begin-request.json"
+  [ "$status" -eq 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  printf 'causal next increment\n' >"$repo/source"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  git -C "$repo" add source
+  git -C "$repo" commit -m 'causal next increment' >"$evidence" 2>&1
+  invoke commit-success "$(evidence_fields '{"mode":"pull-request"}')"
+  accepted
+  invoke exact-verify-pass "$(evidence_fields)"
+  accepted
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  accepted
+  invoke ci-register "$(ci_fields next-build queued)"
+  accepted
+  [ "$(jq -c '.ci.runs[0:1]' <<<"$record")" = "$first" ]
+  [ "$(jq '.ci.runs | length' <<<"$record")" = 2 ]
+}
+
+@test "begin edit rejects source drift unverified delivery and failed CI recovery holds" {
+  remote_committed
+  before=$(sha256sum "$target")
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"next increment"}')"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  accepted
+  printf 'premature edit\n' >"$repo/source"
+  before=$(sha256sum "$target")
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"next increment"}')"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  git -C "$repo" checkout -- source
+  invoke ci-register "$(ci_fields failed-build failure)"
+  accepted
+  before=$(sha256sum "$target")
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"next increment"}')"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  invoke ci-recovery "$(evidence_fields '{"causal_repair":"fix actual CI failure"}')"
+  accepted
+}
+
+@test "remote delivery mode cannot weaken to local-only at successful commit" {
+  remote_reviewed
+  git -C "$repo" add source
+  git -C "$repo" commit -m 'actual remote fixture' >"$evidence" 2>&1
+  before=$(sha256sum "$target")
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  [[ "$output" == *'cannot cross local-only and remote delivery gates'* ]]
+}
+
+@test "begin edit after terminal success retires its current CI credit without losing observations" {
+  remote_committed
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  accepted
+  invoke ci-register "$(ci_fields completed-build success)"
+  accepted
+  invoke terminal-review-pass "$(evidence_fields)"
+  accepted
+  first=$(jq -c '.ci.runs' <<<"$record")
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"next approved increment"}')"
+  accepted
+  [ "$(jq -c '.ci.runs' <<<"$record")" = "$first" ]
+  [ "$(jq -r '.ci.terminal_success_run_id' <<<"$record")" = null ]
+  [ "$(jq -r '.state' <<<"$record")" = awaiting-causal-edit ]
+}
+
+@test "begin edit after local delivery preserves the local gate family" {
+  local_delivery
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"next approved local increment"}')"
+  accepted
+  [ "$(jq -r '.state' <<<"$record")" = awaiting-causal-edit ]
+  [ "$(jq '.ci.runs | length' <<<"$record")" = 0 ]
+  printf 'next local increment\n' >"$repo/source"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"local-snapshot"}')"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = fast-gate ]
+}
+
+@test "signed commits ignore signature display configuration in machine-readable ancestry queries" {
+  reviewed
+  ssh-keygen -q -t ed25519 -N '' -f "$records/signing-key"
+  printf 'test@example.invalid %s\n' "$(cat "$records/signing-key.pub")" >"$records/allowed-signers"
+  git -C "$repo" config gpg.format ssh
+  git -C "$repo" config user.signingkey "$records/signing-key"
+  git -C "$repo" config gpg.ssh.allowedSignersFile "$records/allowed-signers"
+  git -C "$repo" config log.showSignature true
+  printf '#!/bin/sh\necho actual-hook-passed\n' >"$repo/.git/hooks/pre-commit"
+  chmod +x "$repo/.git/hooks/pre-commit"
+  git -C "$repo" add source
+  git -C "$repo" commit -S -m 'actually signed fixture' >"$evidence" 2>&1
+  git -C "$repo" verify-commit HEAD >>"$evidence" 2>&1
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = verify-exact-commit ]
+  invoke exact-verify-fail "$(evidence_fields)"
+  accepted
+  git -C "$repo" commit --amend -S -m 'repaired signed commit metadata' >"$evidence" 2>&1
+  git -C "$repo" verify-commit HEAD >>"$evidence" 2>&1
+  invoke exact-verify-retry "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = verify-exact-commit ]
+  [ "$(git -C "$repo" config log.showSignature)" = true ]
+}
+
+@test "begin edit after verified push does not invent a CI run when registration awaits PR" {
+  remote_committed
+  git -C "$repo" push -q origin HEAD:refs/heads/feature
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/feature"}'
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = register-exact-sha-ci-monitor ]
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"fix delivery helper before opening PR"}')"
+  accepted
+  [ "$(jq -r '.state' <<<"$record")" = awaiting-causal-edit ]
+  [ "$(jq '.ci.runs | length' <<<"$record")" = 0 ]
+  [ "$(jq -r '.ci.terminal_success_run_id' <<<"$record")" = null ]
+  [ "$(jq -r '.baseline_oid' <<<"$record")" = "$baseline" ]
 }

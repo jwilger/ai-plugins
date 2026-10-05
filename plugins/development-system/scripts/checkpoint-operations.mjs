@@ -262,6 +262,7 @@ function verifyRemote(remote, ref, head) {
 const evidenceKeys = ["command", "receipt_file"];
 const specs = {
   initialize: ["mode", "causal_edit"],
+  "begin-edit": [...evidenceKeys, "causal_edit"],
   "edit-pass": evidenceKeys,
   "edit-fail": [...evidenceKeys, "failure_kind", "causal_repair"],
   "edit-invalid-test": [...evidenceKeys, "causal_repair"],
@@ -424,10 +425,15 @@ function prepare(operationId, operation, inputFile) {
       ["local-only", "direct-to-trunk", "pull-request"].includes(input.mode),
       "invalid delivery mode",
     );
-  if (input.mode && current?.context?.delivery_mode)
+  const previousMode =
+    current?.context?.delivery_mode ?? current?.record.delivery?.mode;
+  if (input.mode && previousMode)
     requireThat(
-      input.mode === current.context.delivery_mode,
-      "delivery mode cannot change within checkpoint",
+      input.mode === previousMode ||
+        (operation === "commit-success" &&
+          ["direct-to-trunk", "pull-request"].includes(previousMode) &&
+          ["direct-to-trunk", "pull-request"].includes(input.mode)),
+      "delivery mode rebind cannot cross local-only and remote delivery gates",
     );
   switch (operation) {
     case "initialize":
@@ -444,6 +450,35 @@ function prepare(operationId, operation, inputFile) {
         pushed_oid: mode === "local-only" ? null : identity.head_oid,
         local_snapshot: mode === "local-only" ? source : null,
       };
+      record.next_action = `causal-edit: ${input.causal_edit}`;
+      break;
+    case "begin-edit":
+      requireThat(
+        action !== "enter-ci-recovery",
+        "begin-edit cannot bypass failed CI; use ci-recovery with actual failure evidence",
+      );
+      requireAction(
+        "register-exact-sha-ci-monitor",
+        "monitor-exact-sha-ci",
+        "terminal-review",
+        "complete",
+      );
+      requireSnapshot();
+      requireThat(
+        record.state === "pushed-or-delivery-mode-equivalent" &&
+          record.gates.exact_identity_verification_receipt?.outcome ===
+            "pass" &&
+          current.context?.source_sha256 === source &&
+          (mode === "local-only"
+            ? record.delivery?.local_snapshot === source
+            : record.delivery?.pushed_oid === identity.head_oid),
+        "begin-edit requires unchanged verified and delivered source",
+      );
+      record.state = "awaiting-causal-edit";
+      record.test = null;
+      record.gates = gates;
+      record.delivery = null;
+      record.ci.terminal_success_run_id = null;
       record.next_action = `causal-edit: ${input.causal_edit}`;
       break;
     case "edit-pass":
@@ -518,8 +553,14 @@ function prepare(operationId, operation, inputFile) {
       );
       requireThat(
         identity.head_oid !== current.record.snapshot.head_oid &&
-          gitText("show", "-s", "--format=%P", "HEAD") ===
-            current.record.snapshot.head_oid,
+          gitText(
+            "-c",
+            "log.showSignature=false",
+            "show",
+            "-s",
+            "--format=%P",
+            "HEAD",
+          ) === current.record.snapshot.head_oid,
         "commit-success requires an actual direct successor commit",
       );
       requireThat(
@@ -566,8 +607,17 @@ function prepare(operationId, operation, inputFile) {
       );
       if (identity.head_oid !== current.record.snapshot.head_oid) {
         requireThat(
-          gitText("show", "-s", "--format=%P", "HEAD") ===
+          gitText(
+            "-c",
+            "log.showSignature=false",
+            "show",
+            "-s",
+            "--format=%P",
+            "HEAD",
+          ) ===
             gitText(
+              "-c",
+              "log.showSignature=false",
               "show",
               "-s",
               "--format=%P",

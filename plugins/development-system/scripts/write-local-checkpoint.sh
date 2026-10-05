@@ -142,7 +142,13 @@ if [[ -e $target ]]; then
       $proposed.snapshot.head_oid == $current.snapshot.head_oid and
       $proposed.test.outcome == "fail" and
       $proposed.test.failure_kind == $kind;
-    if ($current.next_action | test("^(causal-edit|rewrite-invalid-test): \\S")) then
+    if $proposed.state == "awaiting-causal-edit" then
+      $current.state == "pushed-or-delivery-mode-equivalent" and
+      ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "terminal-review", "complete")) and
+      $current.gates.exact_identity_verification_receipt.outcome == "pass" and
+      $proposed.snapshot == $current.snapshot and
+      $proposed.ci.runs == $current.ci.runs
+    elif ($current.next_action | test("^(causal-edit|rewrite-invalid-test): \\S")) then
       remediation_result
     elif $current.next_action == "lightweight-review" then
       gate_failure("lightweight-review") or

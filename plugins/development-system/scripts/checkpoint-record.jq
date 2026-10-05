@@ -11,7 +11,7 @@
   (.baseline_oid | oid) and
   (.snapshot | exact_keys(["head_oid", "tracked_sha256", "untracked_sha256"]) and (.head_oid | oid) and (.tracked_sha256 | sha256) and (.untracked_sha256 | sha256)) and
   .snapshot.head_oid == $current_head and .snapshot.tracked_sha256 == $current_tracked and .snapshot.untracked_sha256 == $current_untracked and
-  (.state | IN("failing", "passing-awaiting-gates-or-review", "committed", "pushed-or-delivery-mode-equivalent")) and
+  (.state | IN("awaiting-causal-edit", "failing", "passing-awaiting-gates-or-review", "committed", "pushed-or-delivery-mode-equivalent")) and
   (.test == null or (.test | exact_keys(["command", "receipt_ref", "outcome", "failure_kind"]) and (.command | nonblank) and (.receipt_ref | nonblank) and (.outcome | IN("pass", "fail")) and (.failure_kind | string_or_null))) and
   (.gates | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"]) and
     (.lightweight_review_receipt | nonblank_or_null) and (.fast_gate_receipt | nonblank_or_null) and
@@ -25,7 +25,11 @@
   (.ci.terminal_success_run_id == null or
    ((.ci.runs | length) > 0 and .ci.runs[-1].run_id == .ci.terminal_success_run_id and
     .ci.runs[-1].status == "success" and .ci.runs[-1].commit_oid == $record.delivery.pushed_oid)) and
-  (if .state == "failing" then
+  (if .state == "awaiting-causal-edit" then
+     .generation > 0 and .test == null and .delivery == null and
+     all(.gates[]; . == null) and .ci.terminal_success_run_id == null and
+     (.next_action | test("^causal-edit: \\S"))
+   elif .state == "failing" then
      .test != null and .delivery == null and all(.gates[]; . == null) and
      (if .test.outcome == "pass" then
         .test.failure_kind == "invalid-test" and (.next_action | test("^rewrite-invalid-test: \\S"))
