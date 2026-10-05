@@ -1,0 +1,416 @@
+{
+  "description": "Actual seven-report round from the repository review at 366088a7; summaries omitted. Native filter rejected security-safety for missing suspected_pii.",
+  "lens_results": [
+    {
+      "lens": "correctness-behavior",
+      "subagent_key": "ai-plugins-reliable-review-orchestration-final:1:correctness-behavior",
+      "status": "clean",
+      "shared_test_evidence_id": "review-orchestration-delivered-tests",
+      "additional_broad_test_run": false,
+      "findings": [],
+      "caller_attestation": {
+        "model_role": "gpt-6-sol",
+        "fresh_context": true,
+        "closed_after_result": true
+      }
+    },
+    {
+      "lens": "tests-verification",
+      "subagent_key": "ai-plugins-reliable-review-orchestration-final:1:tests-verification",
+      "status": "clean",
+      "shared_test_evidence_id": "review-orchestration-delivered-tests",
+      "additional_broad_test_run": false,
+      "findings": [],
+      "caller_attestation": {
+        "model_role": "gpt-6-sol",
+        "fresh_context": true,
+        "closed_after_result": true
+      }
+    },
+    {
+      "lens": "security-safety",
+      "subagent_key": "ai-plugins-reliable-review-orchestration-final:1:security-safety",
+      "status": "findings",
+      "shared_test_evidence_id": "review-orchestration-delivered-tests",
+      "additional_broad_test_run": false,
+      "findings": [
+        {
+          "finding_id": "checkpoint-recovery-loses-delivery-gate-family",
+          "severity": "MAJOR",
+          "causality": "caused",
+          "causality_evidence": "The diff adds both the compatibility failure helper and typed delivery-mode enforcement. record-checkpoint-failure.sh:98-111 publishes a failing successor with delivery=null through write-local-checkpoint.sh without --operation, so the successor has no typed operation receipt. checkpoint-operations.mjs:229-244 retrieves context only from a receipt matching the exact current record digest; lines 419-430 consequently leave mode and previousMode undefined after that supported recovery. Subsequent typed edit-pass/lightweight-review-pass receipts retain no delivery_mode, and commit-success skips its cross-family guard when previousMode is absent. This creates a supported recovery-to-typed-operation path that loses the configured gate family.",
+          "likelihood": "possible",
+          "security_impact": "moderate",
+          "safety_impact": "none",
+          "message": "Preserve delivery mode across compatibility failure recovery: the missing mode lets a remote workflow switch to local-only and reach completion without required push and exact-SHA CI gates.",
+          "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+          "line": 428,
+          "scenario": "Initialize a pull-request or direct-to-trunk checkpoint before any CI history exists, record passing tests and lightweight review, then recover a real failed pre-commit attempt using the documented record-checkpoint-failure.sh helper. After the causal repair, use typed edit-pass and lightweight-review-pass, make the actual reviewed direct-successor commit, and submit commit-success with mode=local-only. Since previousMode is undefined, the guard at line 430 is skipped. Valid exact verification, local-delivery and terminal-review-pass can then produce complete with no push or CI observation. This requires no fabricated failure, source attestation, or manual checkpoint edits; an incorrect mode selection after supported recovery is sufficient. The path is statically traced, not executed in this read-only review.",
+          "suggested_fix": "Carry the authoritative delivery mode through the compatibility failure transition, preferably by routing it through the typed failure operation when a typed predecessor exists. Fail closed when typed continuation cannot recover an established mode; require an explicit authoritative legacy reconciliation instead of silently accepting a new gate family. Add a mixed compatibility-recovery/typed-continuation regression for a remote workflow with empty CI history.",
+          "relevance": {
+            "category": "diff_changed_file",
+            "explanation": "The new typed checkpoint API explicitly promises to reject crossing local and remote gate families, while the newly added supported failure helper can erase the only retained mode context. This weakens the exact-revision delivery and CI obligations the change is required to preserve."
+          }
+        }
+      ],
+      "caller_attestation": {
+        "model_role": "gpt-6-astra",
+        "fresh_context": true,
+        "closed_after_result": true
+      }
+    },
+    {
+      "lens": "architecture-maintainability",
+      "subagent_key": "ai-plugins-reliable-review-orchestration-final:1:architecture-maintainability",
+      "status": "findings",
+      "shared_test_evidence_id": "review-orchestration-delivered-tests",
+      "additional_broad_test_run": false,
+      "findings": [
+        {
+          "finding_id": "checkpoint-untracked-filter-identity-divergence",
+          "severity": "MINOR",
+          "causality": "caused",
+          "causality_evidence": "The new snapshot() in checkpoint-operations.mjs delegates untracked identity to fileIdentity(), which hashes raw file bytes. The retained publication validator in write-local-checkpoint.sh:103 and :230 instead invokes git hash-object -- <path>, applying Git clean/text conversion. The new typed entry point therefore proposes a different checkpoint-v1 untracked_sha256 from the publisher for the same unchanged file.",
+          "likelihood": "observed",
+          "security_impact": "none",
+          "safety_impact": "none",
+          "message": "Typed checkpoint transitions reject valid untracked files when Git text normalization or a clean filter changes their blob bytes, because derivation and publication use different snapshot identity algorithms.",
+          "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+          "line": 119,
+          "relevance": {
+            "category": "diff_changed_file",
+            "explanation": "The newly added typed checkpoint derivation duplicates the compatibility writer's canonical snapshot computation but changes its Git-filter semantics, producing a concrete disagreement at the shared publication boundary."
+          },
+          "scenario": "Reproduced with the repository Nix devshell in disposable /tmp/review-arch-filter-g008kak9/repo: commit .gitattributes containing *.txt text eol=lf, initialize a local-only checkpoint, then create untracked new.txt containing one\\r\\ntwo\\r\\n. edit-pass exits 2 with checkpoint record failed schema, snapshot, or state validation and leaves generation 0. The raw blob OID is 4e349b596c5c9d38a82829fafbaf52281c21e319; git hash-object -- new.txt returns 814f4a422927b82f5f8a43f8fab6d3839e3983f2. Replacing only CRLF with LF makes the identical pending operation succeed at generation 1. Diagnostic source: /tmp/ai-plugins-review-runtime/round1/check-filter-identity.py; retained result: /tmp/review-arch-filter-g008kak9/summary.json. No source or existing checkpoint is lost, but ordinary progress is blocked for the original valid working tree.",
+          "suggested_fix": "Give typed derivation and the compatibility publisher one canonical checkpoint snapshot implementation, preserving checkpoint-v1 Git-filter semantics for untracked snapshot entries. Keep the separate raw reviewed-source identity explicit rather than silently changing both identities. Add a focused regression with an untracked CRLF file under text attributes and, if supported, a clean filter.",
+          "suspected_pii": false
+        }
+      ],
+      "caller_attestation": {
+        "model_role": "gpt-6-astra",
+        "fresh_context": true,
+        "closed_after_result": true
+      }
+    },
+    {
+      "lens": "operability-user-impact",
+      "subagent_key": "ai-plugins-reliable-review-orchestration-final:1:operability-user-impact",
+      "status": "clean",
+      "shared_test_evidence_id": "review-orchestration-delivered-tests",
+      "additional_broad_test_run": false,
+      "findings": [],
+      "caller_attestation": {
+        "model_role": "gpt-6-sol",
+        "fresh_context": true,
+        "closed_after_result": true
+      }
+    },
+    {
+      "lens": "release-integration",
+      "subagent_key": "ai-plugins-reliable-review-orchestration-final:1:release-integration",
+      "status": "clean",
+      "shared_test_evidence_id": "review-orchestration-delivered-tests",
+      "additional_broad_test_run": false,
+      "findings": [],
+      "caller_attestation": {
+        "model_role": "gpt-6-sol",
+        "fresh_context": true,
+        "closed_after_result": true
+      }
+    },
+    {
+      "lens": "production-risk-footguns",
+      "subagent_key": "ai-plugins-reliable-review-orchestration-final:1:production-risk-footguns",
+      "status": "findings",
+      "shared_test_evidence_id": "review-orchestration-delivered-tests",
+      "additional_broad_test_run": false,
+      "findings": [
+        {
+          "finding_id": "checkpoint-gitlink-recovery-hold",
+          "severity": "MAJOR",
+          "causality": "caused",
+          "causality_evidence": "checkpoint-operations.mjs is new in this diff. Its sourceIdentity enumerates cached paths, then fileIdentity rejects any path that is neither a regular file nor a symlink. A Git gitlink is a tracked path represented by a directory in the worktree.",
+          "likelihood": "observed",
+          "security_impact": "none",
+          "safety_impact": "none",
+          "message": "A repository containing a Git submodule cannot initialize or advance its required local checkpoint: source identity rejects the tracked gitlink as an unsupported file type.",
+          "relevance": {
+            "category": "diff_changed_file",
+            "explanation": "The new checkpoint operation runs sourceIdentity on every transition, and this failure blocks the repository workflow for a supported Git tree shape."
+          },
+          "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+          "line": 145,
+          "scenario": "In an isolated temporary Git repository, I committed a mode-160000 gitlink, created its worktree directory, then invoked prepare initialize in local-only mode. It exited 3 with \"checkpoint operation: unsupported source file type; recovery hold\" before writing a record.",
+          "suggested_fix": "Handle tracked mode-160000 paths explicitly in sourceIdentity, binding the gitlink commit identity and defining how a checked-out submodule HEAD affects the source snapshot. Add a focused submodule fixture."
+        },
+        {
+          "finding_id": "checkpoint-source-identity-unbounded-file-buffer",
+          "severity": "MAJOR",
+          "causality": "caused",
+          "causality_evidence": "The new fileIdentity calls fs.readFileSync for each regular file, and sourceIdentity invokes it for every cached and untracked path on every prepare call. There is no per-file or aggregate size bound; the resulting Buffer is held while the Git blob hash is computed.",
+          "likelihood": "possible",
+          "security_impact": "none",
+          "safety_impact": "none",
+          "message": "A large tracked binary can exhaust the Node process during an otherwise routine checkpoint transition, leaving the workflow unable to record progress.",
+          "relevance": {
+            "category": "diff_changed_file",
+            "explanation": "The new source-identity implementation is invoked on every checkpoint operation, including clean initialization and evidence-only transitions."
+          },
+          "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+          "line": 150,
+          "scenario": "A repository has a tracked artifact larger than available process memory. prepare calls sourceIdentity, which reads that entire file into one Buffer even when it is unchanged, and the process is killed or fails before publishing the checkpoint.",
+          "suggested_fix": "Compute Git blob identities by streaming file bytes with known length, and stream the path-identity digest instead of retaining all entries in a concatenated Buffer."
+        }
+      ],
+      "caller_attestation": {
+        "model_role": "gpt-6-sol",
+        "fresh_context": true,
+        "closed_after_result": true
+      }
+    }
+  ],
+  "filtered": {
+    "actionable": [],
+    "already_tracked": [],
+    "clean": false,
+    "defended_or_accepted": [],
+    "follow_up_tickets_required": [
+      {
+        "causality": "caused",
+        "causality_evidence": "The new snapshot() in checkpoint-operations.mjs delegates untracked identity to fileIdentity(), which hashes raw file bytes. The retained publication validator in write-local-checkpoint.sh:103 and :230 instead invokes git hash-object -- <path>, applying Git clean/text conversion. The new typed entry point therefore proposes a different checkpoint-v1 untracked_sha256 from the publisher for the same unchanged file.",
+        "disposition": "ticket",
+        "finding_id": "checkpoint-untracked-filter-identity-divergence",
+        "id": "checkpoint-untracked-filter-identity-divergence",
+        "lens": "architecture-maintainability",
+        "likelihood": "observed",
+        "line": 119,
+        "message": "Typed checkpoint transitions reject valid untracked files when Git text normalization or a clean filter changes their blob bytes, because derivation and publication use different snapshot identity algorithms.",
+        "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+        "relevance": {
+          "category": "diff_changed_file",
+          "explanation": "The newly added typed checkpoint derivation duplicates the compatibility writer's canonical snapshot computation but changes its Git-filter semantics, producing a concrete disagreement at the shared publication boundary."
+        },
+        "safety_impact": "none",
+        "scenario": "Reproduced with the repository Nix devshell in disposable /tmp/review-arch-filter-g008kak9/repo: commit .gitattributes containing *.txt text eol=lf, initialize a local-only checkpoint, then create untracked new.txt containing one\\r\\ntwo\\r\\n. edit-pass exits 2 with checkpoint record failed schema, snapshot, or state validation and leaves generation 0. The raw blob OID is 4e349b596c5c9d38a82829fafbaf52281c21e319; git hash-object -- new.txt returns 814f4a422927b82f5f8a43f8fab6d3839e3983f2. Replacing only CRLF with LF makes the identical pending operation succeed at generation 1. Diagnostic source: /tmp/ai-plugins-review-runtime/round1/check-filter-identity.py; retained result: /tmp/review-arch-filter-g008kak9/summary.json. No source or existing checkpoint is lost, but ordinary progress is blocked for the original valid working tree.",
+        "security_impact": "none",
+        "severity": "MINOR",
+        "suggested_fix": "Give typed derivation and the compatibility publisher one canonical checkpoint snapshot implementation, preserving checkpoint-v1 Git-filter semantics for untracked snapshot entries. Keep the separate raw reviewed-source identity explicit rather than silently changing both identities. Add a focused regression with an untracked CRLF file under text attributes and, if supported, a clean filter.",
+        "suspected_pii": false
+      },
+      {
+        "causality": "caused",
+        "causality_evidence": "checkpoint-operations.mjs is new in this diff. Its sourceIdentity enumerates cached paths, then fileIdentity rejects any path that is neither a regular file nor a symlink. A Git gitlink is a tracked path represented by a directory in the worktree.",
+        "disposition": "ticket",
+        "finding_id": "checkpoint-gitlink-recovery-hold",
+        "id": "checkpoint-gitlink-recovery-hold",
+        "lens": "production-risk-footguns",
+        "likelihood": "observed",
+        "line": 145,
+        "message": "A repository containing a Git submodule cannot initialize or advance its required local checkpoint: source identity rejects the tracked gitlink as an unsupported file type.",
+        "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+        "relevance": {
+          "category": "diff_changed_file",
+          "explanation": "The new checkpoint operation runs sourceIdentity on every transition, and this failure blocks the repository workflow for a supported Git tree shape."
+        },
+        "safety_impact": "none",
+        "scenario": "In an isolated temporary Git repository, I committed a mode-160000 gitlink, created its worktree directory, then invoked prepare initialize in local-only mode. It exited 3 with \"checkpoint operation: unsupported source file type; recovery hold\" before writing a record.",
+        "security_impact": "none",
+        "severity": "MAJOR",
+        "suggested_fix": "Handle tracked mode-160000 paths explicitly in sourceIdentity, binding the gitlink commit identity and defining how a checked-out submodule HEAD affects the source snapshot. Add a focused submodule fixture."
+      },
+      {
+        "causality": "caused",
+        "causality_evidence": "The new fileIdentity calls fs.readFileSync for each regular file, and sourceIdentity invokes it for every cached and untracked path on every prepare call. There is no per-file or aggregate size bound; the resulting Buffer is held while the Git blob hash is computed.",
+        "disposition": "ticket",
+        "finding_id": "checkpoint-source-identity-unbounded-file-buffer",
+        "id": "checkpoint-source-identity-unbounded-file-buffer",
+        "lens": "production-risk-footguns",
+        "likelihood": "possible",
+        "line": 150,
+        "message": "A large tracked binary can exhaust the Node process during an otherwise routine checkpoint transition, leaving the workflow unable to record progress.",
+        "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+        "relevance": {
+          "category": "diff_changed_file",
+          "explanation": "The new source-identity implementation is invoked on every checkpoint operation, including clean initialization and evidence-only transitions."
+        },
+        "safety_impact": "none",
+        "scenario": "A repository has a tracked artifact larger than available process memory. prepare calls sourceIdentity, which reads that entire file into one Buffer even when it is unchanged, and the process is killed or fails before publishing the checkpoint.",
+        "security_impact": "none",
+        "severity": "MAJOR",
+        "suggested_fix": "Compute Git blob identities by streaming file bytes with known length, and stream the path-identity digest instead of retaining all entries in a concatenated Buffer."
+      }
+    ],
+    "malformed": [
+      {
+        "causality": "caused",
+        "causality_evidence": "The diff adds both the compatibility failure helper and typed delivery-mode enforcement. record-checkpoint-failure.sh:98-111 publishes a failing successor with delivery=null through write-local-checkpoint.sh without --operation, so the successor has no typed operation receipt. checkpoint-operations.mjs:229-244 retrieves context only from a receipt matching the exact current record digest; lines 419-430 consequently leave mode and previousMode undefined after that supported recovery. Subsequent typed edit-pass/lightweight-review-pass receipts retain no delivery_mode, and commit-success skips its cross-family guard when previousMode is absent. This creates a supported recovery-to-typed-operation path that loses the configured gate family.",
+        "filter_reason": "security-safety findings require suspected_pii classification",
+        "finding_id": "checkpoint-recovery-loses-delivery-gate-family",
+        "id": "checkpoint-recovery-loses-delivery-gate-family",
+        "lens": "security-safety",
+        "likelihood": "possible",
+        "line": 428,
+        "message": "Preserve delivery mode across compatibility failure recovery: the missing mode lets a remote workflow switch to local-only and reach completion without required push and exact-SHA CI gates.",
+        "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+        "relevance": {
+          "category": "diff_changed_file",
+          "explanation": "The new typed checkpoint API explicitly promises to reject crossing local and remote gate families, while the newly added supported failure helper can erase the only retained mode context. This weakens the exact-revision delivery and CI obligations the change is required to preserve."
+        },
+        "safety_impact": "none",
+        "scenario": "Initialize a pull-request or direct-to-trunk checkpoint before any CI history exists, record passing tests and lightweight review, then recover a real failed pre-commit attempt using the documented record-checkpoint-failure.sh helper. After the causal repair, use typed edit-pass and lightweight-review-pass, make the actual reviewed direct-successor commit, and submit commit-success with mode=local-only. Since previousMode is undefined, the guard at line 430 is skipped. Valid exact verification, local-delivery and terminal-review-pass can then produce complete with no push or CI observation. This requires no fabricated failure, source attestation, or manual checkpoint edits; an incorrect mode selection after supported recovery is sufficient. The path is statically traced, not executed in this read-only review.",
+        "security_impact": "moderate",
+        "severity": "MAJOR",
+        "suggested_fix": "Carry the authoritative delivery mode through the compatibility failure transition, preferably by routing it through the typed failure operation when a typed predecessor exists. Fail closed when typed continuation cannot recover an established mode; require an explicit authoritative legacy reconciliation instead of silently accepting a new gate family. Add a mixed compatibility-recovery/typed-continuation regression for a remote workflow with empty CI history."
+      }
+    ],
+    "needs_human_decision": [],
+    "out_of_scope": [],
+    "routed": [
+      {
+        "causality": "caused",
+        "causality_evidence": "The new snapshot() in checkpoint-operations.mjs delegates untracked identity to fileIdentity(), which hashes raw file bytes. The retained publication validator in write-local-checkpoint.sh:103 and :230 instead invokes git hash-object -- <path>, applying Git clean/text conversion. The new typed entry point therefore proposes a different checkpoint-v1 untracked_sha256 from the publisher for the same unchanged file.",
+        "disposition": "ticket",
+        "finding_id": "checkpoint-untracked-filter-identity-divergence",
+        "id": "checkpoint-untracked-filter-identity-divergence",
+        "lens": "architecture-maintainability",
+        "likelihood": "observed",
+        "line": 119,
+        "message": "Typed checkpoint transitions reject valid untracked files when Git text normalization or a clean filter changes their blob bytes, because derivation and publication use different snapshot identity algorithms.",
+        "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+        "relevance": {
+          "category": "diff_changed_file",
+          "explanation": "The newly added typed checkpoint derivation duplicates the compatibility writer's canonical snapshot computation but changes its Git-filter semantics, producing a concrete disagreement at the shared publication boundary."
+        },
+        "safety_impact": "none",
+        "scenario": "Reproduced with the repository Nix devshell in disposable /tmp/review-arch-filter-g008kak9/repo: commit .gitattributes containing *.txt text eol=lf, initialize a local-only checkpoint, then create untracked new.txt containing one\\r\\ntwo\\r\\n. edit-pass exits 2 with checkpoint record failed schema, snapshot, or state validation and leaves generation 0. The raw blob OID is 4e349b596c5c9d38a82829fafbaf52281c21e319; git hash-object -- new.txt returns 814f4a422927b82f5f8a43f8fab6d3839e3983f2. Replacing only CRLF with LF makes the identical pending operation succeed at generation 1. Diagnostic source: /tmp/ai-plugins-review-runtime/round1/check-filter-identity.py; retained result: /tmp/review-arch-filter-g008kak9/summary.json. No source or existing checkpoint is lost, but ordinary progress is blocked for the original valid working tree.",
+        "security_impact": "none",
+        "severity": "MINOR",
+        "suggested_fix": "Give typed derivation and the compatibility publisher one canonical checkpoint snapshot implementation, preserving checkpoint-v1 Git-filter semantics for untracked snapshot entries. Keep the separate raw reviewed-source identity explicit rather than silently changing both identities. Add a focused regression with an untracked CRLF file under text attributes and, if supported, a clean filter.",
+        "suspected_pii": false
+      },
+      {
+        "causality": "caused",
+        "causality_evidence": "checkpoint-operations.mjs is new in this diff. Its sourceIdentity enumerates cached paths, then fileIdentity rejects any path that is neither a regular file nor a symlink. A Git gitlink is a tracked path represented by a directory in the worktree.",
+        "disposition": "ticket",
+        "finding_id": "checkpoint-gitlink-recovery-hold",
+        "id": "checkpoint-gitlink-recovery-hold",
+        "lens": "production-risk-footguns",
+        "likelihood": "observed",
+        "line": 145,
+        "message": "A repository containing a Git submodule cannot initialize or advance its required local checkpoint: source identity rejects the tracked gitlink as an unsupported file type.",
+        "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+        "relevance": {
+          "category": "diff_changed_file",
+          "explanation": "The new checkpoint operation runs sourceIdentity on every transition, and this failure blocks the repository workflow for a supported Git tree shape."
+        },
+        "safety_impact": "none",
+        "scenario": "In an isolated temporary Git repository, I committed a mode-160000 gitlink, created its worktree directory, then invoked prepare initialize in local-only mode. It exited 3 with \"checkpoint operation: unsupported source file type; recovery hold\" before writing a record.",
+        "security_impact": "none",
+        "severity": "MAJOR",
+        "suggested_fix": "Handle tracked mode-160000 paths explicitly in sourceIdentity, binding the gitlink commit identity and defining how a checked-out submodule HEAD affects the source snapshot. Add a focused submodule fixture."
+      },
+      {
+        "causality": "caused",
+        "causality_evidence": "The new fileIdentity calls fs.readFileSync for each regular file, and sourceIdentity invokes it for every cached and untracked path on every prepare call. There is no per-file or aggregate size bound; the resulting Buffer is held while the Git blob hash is computed.",
+        "disposition": "ticket",
+        "finding_id": "checkpoint-source-identity-unbounded-file-buffer",
+        "id": "checkpoint-source-identity-unbounded-file-buffer",
+        "lens": "production-risk-footguns",
+        "likelihood": "possible",
+        "line": 150,
+        "message": "A large tracked binary can exhaust the Node process during an otherwise routine checkpoint transition, leaving the workflow unable to record progress.",
+        "path": "plugins/development-system/scripts/checkpoint-operations.mjs",
+        "relevance": {
+          "category": "diff_changed_file",
+          "explanation": "The new source-identity implementation is invoked on every checkpoint operation, including clean initialization and evidence-only transitions."
+        },
+        "safety_impact": "none",
+        "scenario": "A repository has a tracked artifact larger than available process memory. prepare calls sourceIdentity, which reads that entire file into one Buffer even when it is unchanged, and the process is killed or fails before publishing the checkpoint.",
+        "security_impact": "none",
+        "severity": "MAJOR",
+        "suggested_fix": "Compute Git blob identities by streaming file bytes with known length, and stream the path-identity digest instead of retaining all entries in a concatenated Buffer."
+      }
+    ],
+    "security_escalations_required": [],
+    "transition": {
+      "complete_lens_set": true,
+      "diff_hash": "f3e49cfccf9f5b799a82186d4a7c5006918931ef",
+      "expected_lenses": [
+        "correctness-behavior",
+        "tests-verification",
+        "security-safety",
+        "architecture-maintainability",
+        "operability-user-impact",
+        "release-integration",
+        "production-risk-footguns"
+      ],
+      "expected_subagent_keys": [
+        "ai-plugins-reliable-review-orchestration-final:1:correctness-behavior",
+        "ai-plugins-reliable-review-orchestration-final:1:tests-verification",
+        "ai-plugins-reliable-review-orchestration-final:1:security-safety",
+        "ai-plugins-reliable-review-orchestration-final:1:architecture-maintainability",
+        "ai-plugins-reliable-review-orchestration-final:1:operability-user-impact",
+        "ai-plugins-reliable-review-orchestration-final:1:release-integration",
+        "ai-plugins-reliable-review-orchestration-final:1:production-risk-footguns"
+      ],
+      "iteration_index": 1,
+      "seen_subagent_keys": [
+        "ai-plugins-reliable-review-orchestration-final:1:correctness-behavior",
+        "ai-plugins-reliable-review-orchestration-final:1:tests-verification",
+        "ai-plugins-reliable-review-orchestration-final:1:security-safety",
+        "ai-plugins-reliable-review-orchestration-final:1:architecture-maintainability",
+        "ai-plugins-reliable-review-orchestration-final:1:operability-user-impact",
+        "ai-plugins-reliable-review-orchestration-final:1:release-integration",
+        "ai-plugins-reliable-review-orchestration-final:1:production-risk-footguns"
+      ],
+      "session_id": "ai-plugins-reliable-review-orchestration-final"
+    }
+  },
+  "scope": {
+    "base": "origin/main",
+    "baseline_commit": "4b4721707ba9dd622f2fa76697e262a714bd9611",
+    "changed_files": [
+      ".agents/plugins/marketplace.json",
+      "README.md",
+      "docs/adr/0017-recoverable-evidence-bound-review-orchestration.md",
+      "evals/fixtures/behavior/development-discipline/cases.json",
+      "plugins/development-system/README.md",
+      "plugins/development-system/components/development-discipline/rust/src/main.rs",
+      "plugins/development-system/components/development-discipline/rust/src/review_budget.rs",
+      "plugins/development-system/components/development-discipline/rust/src/review_budget_tests.rs",
+      "plugins/development-system/components/development-discipline/rust/src/review_recovery.rs",
+      "plugins/development-system/components/development-discipline/rust/src/review_recovery_tests.rs",
+      "plugins/development-system/components/development-discipline/rust/src/review_replay.rs",
+      "plugins/development-system/components/development-discipline/rust/src/review_resolution.rs",
+      "plugins/development-system/components/development-discipline/rust/src/review_yield.rs",
+      "plugins/development-system/components/development-discipline/rust/tests/review_recovery.rs",
+      "plugins/development-system/components/development-discipline/rust/tests/review_replay.rs",
+      "plugins/development-system/components/development-discipline/rust/tests/review_yield.rs",
+      "plugins/development-system/components/development-discipline/skills/delivery-workflow/SKILL.md",
+      "plugins/development-system/components/development-discipline/skills/final-review/SKILL.md",
+      "plugins/development-system/components/development-discipline/skills/final-review/references/mcp-protocol.md",
+      "plugins/development-system/components/development-discipline/skills/test-driven-development/SKILL.md",
+      "plugins/development-system/components/tiber/rust/crates/tiber-git/src/git_event_store.rs",
+      "plugins/development-system/plugin.json",
+      "plugins/development-system/scripts/checkpoint-operations.mjs",
+      "plugins/development-system/scripts/checkpoint-record.jq",
+      "plugins/development-system/scripts/record-checkpoint-failure.sh",
+      "plugins/development-system/scripts/replay-review-operation.md",
+      "plugins/development-system/scripts/replay-review-operation.sh",
+      "plugins/development-system/scripts/transition-local-checkpoint.sh",
+      "plugins/development-system/scripts/write-local-checkpoint.sh",
+      "plugins/development-system/skills/delivery/SKILL.md",
+      "plugins/development-system/skills/development-workflow/SKILL.md",
+      "plugins/development-system/skills/development-workflow/references/checkpoint-operations.md",
+      "scripts/tests/checkpoint-recovery.bats",
+      "scripts/tests/checkpoint-transitions.bats",
+      "scripts/tests/review-persistence-replay.bats"
+    ],
+    "diff_hash": "f3e49cfccf9f5b799a82186d4a7c5006918931ef",
+    "kind": "base",
+    "project_root": "/home/jwilger/src/ai-plugins",
+    "review_lifecycle": "unlanded",
+    "snapshot_commit": "a7bc73b2ea9895448b05acafff8883207187ab1a",
+    "split_lineage": null
+  }
+}

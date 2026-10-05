@@ -185,7 +185,11 @@ impl EventStoreOperationLock {
             .truncate(false)
             .read(true)
             .write(true)
-            .open(directory.join("eventstore-operation.lock"))?;
+            .open(directory.join("eventstore-operation.lock"))
+            .map_err(|error| GitEventStoreOpenError::Git(format!(
+                "phase=authority_lock path={} retryable=after_path_permission_repair source={error}",
+                directory.join("eventstore-operation.lock").display()
+            )))?;
         file.lock()?;
         Ok(Self { _file: file })
     }
@@ -472,7 +476,8 @@ impl EventStore for GitEventStore {
                             )
                             .map_err(|_| store_failure(Operation::AppendEvents))?;
                         }
-                        Err(_) => {
+                        Err(error) => {
+                            let _ = diagnosed_store_failure(Operation::AppendEvents, &error);
                             persist_indeterminate(self, &rebased_candidate, &merged)?;
                             *self.stage.lock().await = merged;
                             return Err(store_failure(Operation::AppendEvents));
@@ -481,7 +486,8 @@ impl EventStore for GitEventStore {
                 }
                 Err(store_failure(Operation::AppendEvents))
             }
-            Err(_) => {
+            Err(error) => {
+                let _ = diagnosed_store_failure(Operation::AppendEvents, &error);
                 persist_indeterminate(self, &candidate, &stage)?;
                 *self.stage.lock().await = stage;
                 Err(store_failure(Operation::AppendEvents))
@@ -969,6 +975,11 @@ fn publish_local(
         .is_some_and(|head| is_ancestor(repository, candidate, head))
     {
         Ok(Publication::Confirmed)
+    } else if current.as_deref() == base {
+        // A failed ref write with unchanged authority is not a concurrency
+        // conflict. Preserve its diagnostics and the existing indeterminate
+        // candidate reconciliation instead of repeatedly rerunning the command.
+        Err(git_error("publish local authority", &update))
     } else {
         Ok(Publication::Conflict)
     }
@@ -1161,6 +1172,10 @@ where
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
+    let arguments = arguments
+        .into_iter()
+        .map(|value| value.as_ref().to_os_string())
+        .collect::<Vec<_>>();
     let mut command = Command::new("git");
     command.arg("-C").arg(repository);
     if let Some(work_tree) = work_tree {
@@ -1174,10 +1189,20 @@ where
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .args(arguments);
+        .args(&arguments);
     let mut child = command.spawn()?;
     match child.wait_timeout(GIT_TIMEOUT)? {
-        Some(_) => child.wait_with_output().map_err(GitEventStoreOpenError::Io),
+        Some(_) => {
+            let mut output = child.wait_with_output()?;
+            if !output.status.success() {
+                if let Some(context) = git_write_failure_context(repository, &arguments) {
+                    let mut stderr = format!("{context}\n").into_bytes();
+                    stderr.extend_from_slice(&output.stderr);
+                    output.stderr = stderr;
+                }
+            }
+            Ok(output)
+        }
         None => {
             child.kill()?;
             let _ = child.wait();
@@ -1186,6 +1211,51 @@ where
             ))
         }
     }
+}
+
+fn git_write_failure_context(
+    repository: &Path,
+    arguments: &[std::ffi::OsString],
+) -> Option<String> {
+    let operation = arguments.first()?.to_str()?;
+    let (phase, suffix, retry) = match operation {
+        "add" | "write-tree" => ("objects", "objects", "after_path_permission_repair"),
+        "commit-tree" if arguments.iter().any(|arg| arg == "-S") => (
+            "signing",
+            "objects",
+            "after_signing_configuration_or_agent_repair",
+        ),
+        "commit-tree" => ("commit_object", "objects", "after_path_permission_repair"),
+        "update-ref" => (
+            "ref_publication",
+            arguments.get(1)?.to_str()?,
+            "reconcile_authority_before_retry",
+        ),
+        _ => return None,
+    };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repository)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let directory = String::from_utf8(output.stdout).ok()?;
+    let common = Path::new(directory.strip_suffix('\n').unwrap_or(&directory));
+    Some(format!(
+        "phase={phase} path={}{} retryable={retry}",
+        common.join(suffix).display(),
+        if operation == "update-ref" {
+            format!(
+                " reflog_path={}",
+                common.join("logs").join(suffix).display()
+            )
+        } else {
+            String::new()
+        }
+    ))
 }
 
 fn require_success(output: Output) -> Result<Output, GitEventStoreOpenError> {

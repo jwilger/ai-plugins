@@ -12,17 +12,8 @@ ci: validate-marketplace github-actions tiber-harness-rust tiber-rust developmen
 # The developer gate runs before every commit. It deliberately excludes
 # acceptance, release, browser, mutation, and shell suites; CI owns those after
 # the push. It still runs formatting, linting, and every Rust unit-test target.
-pre-commit: validate-marketplace github-actions
-    bash tiber/scripts/check-lint-policy.sh
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo fmt --manifest-path tiber/Cargo.toml --all --check
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo clippy --manifest-path tiber/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo test --manifest-path tiber/Cargo.toml --workspace --all-features
-    cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
-    cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
-    cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
-    cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
-    cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp -- --test-threads=1
+pre-commit:
+    bash scripts/run-pre-commit-gate.sh
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
