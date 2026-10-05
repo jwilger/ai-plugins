@@ -77,6 +77,7 @@
             ];
 
           shellHook = ''
+            export AI_PLUGINS_RUST_ANALYZER_BIN="${pkgs.rust-analyzer}/bin/rust-analyzer"
             ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
               # Candidate verifiers resolve these exact flake-selected tools;
               # they must not discover security boundaries through caller PATH.

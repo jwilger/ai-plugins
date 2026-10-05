@@ -7,4 +7,4 @@ serena_repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$serena_repo_root"
 serena_nix_env="$(nix print-dev-env)"
 eval "$serena_nix_env" >&2
-exec rust-analyzer "$@"
+exec "${AI_PLUGINS_RUST_ANALYZER_BIN:?flake-selected rust-analyzer path unavailable}" "$@"
