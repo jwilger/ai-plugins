@@ -59,6 +59,7 @@
               chromium
               clippy
               rustc
+              rust-analyzer
               rustfmt
               rustup
               zig
