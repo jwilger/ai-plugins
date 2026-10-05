@@ -108,3 +108,41 @@ surface, not the ordinary workflow API. Successful typed commits need a retained
 typed review receipt so source can be compared independently of staging and
 HEAD; reconcile a legacy pending commit explicitly instead of inventing that
 missing source attestation.
+
+Compatibility gate failures with an exact typed predecessor use the same typed
+failure operation, task lock, CAS checks, and durable publication recovery. The
+compatibility helper derives a stable operation ID from the expected generation
+and predecessor; retry with the same arguments to recover interrupted
+publication. Changed arguments under that ID fail closed. Both hook and
+lightweight-review failures retain the established delivery mode, including
+local-only. Remote-to-remote rebinding remains available at `commit-success`;
+a failure cannot authorize crossing between remote and local gate families.
+Legacy records still support compatibility failure publication. If their current
+record and exact receipt do not establish a delivery mode, typed continuation
+holds: continue through the compatibility full-record workflow while explicitly
+reconciling delivery and review evidence. Do not infer local-only from absent CI,
+reuse an unrelated historical receipt, or manufacture missing source evidence.
+
+The published `checkpoint-v1` snapshot retains Git's path-aware text/clean-filter
+conversion for untracked regular files and raw symlink targets. The separate
+reviewed-source identity hashes raw bytes, executable modes, and exact path
+bytes, independently of filters, HEAD, or staging. Thus a raw edit that cleans to
+the same Git blob still invalidates review. Raw identity is checked again before
+the writer creates its durable publication intent. Regular source files are hashed in
+64 KiB chunks with the repository's Git object format and checked for detected
+type, replacement, size, or metadata changes during reading. Path inventories
+and Git diff output remain buffered; this is a bound on file-content allocation,
+not a constant-memory guarantee for arbitrarily large repositories.
+
+An index-mode `160000` gitlink binds source identity to the actual HEAD of the
+clean child repository rooted at that exact path. Parent staging does not change
+that identity. A clean baseline or successful committed verification, delivery,
+or readiness claim additionally requires every gitlink's actual child HEAD and
+index entry to match the authoritative commit tree, regardless of submodule
+ignore settings. Staging a reviewed child reference does not commit it. These
+checks run again before publication; failure recording remains available for
+causal recovery. Dirty or untracked child content, including nested submodule
+changes despite ignore settings, requires reconciliation before checkpointing.
+Missing or deinitialized submodules also hold: initialize them at their recorded
+paths before continuing. Ordinary directories are not silently treated as
+submodules or omitted from source identity.

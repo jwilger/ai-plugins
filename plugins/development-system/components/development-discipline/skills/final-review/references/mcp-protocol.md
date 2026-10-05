@@ -613,6 +613,31 @@ malformed results and exclude delta/reset bookkeeping. Full historical counts
 remain unavailable when legacy records lack evidence. Inspect the returned
 references instead of estimating counts or changing clean-round policy.
 
+New round records also retain an optional compact `review_attempts` ledger.
+`review_counts` separates submitted, native-accepted and malformed lens reports;
+`round_attempts` counts captured review batches. These differ from eligible
+`completed_lens_rounds`, clean credit and coordinator iterations. A malformed
+lens leaves valid sibling attempts inspectable. The round evidence reference
+includes each attempt's submitted status, assigned and submitted subagent keys,
+native scope binding and disposition/reasons, and the caller's exact
+`model_role`, `fresh_context` and `closed_after_result` claims, including clean
+reviewers. `actual_model` is null because the protocol does not independently
+record the concrete runtime model; never infer it from `model_role`.
+`observed_review_counts` and `observed_round_attempts` cover only retained
+ledger-bearing rows. Full review counts are null if any legacy row lacks a
+ledger or earlier rows were pruned; `review_counts_available_for_full_history`
+reports that separate coverage. No history is retrofilled from iteration
+counters or old artifacts. Empty delta/reset bookkeeping adds no attempt.
+
+A bounded report with an invalid findings container still retains its attempt
+and valid sibling attempts. Its round records `raw_findings_complete: false`;
+raw allegation counts are null because the complete number is unknown.
+`retained_raw_allegations` labels only the individually retained allegations,
+not the missing total. An empty retained array then cannot establish
+`finding_free` or clean credit. Missing submitted status is null, distinct from
+the native malformed disposition. Oversized or non-array whole batches remain
+unavailable when individual submitted reports cannot be recovered.
+
 The existing serialized-state size limit remains in force. Evidence-heavy
 sessions fail closed when that limit is exceeded; no evidence is silently
 invented or dropped to authorize completion.

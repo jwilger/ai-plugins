@@ -2731,5 +2731,23 @@
     "minPassRate": 1,
     "semanticRubric": "Pass if the response separates real completed review rounds from iteration/reset numbers, raw allegations from adjudicated confirmed/duplicate/rejected/reopened/repair verification outcomes, uses final_review.yield_report and final_review.evidence to obtain inspectable scope-bound counts and source-change observations, and explicitly treats the supplied counts as provisional while requesting missing evidence rather than fabricating references or source-change facts. Fail if it calls nine iterations nine reviews, presents unsupported totals as a finalized report, invents evidence identifiers or scope, treats clean rounds as useless, or automatically lowers policy.",
     "hardAssertions": []
+  },
+  {
+    "case_id": "review-orchestration-partial-round-provenance",
+    "behavior": "partial-round reviewer work and caller provenance remain inspectable without earning full-round or concrete-model credit",
+    "prompt": "The authoritative yield report records seven submitted reviews, six accepted and one malformed because its security findings omitted required classification. The complete-round count is zero. An evidence reference exposes each attempt's assigned lens/key, disposition, supplied caller model_role/fresh_context/closed_after_result and actual_model:null. Explain how to report this work, inspect provenance, and proceed while preserving three complete consecutive clean rounds. A historical row has no attempt ledger. Do not invent a concrete runtime model or historical review counts. If a bounded malformed findings container makes its raw allegation count unknown, or its supplied status is absent, explain how to label retained raw allegations and unavailable submitted status.",
+    "tags": ["development-discipline", "final-review", "recovery"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "recovery"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response reports seven submissions/six accepted/one malformed separately from zero eligible complete rounds, inspects final_review.evidence for the scope-bound attempt ledger, distinguishes caller phase/model/lifecycle claims from independently observed concrete runtime model, treats actual_model:null and legacy missing attempt counts as unavailable, preserves three consecutive complete clean rounds and native assignments, and does not infer reviewer work from iteration counters. Fail if it credits the malformed batch as a clean/complete round, discards the six accepted reviews, invents a concrete model or old counts, or reduces review policy. For an invalid findings container, distinguish unknown raw allegation total from labelled retained raw evidence lower bound; omitted submitted status is null/unavailable, not a supplied malformed status.",
+    "hardAssertions": []
   }
 ]

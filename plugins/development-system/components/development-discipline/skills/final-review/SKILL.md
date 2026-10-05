@@ -693,3 +693,15 @@ evidence references. Inspect a reference with `final_review.evidence`; do not
 infer counts from iteration numbers or filtered bucket totals. Legacy evidence
 that was never retained is unavailable, not zero. An all-clean round supplies
 required scrutiny; its yield never changes the review policy automatically.
+Report `review_counts` (submitted, accepted, malformed) and `round_attempts`
+separately from eligible completed rounds. Inspect the round's `review_attempts`
+for each reviewer's submitted status, native disposition, assigned key, scope
+binding and caller model/lifecycle attestations, including clean reviewers and
+accepted peers of a malformed report. Concrete `actual_model` is unavailable;
+never substitute the attested `model_role`. When full review counts are null,
+label `observed_review_counts` as retained evidence only and state the missing
+legacy/pruned coverage.
+A malformed findings container leaves raw allegation totals null while bounded
+reviewer attempts remain inspectable; label `retained_raw_allegations` as a
+partial count. An absent submitted status is unavailable, even when the native
+disposition is malformed.

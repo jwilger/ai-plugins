@@ -2,6 +2,7 @@
 // lock and publishes .latest; this module never runs tests, commits, or pushes.
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -110,19 +111,53 @@ function canonical(value) {
   return value;
 }
 
+function pathDigestUpdate(hash, name, { mode, oid }) {
+  hash.update(`${mode}\0`).update(name).update(`\0${oid}\n`);
+}
+
+// checkpoint-v1 uses Git's path-aware clean conversion for regular untracked
+// files. Keep this routine shared by derivation and both publication checks.
 function snapshot(root) {
   const tracked = digest(git("diff", "--binary", "--full-index", "HEAD", "--"));
-  const stream = [];
+  const stream = crypto.createHash("sha256");
   for (const name of splitPaths(
     git("ls-files", "--full-name", "--others", "--exclude-standard", "-z"),
   )) {
-    const { mode, oid } = fileIdentity(root, name);
-    stream.push(Buffer.from(`${mode}\0`), name, Buffer.from(`\0${oid}\n`));
+    const absolute = Buffer.concat([Buffer.from(`${root}/`), name]);
+    const stat = fs.lstatSync(absolute);
+    let identity;
+    if (stat.isSymbolicLink()) identity = fileIdentity(root, name);
+    else {
+      requireThat(
+        stat.isFile(),
+        "unsupported untracked file type; recovery hold",
+      );
+      // --stdin-paths understands Git C quoting. Octal-quote every byte so paths
+      // with newlines, quotes, or invalid UTF-8 never pass through JS argv text.
+      const quoted = `"${[...name].map((byte) => `\\${byte.toString(8).padStart(3, "0")}`).join("")}"\n`;
+      const oid = execFileSync("git", ["hash-object", "--stdin-paths"], {
+        cwd: root,
+        input: quoted,
+      })
+        .toString()
+        .trim();
+      // Preserve the checkpoint-v1 shell publisher's `test -x` contract,
+      // including owner/group access and ACLs. Raw source mode uses bits below.
+      let executable = false;
+      try {
+        fs.accessSync(absolute, fs.constants.X_OK);
+        executable = true;
+      } catch (error) {
+        if (error.code !== "EACCES") throw error;
+      }
+      identity = { mode: executable ? "100755" : "100644", oid };
+    }
+    pathDigestUpdate(stream, name, identity);
   }
   return {
     head_oid: gitText("rev-parse", "HEAD"),
     tracked_sha256: tracked,
-    untracked_sha256: digest(Buffer.concat(stream)),
+    untracked_sha256: stream.digest("hex"),
   };
 }
 
@@ -138,60 +173,264 @@ function splitPaths(bytes) {
   return result;
 }
 
+function sameFile(a, b) {
+  return ["dev", "ino", "mode", "size", "mtimeNs", "ctimeNs"].every(
+    (key) => a[key] === b[key],
+  );
+}
+
 function fileIdentity(root, name) {
   const absolute = Buffer.concat([Buffer.from(`${root}/`), name]);
-  const stat = fs.lstatSync(absolute);
+  const stat = fs.lstatSync(absolute, { bigint: true });
   requireThat(
     stat.isFile() || stat.isSymbolicLink(),
     "unsupported source file type; recovery hold",
   );
-  const bytes = stat.isSymbolicLink()
-    ? fs.readlinkSync(absolute, { encoding: "buffer" })
-    : fs.readFileSync(absolute);
-  const mode = stat.isSymbolicLink()
-    ? "120000"
-    : (stat.mode & 0o111) !== 0
-      ? "100755"
-      : "100644";
   objectFormat ??= gitText("rev-parse", "--show-object-format");
-  const oid = crypto
-    .createHash(objectFormat)
-    .update(`blob ${bytes.length}\0`)
-    .update(bytes)
-    .digest("hex");
-  return { mode, oid };
+  const hash = crypto.createHash(objectFormat);
+  let mode;
+  if (stat.isSymbolicLink()) {
+    const bytes = fs.readlinkSync(absolute, { encoding: "buffer" });
+    hash.update(`blob ${bytes.length}\0`).update(bytes);
+    mode = "120000";
+  } else {
+    const fd = fs.openSync(
+      absolute,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
+    try {
+      const opened = fs.fstatSync(fd, { bigint: true });
+      requireThat(
+        opened.isFile() && sameFile(stat, opened),
+        "source file changed before hashing; recovery hold",
+      );
+      hash.update(`blob ${opened.size}\0`);
+      const chunk = Buffer.allocUnsafe(64 * 1024);
+      let total = 0n;
+      for (;;) {
+        const size = fs.readSync(fd, chunk, 0, chunk.length, null);
+        if (size === 0) break;
+        total += BigInt(size);
+        requireThat(
+          total <= opened.size,
+          "source file grew while hashing; recovery hold",
+        );
+        hash.update(chunk.subarray(0, size));
+      }
+      requireThat(
+        total === opened.size &&
+          sameFile(opened, fs.fstatSync(fd, { bigint: true })),
+        "source file changed while hashing; recovery hold",
+      );
+    } finally {
+      fs.closeSync(fd);
+    }
+    mode = (stat.mode & 0o111n) !== 0n ? "100755" : "100644";
+  }
+  requireThat(
+    sameFile(stat, fs.lstatSync(absolute, { bigint: true })),
+    "source path changed while hashing; recovery hold",
+  );
+  return { mode, oid: hash.digest("hex") };
 }
 
-// Unlike snapshot, this identity is independent of HEAD and staging partition.
-// Keep exact path bytes, executable modes, and symlink target bytes.
-function sourceIdentity(root) {
-  const paths = splitPaths(
-    git(
-      "ls-files",
-      "--full-name",
-      "--cached",
-      "--others",
-      "--exclude-standard",
-      "-z",
-    ),
-  );
-  const unique = new Map(paths.map((name) => [name.toString("hex"), name]));
-  const stream = [];
-  for (const name of [...unique.values()].sort(Buffer.compare)) {
-    let identity;
-    try {
-      identity = fileIdentity(root, name);
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      throw error;
-    }
-    stream.push(
-      Buffer.from(`${identity.mode}\0`),
-      name,
-      Buffer.from(`\0${identity.oid}\n`),
+function indexEntries(bytes) {
+  return splitPaths(bytes).map((entry) => {
+    const tab = entry.indexOf(9);
+    requireThat(tab > 0, "malformed Git index entry");
+    const [mode, oid, stage] = entry
+      .subarray(0, tab)
+      .toString("ascii")
+      .split(" ");
+    requireThat(
+      stage === "0",
+      "unmerged index; resolve conflicts before checkpointing",
     );
+    return { name: entry.subarray(tab + 1), mode, oid };
+  });
+}
+
+// Committed cleanliness is separate from checkpoint-v1's configurable Git diff
+// and from raw reviewed source, which intentionally ignores staging partition.
+function committedGitlinks(indexBytes, treeBytes) {
+  const indexed = new Map(
+    indexEntries(indexBytes)
+      .filter((entry) => entry.mode === "160000")
+      .map((entry) => [entry.name.toString("hex"), entry.oid]),
+  );
+  const committed = splitPaths(treeBytes).flatMap((entry) => {
+    const tab = entry.indexOf(9);
+    requireThat(tab > 0, "malformed Git tree entry");
+    const [mode, type, oid] = entry
+      .subarray(0, tab)
+      .toString("ascii")
+      .split(" ");
+    if (mode !== "160000") return [];
+    requireThat(type === "commit", "malformed Git tree gitlink");
+    return [{ name: entry.subarray(tab + 1), oid }];
+  });
+  requireThat(
+    indexed.size === committed.length &&
+      committed.every(
+        (entry) => indexed.get(entry.name.toString("hex")) === entry.oid,
+      ),
+    "committed gitlinks do not match the index; stage and commit the reviewed child references before claiming committed delivery",
+  );
+  return committed;
+}
+
+function requireCommittedGitlinks(root, head) {
+  const requireHead = () =>
+    requireThat(
+      gitText("rev-parse", "HEAD") === head,
+      "HEAD changed while checking committed gitlinks; recovery hold",
+    );
+  requireHead();
+  const entries = committedGitlinks(
+    git("ls-files", "--full-name", "--stage", "-z"),
+    git("ls-tree", "--full-tree", "-r", "-z", head),
+  );
+  for (const entry of entries)
+    requireThat(
+      gitlinkIdentity(root, entry.name).oid === entry.oid,
+      "committed gitlink does not match the actual clean child HEAD; stage and commit the reviewed child reference before claiming committed delivery",
+    );
+  requireHead();
+}
+
+function requiresCommittedGitlinks(operation, previous, ciStatus) {
+  if (
+    [
+      "initialize",
+      "commit-success",
+      "exact-verify-pass",
+      "exact-verify-retry",
+      "local-delivery",
+      "push-readback",
+    ].includes(operation)
+  )
+    return true;
+  // A failed/queued CI observation and explicit gate-failure operations remain
+  // recordable. Only successful CI may advance committed readiness.
+  if (["ci-register", "ci-observe"].includes(operation))
+    return ciStatus === "success";
+  if (!["begin-edit", "terminal-review-pass"].includes(operation)) return false;
+  const delivery = previous?.delivery;
+  return Boolean(
+    delivery?.commit_oid ||
+    (delivery?.mode !== "local-only" && delivery?.pushed_oid),
+  );
+}
+
+function gitlinkIdentity(root, name) {
+  const absolute = Buffer.concat([Buffer.from(root), Buffer.from("/"), name]);
+  const hold =
+    "submodule is missing or deinitialized; initialize the submodule at its recorded path before checkpointing";
+  let stat;
+  try {
+    stat = fs.lstatSync(absolute);
+  } catch (error) {
+    if (error.code === "ENOENT") fail(hold);
+    throw error;
   }
-  return digest(Buffer.concat(stream));
+  requireThat(stat.isDirectory(), hold);
+  // Node decodes Buffer cwd values before spawning. An ASCII-named private
+  // symlink lets the OS resolve the original pathname bytes without that loss.
+  const temporary = fs.mkdtempSync(
+    path.join(os.tmpdir(), "checkpoint-gitlink-"),
+  );
+  const alias = path.join(temporary, "worktree");
+  try {
+    fs.symlinkSync(absolute, alias);
+    const requireDirectory = () => {
+      const current = fs.lstatSync(absolute);
+      requireThat(
+        current.isDirectory() &&
+          current.dev === stat.dev &&
+          current.ino === stat.ino,
+        "submodule directory changed while hashing; recovery hold",
+      );
+    };
+    const childGit = (...argv) => {
+      requireDirectory();
+      return execFileSync("git", argv, {
+        cwd: alias,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    };
+    let childRoot;
+    try {
+      childRoot = childGit("rev-parse", "--show-toplevel");
+    } catch {
+      fail(hold);
+    }
+    // Remove only Git's newline, retaining all actual pathname bytes.
+    requireThat(
+      childRoot
+        .subarray(0, -1)
+        .equals(fs.realpathSync.native(absolute, { encoding: "buffer" })),
+      hold,
+    );
+    const head = childGit("rev-parse", "HEAD").toString().trim();
+    requireThat(
+      childGit(
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+        "--ignore-submodules=none",
+      ).length === 0,
+      "submodule has dirty or untracked content; commit or reconcile child changes before checkpointing",
+    );
+    for (const entry of committedGitlinks(
+      childGit("ls-files", "--stage", "-z"),
+      childGit("ls-tree", "--full-tree", "-r", "-z", head),
+    )) {
+      const nested = gitlinkIdentity(absolute, entry.name);
+      requireThat(
+        nested.oid === entry.oid,
+        "nested submodule has dirty HEAD; reconcile child changes before checkpointing",
+      );
+    }
+    requireThat(
+      childGit("rev-parse", "HEAD").toString().trim() === head,
+      "submodule HEAD changed while hashing; recovery hold",
+    );
+    requireDirectory();
+    return { mode: "160000", oid: head };
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+// Unlike snapshot, raw source identity is independent of HEAD/staging and clean
+// filters. Index modes identify gitlinks; their identity uses actual child HEAD.
+function sourceIdentity(root) {
+  const entries = indexEntries(git("ls-files", "--full-name", "--stage", "-z"));
+  const unique = new Map(
+    entries.map((entry) => [entry.name.toString("hex"), entry]),
+  );
+  for (const name of splitPaths(
+    git("ls-files", "--full-name", "--others", "--exclude-standard", "-z"),
+  ))
+    unique.set(name.toString("hex"), { name });
+  const stream = crypto.createHash("sha256");
+  for (const { name, mode } of [...unique.values()].sort((a, b) =>
+    Buffer.compare(a.name, b.name),
+  )) {
+    let identity;
+    if (mode === "160000") identity = gitlinkIdentity(root, name);
+    else {
+      try {
+        identity = fileIdentity(root, name);
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+    }
+    pathDigestUpdate(stream, name, identity);
+  }
+  return stream.digest("hex");
 }
 
 function predecessor() {
@@ -395,7 +634,8 @@ function prepare(operationId, operation, inputFile) {
     );
   const requireSnapshot = () =>
     requireThat(
-      equal(identity, current.record.snapshot),
+      equal(identity, current.record.snapshot) &&
+        (!current.context || current.context.source_sha256 === source),
       "source or HEAD changed since predecessor; recovery hold",
     );
   const requireHead = () =>
@@ -427,6 +667,11 @@ function prepare(operationId, operation, inputFile) {
     );
   const previousMode =
     current?.context?.delivery_mode ?? current?.record.delivery?.mode;
+  requireThat(
+    !current ||
+      ["local-only", "direct-to-trunk", "pull-request"].includes(previousMode),
+    "delivery mode is unknown; continue with the compatibility full-record workflow and explicitly reconcile legacy delivery and review evidence before typed continuation",
+  );
   if (input.mode && previousMode)
     requireThat(
       input.mode === previousMode ||
@@ -435,6 +680,8 @@ function prepare(operationId, operation, inputFile) {
           ["direct-to-trunk", "pull-request"].includes(input.mode)),
       "delivery mode rebind cannot cross local-only and remote delivery gates",
     );
+  if (requiresCommittedGitlinks(operation, current?.record, input.status))
+    requireCommittedGitlinks(root, identity.head_oid);
   switch (operation) {
     case "initialize":
       requireThat(
@@ -760,6 +1007,29 @@ function prepare(operationId, operation, inputFile) {
 
 try {
   switch (command) {
+    case "snapshot":
+      repositoryRoot = gitText("rev-parse", "--show-toplevel");
+      process.stdout.write(`${JSON.stringify(snapshot(repositoryRoot))}\n`);
+      break;
+    case "compatibility-route": {
+      const [predecessorDigest, operationId] = args;
+      const candidates = fs.existsSync(receipts)
+        ? fs
+            .readdirSync(receipts)
+            .filter((name) => name.endsWith(".json"))
+            .map((name) => path.join(receipts, name))
+        : [];
+      if (fs.existsSync(pending)) candidates.push(pending);
+      const typed = candidates.some((file) => {
+        const receipt = readJson(file);
+        return (
+          receipt.operation_id === operationId ||
+          receipt.record_sha256 === predecessorDigest
+        );
+      });
+      process.stdout.write(typed ? "typed\n" : "legacy\n");
+      break;
+    }
     case "recover":
       recover();
       break;
@@ -778,6 +1048,25 @@ try {
         equal(JSON.parse(bytes.subarray(14)), receipt.record),
         "candidate differs from operation result",
       );
+      // The writer's checkpoint-v1 checks deliberately apply Git filters.
+      // Recheck raw bytes at the publication boundary as well, before creating
+      // a durable intent that could otherwise recover stale source credit.
+      repositoryRoot = gitText("rev-parse", "--show-toplevel");
+      requireThat(
+        sourceIdentity(repositoryRoot) === receipt.source_sha256,
+        "raw source changed while publishing checkpoint; recovery hold",
+      );
+      if (
+        requiresCommittedGitlinks(
+          receipt.operation,
+          predecessor()?.record,
+          receipt.record.ci.runs.at(-1)?.status,
+        )
+      )
+        requireCommittedGitlinks(
+          repositoryRoot,
+          receipt.record.snapshot.head_oid,
+        );
       receipt.record_sha256 = digest(bytes);
       // The writer serializes JSON through jq. Preserve those exact bytes for
       // interrupted-publication reconciliation, independent of key ordering.

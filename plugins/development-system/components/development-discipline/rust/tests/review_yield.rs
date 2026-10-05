@@ -138,3 +138,90 @@ fn truncated_history_reports_observed_counts_without_full_totals_or_false_novelt
     let reference = report["rounds"][0]["evidence_ref"].as_str().unwrap();
     assert!(review_yield::evidence(&state, reference).is_ok());
 }
+
+fn with_attempts(mut evidence: Value) -> Value {
+    evidence["review_attempts"] = json!([{
+        "lens":"production-risk-footguns", "subagent_key":"s:1:production-risk-footguns",
+        "assigned_subagent_key":"s:1:production-risk-footguns", "submitted_status":"findings",
+        "caller_attestation":{"model_role":"reviewer","fresh_context":true,"closed_after_result":true},
+        "actual_model":null,"scope_bound":true,"disposition":"accepted","malformed_reasons":[]
+    }]);
+    evidence
+}
+
+#[test]
+fn review_attempt_counts_stay_unknown_for_legacy_and_pruned_rows() {
+    for history in [
+        json!([{"completed_iteration":1,"round_evidence":round(true)},{"completed_iteration":2,"round_evidence":with_attempts(round(true))}]),
+        json!([{"omitted_prior_history_rows":65,"round_evidence":with_attempts(round(true))}]),
+        json!([{"completed_iteration":1},{"round_evidence":with_attempts(round(true))}]),
+    ] {
+        let report =
+            review_yield::report(&json!({"session_id":"s","finding_history":history})).unwrap();
+        assert!(report["review_counts"].is_null());
+        assert!(report["round_attempts"].is_null());
+        assert_eq!(report["observed_round_attempts"], 1);
+        assert_eq!(
+            report["observed_review_counts"],
+            json!({"submitted":1,"accepted":1,"malformed":0})
+        );
+        assert_eq!(report["review_counts_available_for_full_history"], false);
+    }
+}
+
+#[test]
+fn review_attempt_evidence_preserves_references_after_retention() {
+    let state = json!({"session_id":"s","finding_history":[{"completed_iteration":1}, {"completed_iteration":2,"round_evidence":with_attempts(round(true))}]});
+    let report = review_yield::report(&state).unwrap();
+    let reference = report["rounds"][1]["evidence_ref"].as_str().unwrap();
+    let retained =
+        json!({"session_id":"s","finding_history":[state["finding_history"][1].clone()]});
+    let detail = review_yield::evidence(&retained, reference).unwrap();
+    assert_eq!(
+        detail["round_evidence"]["review_attempts"][0]["caller_attestation"]["model_role"],
+        "reviewer"
+    );
+    assert!(detail["round_evidence"]["review_attempts"][0]["actual_model"].is_null());
+}
+
+#[test]
+fn accepted_attempts_require_bound_assignments_and_no_malformed_reasons() {
+    for (key, value) in [
+        ("scope_bound", json!(false)),
+        ("malformed_reasons", json!(["missing pii classification"])),
+    ] {
+        let mut evidence = with_attempts(round(true));
+        evidence["review_attempts"][0][key] = value;
+        assert!(review_yield::report(
+            &json!({"session_id":"s","finding_history":[{"round_evidence":evidence}]})
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn incomplete_raw_containers_never_become_zero_allegations_or_clean_evidence() {
+    let mut evidence = with_attempts(round(false));
+    evidence["raw_findings"] = json!([]);
+    evidence["raw_findings_complete"] = json!(false);
+    evidence["rejected_findings"] = json!([]);
+    let state = json!({"session_id":"s","finding_history":[{"completed_iteration":1,"clean":true,"round_evidence":evidence}]});
+    let report = review_yield::report(&state).unwrap();
+    assert_eq!(report["completed_lens_rounds"], 0);
+    assert_eq!(report["review_counts"]["submitted"], 1);
+    assert_eq!(report["counts_available_for_full_history"], false);
+    assert_eq!(
+        report["raw_allegation_counts_available_for_full_history"],
+        false
+    );
+    assert!(report["totals"]["raw_allegations"].is_null());
+    assert!(report["observed_totals"]["raw_allegations"].is_null());
+    assert_eq!(report["observed_totals"]["retained_raw_allegations"], 0);
+    assert!(report["rounds"][0]["finding_free"].is_null());
+    assert_eq!(report["rounds"][0]["clean"], false);
+    let mut invalid = state;
+    invalid["finding_history"][0]["round_evidence"]["completed_lens_round"] = json!(true);
+    assert!(review_yield::report(&invalid)
+        .unwrap_err()
+        .contains("complete_round_raw_evidence_required"));
+}

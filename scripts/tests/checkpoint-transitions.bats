@@ -669,3 +669,604 @@ SHIM
   [ "$(jq -r '.ci.terminal_success_run_id' <<<"$record")" = null ]
   [ "$(jq -r '.baseline_oid' <<<"$record")" = "$baseline" ]
 }
+
+compatibility_failure() {
+  local kind=$1
+  generation=$(tail -c +15 "$target" | jq '.generation + 1')
+  predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" "$5" "actual failed gate" "$6" "repair failed gate"' _ "$repo" "$ROOT/plugins/development-system/scripts/record-checkpoint-failure.sh" "$generation" "$predecessor" "$kind" "$evidence"
+  accepted
+}
+
+compatibility_recovery() {
+  local mode=$1 kind=$2
+  if [ "$mode" = local-only ]; then passing; else
+    remote_reviewed
+    if [ "$kind" = lightweight-review ]; then
+      invoke hook-failure "$(evidence_fields '{"causal_repair":"prepare another reviewed attempt"}')"
+      accepted
+      invoke edit-pass "$(evidence_fields)"
+      accepted
+    fi
+  fi
+  if [ "$kind" = pre-commit-hook ]; then
+    if [ "$mode" = local-only ]; then
+      invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+      accepted
+    fi
+    printf '#!/bin/sh\necho actual-hook-failure >&2\nexit 1\n' >"$repo/.git/hooks/pre-commit"
+    chmod +x "$repo/.git/hooks/pre-commit"
+    git -C "$repo" add source
+    run bash -c 'git -C "$1" commit -m failed >"$2" 2>&1' _ "$repo" "$evidence"
+    [ "$status" -ne 0 ]
+  else
+    printf 'actual review finding: repair fixture\n' >"$evidence"
+  fi
+  compatibility_failure "$kind"
+  printf '#!/bin/sh\necho repaired-hook\n' >"$repo/.git/hooks/pre-commit"
+  chmod +x "$repo/.git/hooks/pre-commit"
+  printf 'repaired source\n' >"$repo/source"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  git -C "$repo" add source
+  git -C "$repo" commit -m repaired >"$evidence" 2>&1
+  before=$(sha256sum "$target")
+  if [ "$mode" != local-only ]; then
+    invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+    [ "$status" -ne 0 ]
+    [ "$(sha256sum "$target")" = "$before" ]
+  fi
+  invoke commit-success "$(evidence_fields "$(jq -cn --arg mode "$mode" '{mode:$mode}')")"
+  accepted
+}
+
+@test "repair compatibility hook failure retains remote gate family" { compatibility_recovery direct-to-trunk pre-commit-hook; }
+@test "repair compatibility review failure retains remote gate family" { compatibility_recovery direct-to-trunk lightweight-review; }
+@test "repair compatibility hook failure retains genuine local mode" { compatibility_recovery local-only pre-commit-hook; }
+@test "repair compatibility review failure retains genuine local mode" { compatibility_recovery local-only lightweight-review; }
+
+@test "repair unknown legacy mode holds typed continuation without reusing older receipts" {
+  passing
+  # Publish the supported compatibility failure as a legacy record: its original
+  # typed receipt is deliberately absent, but the older initialize receipt stays.
+  rm "$target.operations/op-1.json"
+  compatibility_failure lightweight-review
+  before=$(sha256sum "$target")
+  invoke edit-pass "$(evidence_fields)"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'delivery mode'*'compatibility'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "repair filtered snapshot preserves raw reviewed bytes across staging and commit" {
+  printf '*.txt text eol=lf\n*.clean filter=fixture\n' >"$repo/.gitattributes"
+  git -C "$repo" config filter.fixture.clean 'tr -d X'
+  git -C "$repo" add .gitattributes
+  git -C "$repo" commit -qm attributes
+  initialize
+  printf 'one\r\ntwo\r\n' >"$repo/new.txt"
+  printf 'aXb\n' >"$repo/new.clean"
+  printf 'executable\n' >"$repo/odd"$'\n\377'
+  chmod +x "$repo/odd"$'\n\377'
+  ln -s $'target\n' "$repo/link"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.snapshot.untracked_sha256' <<<"$record")" = "$(legacy_untracked_digest)" ]
+  raw_source=$(jq -r '.source_sha256' <<<"$output")
+  printf 'one\ntwo\n' >"$repo/new.txt"
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  printf 'one\r\ntwo\r\n' >"$repo/new.txt"
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  git -C "$repo" add .
+  git -C "$repo" commit -qm filtered
+  # Raw drift hidden by the clean filter must not inherit review credit.
+  printf 'abX\n' >"$repo/new.clean"
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  [ "$status" -ne 0 ]
+  printf 'aXb\n' >"$repo/new.clean"
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  accepted
+  [ "$(jq -r '.source_sha256' <<<"$output")" = "$raw_source" ]
+}
+
+submodule_fixture() {
+  child="$records/child"
+  git init -q "$child"
+  git -C "$child" config user.name Test
+  git -C "$child" config user.email test@example.invalid
+  printf 'child baseline\n' >"$child/file"
+  git -C "$child" add file
+  git -C "$child" commit -qm child
+  git -C "$repo" -c protocol.file.allow=always submodule add -q "$child" child
+  git -C "$repo/child" config user.name Test
+  git -C "$repo/child" config user.email test@example.invalid
+  git -C "$repo" commit -qam submodule
+}
+
+@test "repair clean gitlink uses actual child HEAD and survives parent staging" {
+  submodule_fixture
+  initialize
+  printf 'child successor\n' >"$repo/child/file"
+  git -C "$repo/child" commit -qam successor
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  source_identity=$(jq -r '.source_sha256' <<<"$output")
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  git -C "$repo" add child
+  git -C "$repo" commit -qm successor
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  accepted
+  [ "$(jq -r '.source_sha256' <<<"$output")" = "$source_identity" ]
+}
+
+@test "repair gitlink dirty untracked missing and different child HEAD hold without publishing" {
+  submodule_fixture
+  initialize
+  printf 'parent edit\n' >"$repo/source"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  before=$(sha256sum "$target")
+  git -C "$repo" config submodule.child.ignore all
+  printf 'dirty child\n' >"$repo/child/file"
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'submodule'*'dirty'* ]]
+  git -C "$repo/child" restore file
+  touch "$repo/child/untracked"
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  rm "$repo/child/untracked"
+  printf 'unreviewed child\n' >"$repo/child/file"
+  git -C "$repo/child" commit -qam drift
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  git -C "$repo" submodule deinit -q -f child
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'submodule'*'initialize'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "repair source hashing bounds regular file reads and equals raw Git blobs" {
+  initialize
+  dd if=/dev/zero of="$repo/large" bs=1048576 count=3 status=none
+  cat >"$records/bounded.cjs" <<'JS'
+const fs = require('node:fs');
+const original = fs.readFileSync;
+fs.readFileSync = function (file, ...args) {
+  if (String(file).endsWith('/large')) throw new Error('whole source file allocation forbidden');
+  return original.call(this, file, ...args);
+};
+const read = fs.readSync;
+fs.readSync = function (fd, buffer, offset, length, position) {
+  if (fs.readlinkSync(`/proc/self/fd/${fd}`).endsWith('/large')) {
+    if (buffer.length > 65536 || length > 65536) throw new Error('unbounded source chunk');
+    fs.appendFileSync(process.env.CHUNK_LOG, `${length}\n`);
+  }
+  return read.call(this, fd, buffer, offset, length, position);
+};
+JS
+  export NODE_OPTIONS="--require=$records/bounded.cjs" CHUNK_LOG="$records/chunks"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  [ "$(wc -l <"$CHUNK_LOG")" -ge 48 ]
+  actual=$(jq -r '.source_sha256' <<<"$output")
+  expected=$( { for name in large source; do
+    printf '100644\0%s\0%s\n' "$name" "$(git -C "$repo" hash-object --no-filters -- "$name")"
+  done; } | sha256sum | cut -d ' ' -f 1)
+  [ "$actual" = "$expected" ]
+}
+
+@test "repair compatibility stable retry recovers interrupted receipt publication and preserves CAS" {
+  remote_reviewed
+  compatibility_failure pre-commit-hook
+  failure_generation=$generation
+  failure_predecessor=$predecessor
+  failure_target=$(sha256sum "$target")
+  receipt=$(find "$target.operations" -name 'compat-failure-*.json')
+  [ -n "$receipt" ]
+  # Reconstruct the real writer crash window after publishing .latest but before
+  # moving its durable operation intent to the retained receipt directory.
+  mv "$receipt" "$target.pending-operation"
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" pre-commit-hook "actual failed gate" "$5" "repair failed gate"' _ "$repo" "$ROOT/plugins/development-system/scripts/record-checkpoint-failure.sh" "$failure_generation" "$failure_predecessor" "$evidence"
+  [ "$status" -eq 0 ]
+  [ ! -e "$target.pending-operation" ]
+  [ -e "$receipt" ]
+  [ "$(sha256sum "$target")" = "$failure_target" ]
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  before=$(sha256sum "$target")
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" pre-commit-hook "actual failed gate" "$5" "repair failed gate"' _ "$repo" "$ROOT/plugins/development-system/scripts/record-checkpoint-failure.sh" "$failure_generation" "$failure_predecessor" "$evidence"
+  [ "$status" -eq 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" pre-commit-hook "different request" "$5" "repair failed gate"' _ "$repo" "$ROOT/plugins/development-system/scripts/record-checkpoint-failure.sh" "$failure_generation" "$failure_predecessor" "$evidence"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "repair nested submodule dirt cannot hide behind ignore settings" {
+  submodule_fixture
+  git -C "$repo/child" -c protocol.file.allow=always submodule add -q "$child" nested
+  git -C "$repo/child" commit -qam nested
+  git -C "$repo" commit -qam nested
+  initialize
+  printf 'parent edit\n' >"$repo/source"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  git -C "$repo" config submodule.child.ignore all
+  git -C "$repo/child" config submodule.nested.ignore all
+  printf 'nested dirt\n' >"$repo/child/nested/file"
+  before=$(sha256sum "$target")
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'submodule'*'dirty'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "repair SHA256 raw identities preserve executable symlink and odd path bytes" {
+  repo="$BATS_TEST_TMPDIR/sha256"
+  git init -q --object-format=sha256 "$repo"
+  git -C "$repo" config user.name Test
+  git -C "$repo" config user.email test@example.invalid
+  printf 'baseline\n' >"$repo/source"
+  git -C "$repo" add source
+  git -C "$repo" commit -qm baseline
+  target="$repo/.git/development-system/checkpoints/task.latest"
+  initialize
+  odd=$'odd\n\377'
+  printf 'binary\0payload\n' >"$repo/$odd"
+  chmod +x "$repo/$odd"
+  ln -s $'target\n' "$repo/link"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.snapshot.untracked_sha256' <<<"$record")" = "$(legacy_untracked_digest)" ]
+  actual=$(jq -r '.source_sha256' <<<"$output")
+  expected=$( {
+    printf '120000\0link\0%s\n' "$(printf 'target\n' | git -C "$repo" hash-object --stdin)"
+    printf '100755\0%s\0%s\n' "$odd" "$(git -C "$repo" hash-object --no-filters -- "$odd")"
+    printf '100644\0source\0%s\n' "$(git -C "$repo" hash-object --no-filters -- source)"
+  } | sha256sum | cut -d ' ' -f 1)
+  [ "$actual" = "$expected" ]
+}
+
+@test "repair changing a file during chunk reading holds publication" {
+  initialize
+  dd if=/dev/zero of="$repo/large" bs=1048576 count=1 status=none
+  cat >"$records/change-during-read.cjs" <<'JS'
+const fs = require('node:fs');
+const read = fs.readSync;
+let changed = false;
+fs.readSync = function (fd, ...args) {
+  const count = read.call(this, fd, ...args);
+  const name = fs.readlinkSync(`/proc/self/fd/${fd}`);
+  if (!changed && name.endsWith('/large')) {
+    changed = true;
+    fs.truncateSync(name, 0);
+  }
+  return count;
+};
+JS
+  export NODE_OPTIONS="--require=$records/change-during-read.cjs"
+  before=$(sha256sum "$target")
+  invoke edit-pass "$(evidence_fields)"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'source file changed while hashing'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+# Independent checkpoint-v1 oracle: the publisher's original shell algorithm,
+# using path-aware Git hashes and raw symlink targets rather than the JS helper.
+legacy_untracked_digest() {
+  git -C "$repo" ls-files --full-name --others --exclude-standard -z |
+    while IFS= read -r -d '' name; do
+      if [ -L "$repo/$name" ]; then
+        mode=120000
+        oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding:"buffer"}))' "$repo/$name" | git -C "$repo" hash-object --stdin)
+      else
+        mode=100644
+        [ ! -x "$repo/$name" ] || mode=100755
+        oid=$(git -C "$repo" hash-object -- "$name")
+      fi
+      printf '%s\0%s\0%s\n' "$mode" "$name" "$oid"
+    done | sha256sum | cut -d ' ' -f 1
+}
+
+@test "repair canonical mode retains legacy execute access while raw mode binds execute bits" {
+  initialize
+  printf 'group execute only\n' >"$repo/group-only"
+  chmod 0654 "$repo/group-only"
+  [ ! -x "$repo/group-only" ]
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.snapshot.untracked_sha256' <<<"$record")" = "$(legacy_untracked_digest)" ]
+  expected=$( {
+    printf '100755\0group-only\0%s\n' "$(git -C "$repo" hash-object --no-filters -- group-only)"
+    printf '100644\0source\0%s\n' "$(git -C "$repo" hash-object --no-filters -- source)"
+  } | sha256sum | cut -d ' ' -f 1)
+  [ "$(jq -r '.source_sha256' <<<"$output")" = "$expected" ]
+}
+
+@test "repair normalized raw edit during publication rejects stale review credit" {
+  printf '*.txt text eol=lf\n' >"$repo/.gitattributes"
+  git -C "$repo" add .gitattributes
+  git -C "$repo" commit -qm attributes
+  initialize
+  printf 'text\n' >"$repo/new.txt"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  real_node=$(command -v node)
+  mkdir "$records/wrappers"
+  cat >"$records/wrappers/node" <<'SH'
+#!/usr/bin/env bash
+if [[ ${2:-} == stage && -e $RACE_MARKER ]]; then
+  rm "$RACE_MARKER"
+  printf 'text\r\n' >"$RACE_SOURCE"
+fi
+exec "$REAL_NODE" "$@"
+SH
+  chmod +x "$records/wrappers/node"
+  export REAL_NODE="$real_node" RACE_MARKER="$records/race" RACE_SOURCE="$repo/new.txt"
+  export PATH="$records/wrappers:$PATH"
+  touch "$RACE_MARKER"
+  before=$(sha256sum "$target")
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'raw source changed while publishing'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+  [ ! -e "$target.pending-operation" ]
+  # Record the real publication failure and rerun testing/review on the changed
+  # bytes. A rejected review cannot silently credit the new content.
+  printf 'publication rejected normalized concurrent source edit\n' >"$evidence"
+  invoke lightweight-review-fail "$(evidence_fields '{"causal_repair":"retest changed raw source"}')"
+  accepted
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+}
+
+@test "repair invalid UTF8 gitlink paths retain clean child identity through nested review and staging" {
+  export TMPDIR="$records/gitlink-temp"
+  mkdir "$TMPDIR"
+  child_name=$'child-\377'
+  nested_name=$'nested-\376'
+  child_path="$repo/$child_name"
+  nested_path="$child_path/$nested_name"
+  git init -q "$child_path"
+  git -C "$child_path" config user.name Test
+  git -C "$child_path" config user.email test@example.invalid
+  printf 'child source\n' >"$child_path/file"
+  git init -q "$nested_path"
+  git -C "$nested_path" config user.name Test
+  git -C "$nested_path" config user.email test@example.invalid
+  printf 'nested source\n' >"$nested_path/file"
+  git -C "$nested_path" add file
+  git -C "$nested_path" commit -qm nested
+  git -C "$child_path" add .
+  git -C "$child_path" commit -qm child
+  git -C "$repo" add -- "$child_name"
+  git -C "$repo" commit -qm gitlink
+  [ -z "$(git -C "$repo" status --porcelain)" ]
+  [ -z "$(git -C "$child_path" status --porcelain)" ]
+  initialize
+  [ -z "$(find "$TMPDIR" -mindepth 1 -print -quit)" ]
+  printf 'reviewed child successor\n' >"$child_path/file"
+  git -C "$child_path" commit -qam successor
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  reviewed_source=$(jq -r '.source_sha256' <<<"$output")
+  before=$(sha256sum "$target")
+  printf 'nested dirty\n' >"$nested_path/file"
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'submodule'*'dirty'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+  [ -z "$(find "$TMPDIR" -mindepth 1 -print -quit)" ]
+  git -C "$nested_path" restore file
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  git -C "$repo" add -- "$child_name"
+  git -C "$repo" commit -qm successor
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  accepted
+  [ "$(jq -r '.source_sha256' <<<"$output")" = "$reviewed_source" ]
+  [ -z "$(find "$TMPDIR" -mindepth 1 -print -quit)" ]
+}
+
+ignored_gitlink_review() {
+  if [ "${1:-sha1}" = sha256 ]; then
+    export GIT_DEFAULT_HASH=sha256
+    repo="$BATS_TEST_TMPDIR/sha256-repo"
+    git init -q "$repo"
+    git -C "$repo" config user.name Test
+    git -C "$repo" config user.email test@example.invalid
+    printf 'baseline\n' >"$repo/source"
+    git -C "$repo" add source
+    git -C "$repo" commit -qm baseline
+    target="$repo/.git/development-system/checkpoints/task.latest"
+  fi
+  submodule_fixture
+  gitlink_name=child
+  if [ "${1:-sha1}" = sha256 ]; then
+    gitlink_name=$'child-\377'
+    git -C "$repo" mv child "$gitlink_name"
+    git -C "$repo" commit -qam 'rename child'
+  fi
+  git -C "$repo" config submodule.child.ignore all
+  initialize
+  printf 'reviewed child successor\n' >"$repo/$gitlink_name/file"
+  git -C "$repo/$gitlink_name" commit -qam successor
+  child_head=$(git -C "$repo/$gitlink_name" rev-parse HEAD)
+  printf 'parent change\n' >"$repo/source"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  git -C "$repo" add source
+  git -C "$repo" commit -qm 'parent file only'
+  [ -z "$(git -C "$repo" diff --binary --full-index HEAD --)" ]
+}
+
+ignored_gitlink_commit_control() {
+  ignored_gitlink_review "$1"
+  before=$(sha256sum "$target")
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'committed gitlink'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+  git -C "$repo" add -- "$gitlink_name"
+  # Staging does not repair the already-created commit.
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  # Amend only this disposable fixture's rejected attempt; the accepted commit
+  # must still be a direct successor of the reviewed checkpoint's HEAD.
+  git -C "$repo" commit --amend --no-edit -q
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  accepted
+  invoke exact-verify-pass "$(evidence_fields)"
+  accepted
+  invoke local-delivery '{}'
+  accepted
+}
+
+@test "repair ignored reviewed gitlink omitted from parent commit rejects until actually committed" {
+  ignored_gitlink_commit_control sha1
+}
+
+@test "repair ignored SHA256 odd-byte gitlink requires the authoritative committed child OID" {
+  ignored_gitlink_commit_control sha256
+}
+
+@test "repair ignored child drift cannot initialize an uncommitted baseline" {
+  submodule_fixture
+  git -C "$repo" config submodule.child.ignore all
+  printf 'uncommitted child reference\n' >"$repo/child/file"
+  git -C "$repo/child" commit -qam successor
+  invoke initialize '{"mode":"local-only","causal_edit":"new work"}'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'committed gitlink'* ]]
+  [ ! -e "$target" ]
+  git -C "$repo" add child
+  git -C "$repo" commit -qm child
+  initialize
+}
+
+@test "repair legacy omitted gitlink cannot gain exact verification but can record and repair failure" {
+  ignored_gitlink_review sha1
+  generation=$(jq '.generation + 1' <<<"$record")
+  predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  head=$(git -C "$repo" rev-parse HEAD)
+  empty=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  # The compatibility API can hold records created before this repair. Publish
+  # such a legacy committed record using the actual omitted-gitlink commit.
+  legacy=$(jq -c --argjson generation "$generation" --arg predecessor "$predecessor" --arg head "$head" --arg empty "$empty" --arg evidence "$evidence" '
+    .generation=$generation | .predecessor_sha256=$predecessor |
+    .snapshot={head_oid:$head,tracked_sha256:$empty,untracked_sha256:$empty} |
+    .state="committed" | .gates.fast_gate_receipt=$evidence |
+    .delivery={mode:"local-only",commit_oid:$head,pushed_oid:null,local_snapshot:null} |
+    .next_action="verify-exact-commit"' <<<"$record")
+  printf 'checkpoint-v1 %s\n' "$legacy" >"$records/legacy"
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" "$5"' _ "$repo" "$ROOT/plugins/development-system/scripts/write-local-checkpoint.sh" "$generation" "$predecessor" "$records/legacy"
+  accepted
+  before=$(sha256sum "$target")
+  invoke exact-verify-pass "$(evidence_fields)"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'committed gitlink'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+  invoke exact-verify-fail "$(evidence_fields)"
+  accepted
+  before=$(sha256sum "$target")
+  invoke exact-verify-retry "$(evidence_fields)"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target")" = "$before" ]
+  git -C "$repo" add child
+  git -C "$repo" commit --amend --no-edit -q
+  invoke exact-verify-retry "$(evidence_fields)"
+  accepted
+  invoke exact-verify-pass "$(evidence_fields)"
+  accepted
+}
+
+committed_gitlink_shape() {
+  submodule_fixture
+  git -C "$repo" config submodule.child.ignore all
+  initialize
+  case "$1" in
+    added)
+      git -C "$repo" -c protocol.file.allow=always submodule add -q "$child" second
+      git -C "$repo" config submodule.second.ignore all
+      ;;
+    removed) git -C "$repo" rm -q child ;;
+    renamed) git -C "$repo" mv child $'renamed-\377' ;;
+  esac
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  reviewed_source=$(jq -r '.source_sha256' <<<"$output")
+  git -C "$repo" commit -qam "$1 gitlink"
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  accepted
+  [ "$(jq -r '.source_sha256' <<<"$output")" = "$reviewed_source" ]
+}
+
+@test "repair committed gitlink check accepts actually added references" { committed_gitlink_shape added; }
+@test "repair committed gitlink check accepts actually removed references" { committed_gitlink_shape removed; }
+@test "repair committed gitlink check accepts actually renamed byte paths" { committed_gitlink_shape renamed; }
+
+@test "repair local snapshot may deliver reviewed child before a parent commit" {
+  submodule_fixture
+  git -C "$repo" config submodule.child.ignore all
+  initialize
+  printf 'local child successor\n' >"$repo/child/file"
+  git -C "$repo/child" commit -qam successor
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"local-snapshot"}')"
+  accepted
+  invoke fast-gate-pass "$(evidence_fields)"
+  accepted
+  invoke local-snapshot-delivery "$(evidence_fields)"
+  accepted
+  invoke terminal-review-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.delivery.commit_oid' <<<"$record")" = null ]
+  [ "$(jq -r '.next_action' <<<"$record")" = complete ]
+}
+
+@test "repair committed gitlink check catches ignored index drift during publication" {
+  ignored_gitlink_review sha1
+  old_child=$(git -C "$repo" rev-parse HEAD:child)
+  git -C "$repo" add child
+  git -C "$repo" commit --amend --no-edit -q
+  mkdir "$records/wrappers"
+  real_node=$(command -v node)
+  cat >"$records/wrappers/node" <<'SH'
+#!/usr/bin/env bash
+if [[ ${2:-} == stage && -e $GITLINK_RACE_MARKER ]]; then
+  rm "$GITLINK_RACE_MARKER"
+  git -C "$GITLINK_RACE_REPO" update-index --cacheinfo "160000,$GITLINK_RACE_OLD,child"
+fi
+exec "$REAL_NODE" "$@"
+SH
+  chmod +x "$records/wrappers/node"
+  export REAL_NODE="$real_node" GITLINK_RACE_MARKER="$records/race"
+  export GITLINK_RACE_REPO="$repo" GITLINK_RACE_OLD="$old_child"
+  export PATH="$records/wrappers:$PATH"
+  touch "$GITLINK_RACE_MARKER"
+  before=$(sha256sum "$target")
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'committed gitlinks'* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+  [ ! -e "$target.pending-operation" ]
+  git -C "$repo" reset -q -- child
+  invoke commit-success "$(evidence_fields '{"mode":"local-only"}')"
+  accepted
+}

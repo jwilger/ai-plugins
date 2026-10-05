@@ -67,12 +67,8 @@ if $operation_mode; then
 fi
 
 candidate=$(mktemp "$checkpoint_dir/.$checkpoint_id.candidate.XXXXXX")
-untracked_stream=
-final_untracked_stream=
 cleanup() {
   [[ -z $candidate ]] || rm -f -- "$candidate"
-  [[ -z $untracked_stream ]] || rm -f -- "$untracked_stream"
-  [[ -z $final_untracked_stream ]] || rm -f -- "$final_untracked_stream"
 }
 trap cleanup EXIT
 if $operation_mode; then
@@ -87,24 +83,10 @@ sync -f "$candidate"
 cmp -s "$candidate" <(tr -d '\000' <"$candidate") || { echo "record must not contain NUL bytes" >&2; exit 2; }
 [[ $(head -c 14 "$candidate") == "checkpoint-v1 " ]] || { echo "record must start with checkpoint-v1" >&2; exit 2; }
 
-current_head=$(git -C "$worktree_root" rev-parse HEAD)
-current_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
-untracked_stream=$(mktemp)
-while IFS= read -r -d '' path; do
-  absolute_path="$worktree_root/$path"
-  if [[ -L $absolute_path ]]; then mode=120000
-  elif [[ -f $absolute_path && -x $absolute_path ]]; then mode=100755
-  elif [[ -f $absolute_path ]]; then mode=100644
-  else echo "unsupported untracked file type: $path" >&2; exit 2
-  fi
-  if [[ -L $absolute_path ]]; then
-    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$absolute_path" | git -C "$worktree_root" hash-object --stdin)
-  else
-    oid=$(git -C "$worktree_root" hash-object -- "$path")
-  fi
-  printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$untracked_stream"
-done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
-current_untracked=$(sha256sum "$untracked_stream" | cut -d ' ' -f 1)
+current_snapshot=$(node "$script_root/checkpoint-operations.mjs" snapshot "$target")
+current_head=$(jq -r '.head_oid' <<<"$current_snapshot")
+current_tracked=$(jq -r '.tracked_sha256' <<<"$current_snapshot")
+current_untracked=$(jq -r '.untracked_sha256' <<<"$current_snapshot")
 
 if ! tail -c +15 "$candidate" | jq -e --argjson generation "$expected_generation" --arg predecessor "$expected_predecessor" --arg current_head "$current_head" --arg current_tracked "$current_tracked" --arg current_untracked "$current_untracked" -f "$script_root/checkpoint-record.jq" >/dev/null; then
   echo "checkpoint record failed schema, snapshot, or state validation" >&2
@@ -214,24 +196,11 @@ else
   [[ $expected_generation -eq 0 && $expected_predecessor == null ]] || { echo "missing checkpoint predecessor" >&2; exit 3; }
 fi
 
-final_head=$(git -C "$worktree_root" rev-parse HEAD)
-final_tracked=$(git -C "$worktree_root" diff --binary --full-index HEAD -- | sha256sum | cut -d ' ' -f 1)
-final_untracked_stream=$(mktemp)
-while IFS= read -r -d '' path; do
-  absolute_path="$worktree_root/$path"
-  if [[ -L $absolute_path ]]; then mode=120000
-  elif [[ -f $absolute_path && -x $absolute_path ]]; then mode=100755
-  elif [[ -f $absolute_path ]]; then mode=100644
-  else echo "unsupported untracked file type: $path" >&2; exit 2
-  fi
-  if [[ -L $absolute_path ]]; then
-    oid=$(node -e 'process.stdout.write(require("node:fs").readlinkSync(process.argv[1], {encoding: "buffer"}))' "$absolute_path" | git -C "$worktree_root" hash-object --stdin)
-  else
-    oid=$(git -C "$worktree_root" hash-object -- "$path")
-  fi
-  printf '%s\0%s\0%s\n' "$mode" "$path" "$oid" >>"$final_untracked_stream"
-done < <(git -C "$worktree_root" ls-files --full-name --others --exclude-standard -z)
-final_untracked=$(sha256sum "$final_untracked_stream" | cut -d ' ' -f 1)
+final_snapshot=$(node "$script_root/checkpoint-operations.mjs" snapshot "$target")
+final_head=$(jq -r '.head_oid' <<<"$final_snapshot")
+final_tracked=$(jq -r '.tracked_sha256' <<<"$final_snapshot")
+final_untracked=$(jq -r '.untracked_sha256' <<<"$final_snapshot")
+
 if [[ $final_head != "$current_head" || $final_tracked != "$current_tracked" || $final_untracked != "$current_untracked" ]]; then
   echo "worktree changed while publishing checkpoint" >&2
   exit 3

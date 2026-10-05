@@ -11,18 +11,54 @@ pub(super) struct RoundEvidence {
     pub completed_lens_round: bool,
     pub expected_lenses: Vec<String>,
     pub completed_lenses: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_attempts: Option<Vec<ReviewAttempt>>,
     pub scope: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_scope: Option<Value>,
     pub scope_changed: bool,
     pub source_changed: bool,
     pub raw_findings: Vec<Value>,
+    // Absent on legacy rounds whose entire raw array was retained. Only false
+    // needs recording, preserving prior evidence-reference identities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_findings_complete: Option<bool>,
     pub confirmed_findings: Vec<Value>,
     pub duplicate_findings: Vec<Value>,
     pub rejected_findings: Vec<Value>,
     pub reopened_findings: Vec<Value>,
     pub repair_verified_findings: Vec<Value>,
     pub verifier_evidence: Option<Value>,
+}
+
+/// Compact caller claims and native disposition; scope is bound by the containing
+/// round. A configured model role is never evidence of the concrete runtime model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ReviewAttempt {
+    pub lens: String,
+    pub subagent_key: String,
+    pub assigned_subagent_key: Option<String>,
+    pub submitted_status: Value,
+    pub caller_attestation: Value,
+    pub actual_model: Option<String>,
+    pub scope_bound: bool,
+    pub disposition: AttemptDisposition,
+    pub malformed_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum AttemptDisposition {
+    Accepted,
+    Malformed,
+}
+
+#[derive(Default, Serialize)]
+struct ReviewCounts {
+    submitted: u64,
+    accepted: u64,
+    malformed: u64,
 }
 
 const BUCKETS: [(&str, &str); 6] = [
@@ -73,6 +109,10 @@ fn analyze(state: &Value) -> Result<(Value, EvidenceIndex), String> {
     let mut rounds = Vec::new();
     let mut complete = 0u64;
     let mut unavailable = 0u64;
+    let mut raw_incomplete = 0u64;
+    let mut attempts_unavailable = 0u64;
+    let mut round_attempts = 0u64;
+    let mut review_counts = ReviewCounts::default();
     let mut totals = BTreeMap::<&str, u64>::new();
     let mut confirmed_identities = BTreeSet::new();
     for (_, metric) in BUCKETS {
@@ -82,15 +122,37 @@ fn analyze(state: &Value) -> Result<(Value, EvidenceIndex), String> {
     for (index, row) in history.iter().enumerate() {
         let Some(raw) = row.get("round_evidence").filter(|value| !value.is_null()) else {
             unavailable += 1;
+            attempts_unavailable += 1;
             rounds.push(json!({"history_index":index,"completed_iteration":row.get("completed_iteration"),"evidence_available":false,
-                "completed_lens_round":null,"counts":null,"reason":"legacy_round_evidence_not_recorded"}));
+                "completed_lens_round":null,"counts":null,"review_counts":null,"reason":"legacy_round_evidence_not_recorded"}));
             continue;
         };
         let round: RoundEvidence = serde_json::from_value(raw.clone()).map_err(|error| {
             format!("review_yield_round_invalid=true history_index={index} source={error}")
         })?;
         validate(&round)?;
+        let raw_complete = round.raw_findings_complete.unwrap_or(true);
+        raw_incomplete += u64::from(!raw_complete);
         complete += u64::from(round.completed_lens_round);
+        let round_review_counts = if let Some(attempts) = &round.review_attempts {
+            round_attempts += 1;
+            let accepted = attempts
+                .iter()
+                .filter(|attempt| attempt.disposition == AttemptDisposition::Accepted)
+                .count() as u64;
+            let counts = ReviewCounts {
+                submitted: attempts.len() as u64,
+                accepted,
+                malformed: attempts.len() as u64 - accepted,
+            };
+            review_counts.submitted += counts.submitted;
+            review_counts.accepted += counts.accepted;
+            review_counts.malformed += counts.malformed;
+            Some(counts)
+        } else {
+            attempts_unavailable += 1;
+            None
+        };
         let mut counts = BTreeMap::<&str, u64>::new();
         let mut references = BTreeMap::<&str, Vec<String>>::new();
         for (bucket, metric) in BUCKETS {
@@ -128,18 +190,37 @@ fn analyze(state: &Value) -> Result<(Value, EvidenceIndex), String> {
             json!({"session_id":session,"history_index":index,
             "completed_iteration":row.get("completed_iteration"),"round_evidence":round}),
         )?;
+        let mut counts = json!(counts);
+        if !raw_complete {
+            counts["retained_raw_allegations"] = counts["raw_allegations"].clone();
+            counts["raw_allegations"] = Value::Null;
+        }
         rounds.push(json!({"history_index":index,"completed_iteration":row.get("completed_iteration"),
             "evidence_available":true,"completed_lens_round":round.completed_lens_round,
-            "clean":round.completed_lens_round && round.raw_findings.is_empty()
+            "clean":raw_complete && round.completed_lens_round && round.raw_findings.is_empty()
                 && row.get("clean").and_then(Value::as_bool)==Some(true)
                 && row.get("reset_reason").and_then(Value::as_str).is_none_or(|reason|reason=="none"),
-            "finding_free":round.raw_findings.is_empty(),"reset_reason":row.get("reset_reason"),
+            "finding_free":if !round.raw_findings.is_empty() {json!(false)} else if raw_complete {json!(true)} else {Value::Null},
+            "raw_findings_complete":raw_complete,"reset_reason":row.get("reset_reason"),
             "scope":round.scope,"prior_scope":round.prior_scope,"scope_changed":round.scope_changed,"source_changed":round.source_changed,
-            "counts":counts,"evidence_ref":round_reference,"evidence_refs":references}));
+            "counts":counts,"review_counts":round_review_counts,"evidence_ref":round_reference,"evidence_refs":references}));
     }
     // Missing or pruned facts cannot establish full-history totals or novelty.
     let full_history_available = unavailable == 0 && omitted_prior_history_rows == 0;
+    let review_counts_available = attempts_unavailable == 0 && omitted_prior_history_rows == 0;
     let mut observed_totals = json!(totals);
+    let mut full_totals = if full_history_available {
+        json!(totals)
+    } else {
+        Value::Null
+    };
+    if raw_incomplete > 0 {
+        observed_totals["retained_raw_allegations"] = observed_totals["raw_allegations"].clone();
+        observed_totals["raw_allegations"] = Value::Null;
+        if full_history_available {
+            full_totals["raw_allegations"] = Value::Null;
+        }
+    }
     if !full_history_available {
         observed_totals["first_confirmed_in_observed_history"] =
             observed_totals["new_confirmed"].clone();
@@ -154,17 +235,25 @@ fn analyze(state: &Value) -> Result<(Value, EvidenceIndex), String> {
     }
     Ok((
         json!({"schema_version":1,"session_id":session,
-        "counts_available_for_full_history":full_history_available,
+        "counts_available_for_full_history":full_history_available && raw_incomplete == 0,
+        "raw_allegation_counts_available_for_full_history":full_history_available && raw_incomplete == 0,
+        "review_counts_available_for_full_history":review_counts_available,
+        "round_attempts":if review_counts_available {json!(round_attempts)} else {Value::Null},
+        "observed_round_attempts":round_attempts,
+        "review_counts":if review_counts_available {json!(review_counts)} else {Value::Null},
+        "observed_review_counts":review_counts,
         "coverage":{
-            "status":if omitted_prior_history_rows>0 {"retained_window_only"} else if unavailable>0 {"incomplete_legacy_evidence"} else {"complete"},
+            "status":if omitted_prior_history_rows>0 {"retained_window_only"} else if unavailable>0 {"incomplete_legacy_evidence"} else if raw_incomplete>0 {"incomplete_raw_evidence"} else {"complete"},
             "retained_history_rows":history.len(),"omitted_prior_history_rows":omitted_prior_history_rows,
             "legacy_rows_without_round_evidence":unavailable,
-            "guidance":if full_history_available {"All retained review history has recorded round evidence."} else {"Use observed_totals only for recorded retained rows and final_review.evidence to inspect them. Full-history totals and finding novelty are unavailable from this state."}
+            "rows_without_review_attempts":attempts_unavailable,
+            "rows_with_incomplete_raw_findings":raw_incomplete,
+            "guidance":if raw_incomplete>0 {"Malformed finding containers leave raw allegation totals unavailable. retained_raw_allegations counts only individually retained allegations, not the unknown total. Review attempts and eligible rounds have separate evidence coverage."} else if full_history_available {"All retained review history has recorded round evidence."} else {"Use observed_totals only for recorded retained rows and final_review.evidence to inspect them. Full-history totals and finding novelty are unavailable from this state."}
         },
         "completed_lens_rounds":if full_history_available {json!(complete)} else {Value::Null},
         "observed_completed_lens_rounds":complete,
         "legacy_rows_without_round_evidence":unavailable,
-        "totals":if full_history_available {json!(totals)} else {Value::Null},
+        "totals":full_totals,
         "observed_totals":observed_totals,"rounds":rounds,
         "interpretation":"Counts describe recorded allegations and adjudications; a clean round is not evidence of useless work. Pruned and missing legacy facts are unavailable, not zero."}),
         details,
@@ -172,6 +261,9 @@ fn analyze(state: &Value) -> Result<(Value, EvidenceIndex), String> {
 }
 
 fn validate(round: &RoundEvidence) -> Result<(), String> {
+    if round.completed_lens_round && round.raw_findings_complete == Some(false) {
+        return Err("review_yield_complete_round_raw_evidence_required=true".into());
+    }
     if round.schema_version != 1 || !round.scope.is_object() {
         return Err("review_yield_round_schema_or_scope_invalid=true".into());
     }
@@ -183,6 +275,38 @@ fn validate(round: &RoundEvidence) -> Result<(), String> {
         || (round.completed_lens_round && (expected.is_empty() || expected != completed))
     {
         return Err("review_yield_completed_lenses_invalid=true".into());
+    }
+    if let Some(attempts) = &round.review_attempts {
+        // Native input admits at most 24 lenses. Reuse that hard boundary while
+        // preserving legacy rows with no ledger and the outer 1 MiB state limit.
+        if attempts.is_empty() || attempts.len() > 24 {
+            return Err("review_yield_review_attempts_invalid=true".into());
+        }
+        for attempt in attempts {
+            let accepted = attempt.disposition == AttemptDisposition::Accepted;
+            if accepted != attempt.malformed_reasons.is_empty()
+                || (accepted
+                    && (!expected.contains(&attempt.lens)
+                        || !attempt.scope_bound
+                        || !matches!(
+                            attempt.submitted_status.as_str(),
+                            Some("clean" | "findings")
+                        )))
+                || (attempt.scope_bound
+                    && attempt.assigned_subagent_key.as_deref()
+                        != Some(attempt.subagent_key.as_str()))
+            {
+                return Err("review_yield_review_attempt_disposition_invalid=true".into());
+            }
+        }
+        if round.completed_lens_round
+            && (attempts.len() != expected.len()
+                || attempts
+                    .iter()
+                    .any(|attempt| attempt.disposition != AttemptDisposition::Accepted))
+        {
+            return Err("review_yield_complete_round_attempts_invalid=true".into());
+        }
     }
     for finding in round
         .confirmed_findings

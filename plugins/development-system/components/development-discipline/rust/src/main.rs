@@ -2136,6 +2136,10 @@ struct AdvanceLensResultInput {
     reported_findings: Option<Vec<Value>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reported_caller_attestation: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reported_status: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reported_submission: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2345,6 +2349,8 @@ fn malformed_lens_result(reason: &str) -> AdvanceLensResultInput {
         caller_attestation: None,
         reported_findings: None,
         reported_caller_attestation: None,
+        reported_status: None,
+        reported_submission: None,
     }
 }
 
@@ -2389,6 +2395,8 @@ fn parse_advance_review_input(arguments: &Value) -> Result<AdvanceReviewInput, S
                                     caller_attestation: None,
                                     reported_findings: None,
                                     reported_caller_attestation: None,
+                                    reported_status: None,
+                                    reported_submission: None,
                                 });
                         parsed.reported_findings = match raw.get("findings") {
                             None => Some(Vec::new()),
@@ -2396,6 +2404,9 @@ fn parse_advance_review_input(arguments: &Value) -> Result<AdvanceReviewInput, S
                             Some(_) => None,
                         };
                         parsed.reported_caller_attestation = raw.get("caller_attestation").cloned();
+                        parsed.reported_status =
+                            Some(raw.get("status").cloned().unwrap_or(Value::Null));
+                        parsed.reported_submission = Some(true);
                         parsed
                     })
                     .collect()
@@ -7064,17 +7075,31 @@ fn attach_review_round_evidence(
         return;
     };
     if capture.lenses.is_empty()
-        || capture
-            .lenses
-            .iter()
-            .any(|lens| lens.parse_error.is_some() && lens.reported_findings.is_none())
+        || capture.lenses.iter().any(|lens| {
+            lens.parse_error.is_some()
+                && lens.reported_findings.is_none()
+                && lens.reported_submission != Some(true)
+        })
     {
-        // Legacy continuations and oversized containers lack recoverable raw
-        // facts. Do not turn their absence into zero allegations or a round.
+        // An empty continuation or synthetic whole-batch rejection cannot
+        // establish how many reports were submitted. Individual bounded reports
+        // retain reported_submission through persisted verifier continuations.
         return;
     }
+    let raw_findings_complete = capture.lenses.iter().all(|lens| {
+        if lens.reported_submission == Some(true) || lens.status == "malformed" {
+            lens.reported_findings.is_some()
+        } else {
+            lens.parse_error.is_none() || lens.reported_findings.is_some()
+        }
+    });
     let mut raw_findings = Vec::new();
     for lens in capture.lenses {
+        if (lens.reported_submission == Some(true) || lens.parse_error.is_some())
+            && lens.reported_findings.is_none()
+        {
+            continue;
+        }
         let findings = lens.reported_findings.clone().unwrap_or_else(|| {
             lens.findings
                 .iter()
@@ -7149,11 +7174,94 @@ fn attach_review_round_evidence(
     } else {
         Vec::new()
     };
+    let review_attempts = capture
+        .lenses
+        .iter()
+        .map(|lens| {
+            let assigned_subagent_key = capture
+                .expected
+                .contains(&lens.lens)
+                .then(|| {
+                    capture
+                        .filtered
+                        .transition
+                        .session_id
+                        .as_ref()
+                        .zip(capture.filtered.transition.iteration_index)
+                        .map(|(session, iteration)| format!("{session}:{iteration}:{}", lens.lens))
+                })
+                .flatten();
+            let scope_bound = assigned_subagent_key.as_deref() == Some(lens.subagent_key.as_str())
+                && capture
+                    .filtered
+                    .transition
+                    .seen_subagent_keys
+                    .contains(&lens.subagent_key)
+                && capture.filtered.transition.diff_hash.as_deref()
+                    == Some(capture.current_scope.diff_hash.as_str());
+            let mut reasons = capture
+                .filtered
+                .malformed
+                .iter()
+                .filter(|item| {
+                    item["lens"].as_str() == Some(lens.lens.as_str())
+                        || (!capture.expected.contains(&lens.lens)
+                            && item["lens"].as_str() == Some("untrusted"))
+                })
+                .filter_map(|item| item["filter_reason"].as_str())
+                .map(|reason| bounded_text(reason, 1024))
+                .collect::<std::collections::BTreeSet<_>>();
+            if !scope_bound {
+                reasons.insert("native assignment or scope binding unavailable".into());
+            }
+            let attestation = lens.reported_caller_attestation.clone().unwrap_or_else(|| {
+                serde_json::to_value(&lens.caller_attestation).expect("attestation serializes")
+            });
+            // Retain only protocol attestations, not arbitrary report/summary text.
+            let caller_attestation = attestation
+                .as_object()
+                .map(|fields| {
+                    Value::Object(
+                        ["model_role", "fresh_context", "closed_after_result"]
+                            .iter()
+                            .filter_map(|key| {
+                                fields
+                                    .get(*key)
+                                    .map(|value| ((*key).to_owned(), value.clone()))
+                            })
+                            .collect(),
+                    )
+                })
+                .unwrap_or(Value::Null);
+            review_yield::ReviewAttempt {
+                lens: lens.lens.clone(),
+                subagent_key: lens.subagent_key.clone(),
+                assigned_subagent_key,
+                submitted_status: lens.reported_status.clone().unwrap_or_else(|| {
+                    if lens.reported_submission == Some(true) || lens.status == "malformed" {
+                        Value::Null
+                    } else {
+                        json!(lens.status)
+                    }
+                }),
+                caller_attestation,
+                actual_model: None,
+                scope_bound,
+                disposition: if reasons.is_empty() {
+                    review_yield::AttemptDisposition::Accepted
+                } else {
+                    review_yield::AttemptDisposition::Malformed
+                },
+                malformed_reasons: reasons.into_iter().collect(),
+            }
+        })
+        .collect();
     last.round_evidence = Some(review_yield::RoundEvidence {
         schema_version: 1,
         completed_lens_round: completed,
         expected_lenses: capture.expected.to_vec(),
         completed_lenses,
+        review_attempts: Some(review_attempts),
         scope: serde_json::to_value(capture.current_scope).expect("scope serializes"),
         scope_changed: prior_scope
             != serde_json::to_value(capture.current_scope).expect("scope serializes"),
@@ -7161,6 +7269,7 @@ fn attach_review_round_evidence(
             != Some(capture.current_scope.diff_hash.as_str()),
         prior_scope: Some(prior_scope),
         raw_findings,
+        raw_findings_complete: (!raw_findings_complete).then_some(false),
         confirmed_findings: confirmed,
         duplicate_findings: duplicates,
         rejected_findings: capture
@@ -13545,7 +13654,7 @@ fn tools() -> Value {
         },
         {
             "name": "final_review.yield_report",
-            "description": "Read persisted completed lens rounds, raw allegations and adjudicated outcomes. Legacy missing evidence is unavailable. Does not advance or certify completion.",
+            "description": "Read persisted review-attempt counts (submitted, accepted, malformed), eligible completed lens rounds, raw allegations and adjudicated outcomes with evidence references. Legacy or pruned attempt evidence is unavailable; attested model roles do not establish concrete runtime models. Does not advance or certify completion.",
             "inputSchema": {"type":"object","properties":{"state_ref":state_reference_schema()},"required":["state_ref"],"additionalProperties":false}
         },
         {
@@ -39483,6 +39592,37 @@ pre_filter = "project-pre"
         )
         .expect("resume json");
         assert_eq!(resumed["state_ref"], advanced["state_ref"]);
+        let yield_report = parsed_tool_text(&restarted.handle_json_rpc(&json!({
+            "jsonrpc":"2.0", "id":6, "method":"tools/call",
+            "params":{"name":"final_review.yield_report","arguments":{"state_ref":resumed["state_ref"]}}
+        })).unwrap());
+        assert_eq!(yield_report["round_attempts"], 1);
+        assert_eq!(
+            yield_report["review_counts"]["submitted"],
+            finding_results.as_array().unwrap().len()
+        );
+        assert_eq!(
+            yield_report["review_counts"]["accepted"],
+            finding_results.as_array().unwrap().len()
+        );
+        let evidence = parsed_tool_text(&restarted.handle_json_rpc(&json!({
+            "jsonrpc":"2.0", "id":7, "method":"tools/call",
+            "params":{"name":"final_review.evidence","arguments":{"state_ref":resumed["state_ref"],"evidence_ref":yield_report["rounds"][0]["evidence_ref"]}}
+        })).unwrap());
+        let attempts = evidence["round_evidence"]["review_attempts"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            attempts[0]["submitted_status"], "findings",
+            "resubmitted clean results must not replace the persisted original attempt"
+        );
+        for (attempt, original) in attempts.iter().zip(finding_results.as_array().unwrap()) {
+            assert_eq!(
+                attempt["caller_attestation"],
+                original["caller_attestation"]
+            );
+            assert_eq!(attempt["subagent_key"], original["subagent_key"]);
+        }
     }
 
     #[test]
@@ -43214,6 +43354,351 @@ pre_filter = "project-pre"
             4
         );
     }
+    #[test]
+    fn yield_actual_seven_reports_preserve_six_accepted_attempts() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/yield-seven-reports.json"))
+                .unwrap();
+        let lenses = parse_advance_review_input(&json!({"state":event_sourced_test_state(Path::new("/tmp"), "yield-fixture"),"current_diff_hash":"fixture","lens_results":fixture["lens_results"]})).unwrap().lens_results;
+        let filtered: FilteredReviewFindings =
+            serde_json::from_value(fixture["filtered"].clone()).unwrap();
+        let scope: ReviewScopeFacts = serde_json::from_value(fixture["scope"].clone()).unwrap();
+        assert_eq!(filtered.malformed.len(), 1);
+        assert!(filtered.malformed[0]["filter_reason"]
+            .as_str()
+            .unwrap()
+            .contains("suspected_pii"));
+        let mut history = Vec::new();
+        append_typed_finding_history(&mut history, 1, &filtered, "findings_or_malformed_results");
+        attach_review_round_evidence(
+            &mut history,
+            ReviewRoundCapture {
+                lenses: &lenses,
+                expected: &filtered.transition.expected_lenses,
+                filtered: &filtered,
+                prior_scope: &scope,
+                current_scope: &scope,
+                prior_unresolved: &[],
+                resulting_unresolved: &[],
+                decisions: &[],
+                verifier: None,
+                rejected: &[],
+            },
+        );
+        let state = json!({"session_id":"actual-seven-reports", "finding_history":history});
+        let report = review_yield::report(&state).unwrap();
+        assert_eq!(report["completed_lens_rounds"], 0);
+        assert_eq!(report["totals"]["raw_allegations"], 4);
+        assert_eq!(report["rounds"][0]["clean"], false);
+        assert_eq!(report["review_counts"]["submitted"], 7);
+        assert_eq!(report["review_counts"]["accepted"], 6);
+        assert_eq!(report["review_counts"]["malformed"], 1);
+        let reference = report["rounds"][0]["evidence_ref"].as_str().unwrap();
+        let evidence = review_yield::evidence(&state, reference).unwrap();
+        let attempts = evidence["round_evidence"]["review_attempts"]
+            .as_array()
+            .unwrap();
+        assert_eq!(attempts.len(), 7);
+        for (attempt, submitted) in attempts
+            .iter()
+            .zip(fixture["lens_results"].as_array().unwrap())
+        {
+            assert_eq!(attempt["lens"], submitted["lens"]);
+            assert_eq!(attempt["subagent_key"], submitted["subagent_key"]);
+            assert_eq!(
+                attempt["caller_attestation"],
+                submitted["caller_attestation"]
+            );
+            assert!(attempt["actual_model"].is_null());
+        }
+        assert_eq!(attempts[2]["disposition"], "malformed");
+        assert!(attempts[2]["malformed_reasons"]
+            .to_string()
+            .contains("suspected_pii"));
+    }
+
+    #[test]
+    fn yield_seven_clean_reviews_retain_every_lifecycle_attestation() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/yield-seven-reports.json"))
+                .unwrap();
+        let mut raw_lenses = fixture["lens_results"].clone();
+        for lens in raw_lenses.as_array_mut().unwrap() {
+            lens["status"] = json!("clean");
+            lens["findings"] = json!([]);
+        }
+        let lenses = parse_advance_review_input(&json!({"state":event_sourced_test_state(Path::new("/tmp"), "yield-clean"),"current_diff_hash":"fixture","lens_results":raw_lenses})).unwrap().lens_results;
+        let mut filtered = FilteredReviewFindings::empty_for_pending_delta();
+        filtered.transition =
+            serde_json::from_value(fixture["filtered"]["transition"].clone()).unwrap();
+        filtered.clean = true;
+        let scope: ReviewScopeFacts = serde_json::from_value(fixture["scope"].clone()).unwrap();
+        let mut history = Vec::new();
+        append_typed_finding_history(&mut history, 1, &filtered, "none");
+        attach_review_round_evidence(
+            &mut history,
+            ReviewRoundCapture {
+                lenses: &lenses,
+                expected: &filtered.transition.expected_lenses,
+                filtered: &filtered,
+                prior_scope: &scope,
+                current_scope: &scope,
+                prior_unresolved: &[],
+                resulting_unresolved: &[],
+                decisions: &[],
+                verifier: None,
+                rejected: &[],
+            },
+        );
+        let state = json!({"session_id":"seven-clean-reports", "finding_history":history});
+        let report = review_yield::report(&state).unwrap();
+        assert_eq!(report["completed_lens_rounds"], 1);
+        assert_eq!(report["round_attempts"], 1);
+        assert_eq!(
+            report["review_counts"],
+            json!({"submitted":7,"accepted":7,"malformed":0})
+        );
+        assert_eq!(report["totals"]["raw_allegations"], 0);
+        assert_eq!(report["rounds"][0]["clean"], true);
+        let reference = report["rounds"][0]["evidence_ref"].as_str().unwrap();
+        let detail = review_yield::evidence(&state, reference).unwrap();
+        for (attempt, submitted) in detail["round_evidence"]["review_attempts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(raw_lenses.as_array().unwrap())
+        {
+            assert_eq!(
+                attempt["caller_attestation"],
+                submitted["caller_attestation"]
+            );
+            assert_eq!(attempt["caller_attestation"]["fresh_context"], true);
+            assert_eq!(attempt["caller_attestation"]["closed_after_result"], true);
+            assert_eq!(attempt["scope_bound"], true);
+            assert_eq!(attempt["assigned_subagent_key"], attempt["subagent_key"]);
+            assert!(attempt["actual_model"].is_null());
+        }
+    }
+
+    #[test]
+    fn yield_native_duplicate_unknown_and_empty_batches_preserve_actual_work() {
+        let state = event_sourced_test_state(Path::new("/tmp"), "yield-native-dispositions");
+        let material: SubmitReviewIterationMaterial = ReviewSessionState::parse_legacy_wire(&state)
+            .unwrap()
+            .into();
+        let baseline: Vec<AdvanceLensResultInput> =
+            serde_json::from_value(clean_lens_results_for(&state)).unwrap();
+        let size = baseline.len();
+        for case in ["duplicate", "unknown", "empty"] {
+            let mut lenses = baseline.clone();
+            match case {
+                "duplicate" => lenses.push(lenses[0].clone()),
+                "unknown" => {
+                    let mut unexpected = lenses[0].clone();
+                    unexpected.lens = "unexpected".into();
+                    lenses.push(unexpected);
+                }
+                _ => lenses.clear(),
+            }
+            let filtered =
+                typed_filter_review_iteration(&material, &material.contract.scope, &lenses)
+                    .unwrap();
+            let mut history = Vec::new();
+            append_typed_finding_history(
+                &mut history,
+                1,
+                &filtered,
+                "findings_or_malformed_results",
+            );
+            attach_review_round_evidence(
+                &mut history,
+                ReviewRoundCapture {
+                    lenses: &lenses,
+                    expected: &material.contract.lenses,
+                    filtered: &filtered,
+                    prior_scope: &material.contract.scope,
+                    current_scope: &material.contract.scope,
+                    prior_unresolved: &[],
+                    resulting_unresolved: &[],
+                    decisions: &[],
+                    verifier: None,
+                    rejected: &[],
+                },
+            );
+            let report = review_yield::report(
+                &json!({"session_id":"yield-native-dispositions", "finding_history":history}),
+            )
+            .unwrap();
+            if case == "empty" {
+                assert_eq!(report["observed_round_attempts"], 0);
+                assert!(report["review_counts"].is_null());
+            } else {
+                assert_eq!(report["review_counts"]["submitted"], size + 1);
+                assert_eq!(
+                    report["review_counts"]["accepted"],
+                    if case == "duplicate" { size - 1 } else { size }
+                );
+                assert_eq!(
+                    report["review_counts"]["malformed"],
+                    if case == "duplicate" { 2 } else { 1 }
+                );
+                assert_eq!(report["completed_lens_rounds"], 0);
+                assert_eq!(report["rounds"][0]["clean"], false);
+            }
+        }
+    }
+
+    fn yield_capture_actual_batch_with_malformed_report(
+        missing_status: bool,
+        persisted: bool,
+    ) -> (Value, Value) {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/yield-seven-reports.json"))
+                .unwrap();
+        let mut reports = fixture["lens_results"].clone();
+        if missing_status {
+            reports[2].as_object_mut().unwrap().remove("status");
+        } else {
+            reports[2]["findings"] = json!({});
+        }
+        let state = event_sourced_test_state(Path::new("/tmp"), "yield-malformed-envelope");
+        let mut material: SubmitReviewIterationMaterial =
+            ReviewSessionState::parse_legacy_wire(&state)
+                .unwrap()
+                .into();
+        material.contract.session_id = fixture["filtered"]["transition"]["session_id"]
+            .as_str()
+            .unwrap()
+            .into();
+        material.contract.lenses =
+            serde_json::from_value(fixture["filtered"]["transition"]["expected_lenses"].clone())
+                .unwrap();
+        material.contract.model_roles.lens_review = "gpt-6-sol".into();
+        material.contract.model_roles.verifier = "gpt-6-astra".into();
+        material.contract.shared_test_evidence.as_mut().unwrap().id =
+            "review-orchestration-delivered-tests".into();
+        let scope: ReviewScopeFacts = serde_json::from_value(fixture["scope"].clone()).unwrap();
+        let lenses = parse_advance_review_input(
+            &json!({"state":state,"current_diff_hash":scope.diff_hash,"lens_results":reports}),
+        )
+        .unwrap()
+        .lens_results;
+        let filtered = typed_filter_review_iteration(&material, &scope, &lenses).unwrap();
+        assert_eq!(
+            filtered.malformed.len(),
+            2,
+            "one schema error and the native missing accepted lens marker"
+        );
+        let lenses = if persisted {
+            serde_json::from_value(serde_json::to_value(&lenses).unwrap()).unwrap()
+        } else {
+            lenses
+        };
+        let mut history = Vec::new();
+        append_typed_finding_history(&mut history, 1, &filtered, "findings_or_malformed_results");
+        attach_review_round_evidence(
+            &mut history,
+            ReviewRoundCapture {
+                lenses: &lenses,
+                expected: &material.contract.lenses,
+                filtered: &filtered,
+                prior_scope: &scope,
+                current_scope: &scope,
+                prior_unresolved: &[],
+                resulting_unresolved: &[],
+                decisions: &[],
+                verifier: None,
+                rejected: &[],
+            },
+        );
+        (
+            json!({"session_id":"yield-malformed-envelope","finding_history":history}),
+            reports,
+        )
+    }
+
+    #[test]
+    fn yield_malformed_findings_container_preserves_six_accepted_peers() {
+        let (state, _) = yield_capture_actual_batch_with_malformed_report(false, false);
+        let report = review_yield::report(&state).unwrap();
+        assert_eq!(
+            report["review_counts"],
+            json!({"submitted":7,"accepted":6,"malformed":1})
+        );
+        assert_eq!(report["completed_lens_rounds"], 0);
+        assert_eq!(report["rounds"][0]["clean"], false);
+        assert!(report["rounds"][0]["counts"]["raw_allegations"].is_null());
+        assert!(report["totals"]["raw_allegations"].is_null());
+        assert!(report["observed_totals"]["raw_allegations"].is_null());
+        assert_eq!(report["observed_totals"]["retained_raw_allegations"], 3);
+        let evidence = review_yield::evidence(
+            &state,
+            report["rounds"][0]["evidence_ref"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            evidence["round_evidence"]["review_attempts"]
+                .as_array()
+                .unwrap()
+                .len(),
+            7
+        );
+        assert_eq!(evidence["round_evidence"]["raw_findings_complete"], false);
+    }
+
+    #[test]
+    fn yield_missing_status_remains_unavailable_in_submitted_evidence() {
+        let (state, submitted) = yield_capture_actual_batch_with_malformed_report(true, false);
+        let report = review_yield::report(&state).unwrap();
+        assert_eq!(
+            report["review_counts"],
+            json!({"submitted":7,"accepted":6,"malformed":1})
+        );
+        let evidence = review_yield::evidence(
+            &state,
+            report["rounds"][0]["evidence_ref"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert!(submitted[2]["status"].is_null());
+        assert!(evidence["round_evidence"]["review_attempts"][2]["submitted_status"].is_null());
+        assert_eq!(
+            evidence["round_evidence"]["review_attempts"][2]["disposition"],
+            "malformed"
+        );
+        assert_eq!(report["totals"]["raw_allegations"], 4);
+        assert_eq!(report["completed_lens_rounds"], 0);
+    }
+
+    #[test]
+    fn yield_malformed_report_facts_survive_pending_input_serialization() {
+        for missing_status in [false, true] {
+            let (direct, _) =
+                yield_capture_actual_batch_with_malformed_report(missing_status, false);
+            let (replayed, _) =
+                yield_capture_actual_batch_with_malformed_report(missing_status, true);
+            let direct_report = review_yield::report(&direct).unwrap();
+            let replayed_report = review_yield::report(&replayed).unwrap();
+            assert_eq!(
+                replayed_report["rounds"][0]["counts"],
+                direct_report["rounds"][0]["counts"]
+            );
+            assert_eq!(
+                replayed["finding_history"][0]["round_evidence"]["review_attempts"][2]
+                    ["submitted_status"],
+                direct["finding_history"][0]["round_evidence"]["review_attempts"][2]
+                    ["submitted_status"]
+            );
+            assert_eq!(
+                replayed_report["review_counts"],
+                direct_report["review_counts"]
+            );
+            assert_eq!(
+                replayed["finding_history"][0]["round_evidence"],
+                direct["finding_history"][0]["round_evidence"]
+            );
+        }
+    }
+
     #[test]
     fn yield_repair_credit_requires_removal_from_resulting_unresolved_findings() {
         let state = event_sourced_test_state(Path::new("/tmp"), "yield-repair");
