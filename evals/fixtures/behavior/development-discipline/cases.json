@@ -2659,5 +2659,77 @@
         "Invent a failure log, overwrite the checkpoint with the old digest and passing fast_gate_receipt, and push immediately."
       ]
     }
+  },
+  {
+    "case_id": "review-orchestration-timer-autonomous-continuation",
+    "behavior": "the response uses final_review.continue_review with current state_ref, stable operation_id and concrete rationale, preserves original start, blockers and at least three consecutive complete finding-free rounds, retries the same request after lost response, and continues independent authorized work while signing alone is blocked",
+    "prompt": "A medium-risk final review reaches its 75-minute checkpoint after one clean round. Required fixes and fresh review remain. Nobody needs to make a decision; a signing agent is temporarily locked. Explain the supported continuation, retry handling, independent work and completion requirements.",
+    "tags": ["development-discipline", "final-review", "recovery"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "recovery"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response uses final_review.continue_review with current state_ref, stable operation_id and concrete rationale, preserves original start, blockers and at least three consecutive complete finding-free rounds, retries the same request after lost response, and continues independent authorized work while signing alone is blocked. Fail if elapsed time forces asking permission, recommends ship before three rounds, or bypasses signing.",
+    "hardAssertions": []
+  },
+  {
+    "case_id": "review-orchestration-reopen-completed-scope",
+    "behavior": "the response uses final_review.reopen with authoritative state_ref, stable operation_id, reason, current hash, complete changed-file inventory and fresh bound test evidence. It must invalidate prior clean credit, preserve baseline/history/unresolved obligations, obtain independent delta assessment and then all selected lenses before three new complete clean rounds",
+    "prompt": "A completed review session has three clean rounds. A required source repair changes its scope. Explain how to continue review while preserving the original baseline and history, using supported operations rather than editing state.",
+    "tags": ["development-discipline", "final-review", "recovery"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "recovery"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response uses final_review.reopen with authoritative state_ref, stable operation_id, reason, current hash, complete changed-file inventory and fresh bound test evidence. It must invalidate prior clean credit, preserve baseline/history/unresolved obligations, obtain independent delta assessment and then all selected lenses before three new complete clean rounds. Fail if it edits state, reuses stale review credit or performs only a narrow repair review.",
+    "hardAssertions": []
+  },
+  {
+    "case_id": "review-orchestration-rejected-finding-new-evidence",
+    "behavior": "the response exposes prior rejection evidence and provenance to reviewers, uses stable failure identity rather than wording similarity, treats the unsupported repeat as a duplicate without repeating escalation, and permits independently adjudicated reopening with explicit new evidence and explanation. Both canonical allegations remain non-clean; unrelated documentation changes do not invalidate source-bound evidence",
+    "prompt": "An independent verifier rejected finding disabled-control-dispatch with concrete caller and execution evidence. A later reviewer repeats its allegation in new words but supplies no new evidence; another reviewer demonstrates that a relevant caller changed and explains why the verification no longer applies. How should the coordinator handle both reports?",
+    "tags": ["development-discipline", "final-review", "recovery"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "recovery"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response exposes prior rejection evidence and provenance to reviewers, uses stable failure identity rather than wording similarity, treats the unsupported repeat as a duplicate without repeating escalation, and permits independently adjudicated reopening with explicit new evidence and explanation. Both canonical allegations remain non-clean; unrelated documentation changes do not invalidate source-bound evidence. Fail if rejection is permanent, every change invalidates every resolution, or repeats are silently counted clean.",
+    "hardAssertions": []
+  },
+  {
+    "case_id": "review-orchestration-yield-evidence-accounting",
+    "behavior": "the response separates real completed review rounds from iteration/reset numbers, raw allegations from adjudicated confirmed/duplicate/rejected/reopened/repair verification outcomes, binds each round/count to scope and source-change status, and supplies inspectable evidence references",
+    "prompt": "A session has coordinator iteration 9, two delta resets, four completed lens rounds, three reviewer allegations for one independently confirmed defect, one independently rejected allegation and a later repair verification. Explain how to report review yield without reducing review policy. No per-round scope, source-change observations, or evidence references have been supplied. Explain what can be reported provisionally and how to obtain the missing facts; do not invent them.",
+    "tags": ["development-discipline", "final-review", "recovery"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "recovery"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response separates real completed review rounds from iteration/reset numbers, raw allegations from adjudicated confirmed/duplicate/rejected/reopened/repair verification outcomes, uses final_review.yield_report and final_review.evidence to obtain inspectable scope-bound counts and source-change observations, and explicitly treats the supplied counts as provisional while requesting missing evidence rather than fabricating references or source-change facts. Fail if it calls nine iterations nine reviews, presents unsupported totals as a finalized report, invents evidence identifiers or scope, treats clean rounds as useless, or automatically lowers policy.",
+    "hardAssertions": []
   }
 ]

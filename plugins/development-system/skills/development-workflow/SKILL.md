@@ -57,15 +57,22 @@ derive it as lowercase hexadecimal SHA-256 of the exact byte sequence
 `baseline_oid`, one NUL byte, and the original user-request text encoded as
 UTF-8 after replacing every CRLF or lone CR line ending with LF. Do not trim
 whitespace, normalize Unicode, interpolate variables, or append a newline.
-Record that ID in every handoff. Invoke the bundled
-`<plugin-root>/scripts/write-local-checkpoint.sh` with that ID, the expected
-generation, the expected predecessor digest (or literal `null`), and a file
-containing the proposed newline-terminated record. Create that proposal outside
-the worktree; the helper rejects an in-worktree proposal because it would become
-part of the untracked snapshot it is trying to describe. The helper creates the
-owner-only parent and serializes transitions with an exclusive task-scoped
-lock. While holding the lock, it first copies the proposal to a private
-same-directory candidate, then validates and publishes that exact candidate.
+Record that ID in every handoff. Use the bundled
+`<plugin-root>/scripts/transition-local-checkpoint.sh CHECKPOINT_ID OPERATION_ID OPERATION INPUT_FILE`
+with the [typed operation contract](references/checkpoint-operations.md).
+Supply operation-specific evidence plus the expected successor generation and
+predecessor digest; never manually construct a successor for an ordinary
+transition. Keep input and retained evidence outside the worktree. Choose and
+retain one stable operation ID before the call; use `read` with `{}` or retry
+the exact request after interruption, without repeating an external action.
+The helper derives the successor from the validated authoritative predecessor
+under the writer's exclusive task-scoped lock, and retains a durable operation
+receipt. Reusing an ID with different input is rejected. After an interrupted
+publication, the writer reconciles the prepared receipt against authoritative
+bytes before any new transition. The compatibility
+`write-local-checkpoint.sh` still accepts a complete outside-worktree proposal
+and uses the same validation, lock, and publication path. The helper creates
+the owner-only parent, then validates a private same-directory candidate.
 It reads the current complete record and requires the candidate's
 `generation` to equal the current generation plus one and its
 `predecessor_sha256` to equal SHA-256 of the exact current `checkpoint-v1` line;
@@ -453,6 +460,48 @@ delivery detail:
      receipts, invalidate every old peer result, and require three fresh,
      consecutive, complete, finding-free iterations of the entire selected
      lens set.
+
+## Review recovery and evidence operations
+
+For timer, completed-session, rejected-finding, or review-yield questions, read
+the [final-review protocol](../../components/development-discipline/skills/final-review/references/mcp-protocol.md)
+before choosing or explaining a recovery. Name the supported operation and its
+required evidence; a generic instruction to continue or start over is insufficient.
+When explaining a completed-session reopen, explicitly name preservation of
+the baseline, history, and unresolved obligations as well as the clean-credit
+reset. When a yield question supplies no scope or evidence references, label
+its counts provisional and request the actual report and evidence; never
+invent identifiers or source-change facts to complete a report.
+
+- After a 75-minute checkpoint, use `final_review.continue_review` with the
+  authoritative `state_ref`, a stable `operation_id`, and concrete progress
+  rationale. Retry the exact request after a lost response. It preserves the
+  original start, unresolved blockers, and at least three consecutive complete
+  finding-free rounds. Resolve a legacy escalation with its concrete recovery
+  reference. A locked signer blocks signing; continue independent authorized
+  work and never bypass its signature gate. Elapsed time alone needs no human
+  permission.
+- For a required source change after completion, use `final_review.reopen`
+  with the authoritative `state_ref`, stable `operation_id`, reason, current
+  scope hash, complete changed-file inventory, and fresh bound test evidence.
+  Preserve baseline, history, and unresolved obligations; invalidate prior
+  clean credit, obtain independent delta assessment, then run every selected
+  lens until three new consecutive complete finding-free rounds.
+- Give reviewers retained rejection rationale, concrete evidence, verifier
+  provenance, and reviewed scope. Match exact finding/lens identity rather
+  than wording. An unsupported repeat is a non-clean duplicate without renewed
+  escalation. A challenge needs `resolution_reopen`, new contradictory evidence,
+  relevant source change, or a demonstrated verification gap, plus an explicit
+  explanation of why the prior resolution fails and independent adjudication.
+  Unrelated documentation changes preserve source-bound evidence. Reopened
+  allegations also remain non-clean.
+- Use `final_review.yield_report` and inspect its references with
+  `final_review.evidence`. Separate actual completed rounds from iteration and
+  delta/reset bookkeeping, and raw allegations from confirmed, duplicate,
+  rejected, reopened, and verified-repair outcomes. Bind every count to its
+  reviewed scope and whether source changed between rounds. Missing evidence
+  is unavailable, not zero; request the evidence rather than inventing counts.
+  Clean rounds supply required scrutiny and never lower review policy.
 
 When a `final_review.plan` handoff is truncated, recover it instead of
 replanning. Call `final_review.pending_assignments` with the retained

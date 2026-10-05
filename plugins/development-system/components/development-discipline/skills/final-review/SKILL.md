@@ -230,13 +230,21 @@ checkpoint. Apply this contract when `advance_kind` is
 
 - The coordinator has already persisted the submitted review or delta findings
   to authoritative state and returned no further reviewer assignments.
-- Make the next call with the returned state, unchanged `current_diff_hash`,
-  empty `lens_results`, and exactly one `review_budget_decision` with a nonblank
-  rationale.
-- For unlanded reviews, the choices are `ship`, `split`, or `escalate`; `split`
-  requires at least two distinct ticket references. For landed reviews, the
-  choices are only `ship` or `escalate` because landed work cannot be decomposed
-  into delivery tickets. `escalate` requires a nonblank escalation reference.
+- Assess progress against the approved goal. When required repairs or fresh independent
+  reviews remain and no human decision is necessary, call
+  `final_review.continue_review` with the returned `state_ref`, a stable
+  `operation_id`, and a concrete `rationale`. This records the assessment and
+  opens another 75-minute window. It preserves blockers, clean-round credit,
+  required lens coverage, and the original start time. Retry the exact same
+  request after an interrupted response; changed requests need a new operation ID.
+- Stop for a human only when a specific unresolved decision or action requires
+  one. Record that dependency explicitly. A locked signing agent blocks the
+  signing operation; continue independent authorized work that can still progress.
+- `ship`, `split`, and `escalate` remain explicit choices through
+  `final_review.advance` with unchanged `current_diff_hash`, empty `lens_results`,
+  and one `review_budget_decision`. `split` is available only for unlanded
+  reviews and requires two distinct ticket references. Escalation requires a
+  concrete escalation reference; elapsed time alone is not a human dependency.
 - Reject `ship` until every planned increment and acceptance criterion is
   delivered, every blocking finding is resolved, and the durable review state
   contains at least three consecutive complete finding-free iterations. For
@@ -245,9 +253,10 @@ checkpoint. Apply this contract when `advance_kind` is
   local-only mode, instead require fresh readiness evidence bound to the exact
   final-reviewed local identity and require no remote CI. Once valid, `ship` is
   terminal and schedules no more reviewers.
-- For unlanded reviews, `split` creates a terminal hold. `escalate` creates one
-  in either lifecycle. Each hold preserves blockers, schedules no reviewers,
-  and rejects every later `final_review.advance` for that session.
+- `split` preserves its explicit hold. A legacy `escalate` hold can be resolved
+  with `final_review.continue_review` plus `recovery_reference` explaining why
+  the recorded dependency is resolved. This resumes the existing obligations;
+  it grants no review or verification credit.
 
 ## Scope
 
@@ -649,3 +658,38 @@ Before PR creation, merge, or readiness claims, report the scope/baseline,
 lenses, fixes/defenses/remaining risk, the selected unrelated-finding
 disposition and its out-of-scope report, risk-selected pass evidence, the final
 blocking-finding status, and verification commands/outcomes.
+
+## Independent rejection evidence and review yield
+
+Inspect `resolution_history` in each reviewer packet. It retains independently
+rejected findings with exact finding/lens identity, rationale, checked evidence,
+assumptions, verifier provenance, reviewed scope, and source dependency identities.
+Reuse the stable identity for the same failure path; wording similarity does not
+establish a duplicate. An unsupported repeat remains a raw non-clean allegation
+and a duplicate, without renewed escalation or verifier work.
+
+To challenge a retained resolution, include `resolution_reopen` in the finding
+with its exact `resolution_id`, `reason` (`contradictory-evidence`,
+`relevant-change`, or `incomplete-prior-verification`), `explanation` of why the
+prior resolution no longer holds, and concrete `evidence_ref`. The challenge
+requires independent adjudication. Source dependency changes invalidate reuse;
+unrelated documentation changes do not. Missing historical dependency evidence
+cannot establish reusable rejection credit.
+
+Independent verifiers rejecting a finding should name the concrete evidence in
+`causality_evidence`, state the rationale and actually checked `assumptions`,
+and supply all actual repository-relative `dependency_blobs` as Git
+`mode:blob-OID` identities. The host re-observes them; invented identities fail.
+Do not omit a dependency merely to make a resolution survive a relevant change.
+The caller adds the real assigned model and fresh/closed lifecycle attestations
+only after the independent verifier has completed.
+
+Use `final_review.yield_report` with the current `state_ref` to report actual
+completed lens rounds separately from coordinator iteration, delta and reset
+bookkeeping. Report raw allegations separately from confirmed defects,
+duplicates, independent rejections, reopenings, and verified repairs. Each
+round binds its counts to the reviewed scope, shows source changes, and returns
+evidence references. Inspect a reference with `final_review.evidence`; do not
+infer counts from iteration numbers or filtered bucket totals. Legacy evidence
+that was never retained is unavailable, not zero. An all-clean round supplies
+required scrutiny; its yield never changes the review policy automatically.

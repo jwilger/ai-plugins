@@ -100,6 +100,14 @@ Verify the checkout version matches the installed plugin version, and verify
 the runtime after restart. A stale explicitly configured project MCP
 binding requires the separately previewed and approved setup migration.
 
+For new checkpoint transitions, use the bundled
+[`transition-local-checkpoint.sh` operation API](skills/development-workflow/references/checkpoint-operations.md).
+It derives successors under the authoritative writer lock and returns durable
+receipts keyed by stable operation IDs. Initialization, focused test outcomes,
+review and gate outcomes, actual commits, exact verification and retry, local
+or pushed delivery, CI observations, and terminal outcomes have explicit
+operations. The recovery command below remains supported for older sessions.
+
 Before changing source, reconcile the retained failed command/review evidence
 with Git. HEAD must still equal the checkpoint's HEAD: if a commit exists,
 recover its normal committed transition instead. Keep the real failure
@@ -228,3 +236,47 @@ unconfirmed routes are reported visibly. See the [routing
 skill](skills/model-routing/SKILL.md) and [mapping
 contract](skills/model-routing/references/runtime-mappings.md) for keys, precedence,
 examples, and fallback rules.
+
+## Continue required review after a timed checkpoint
+
+A medium-risk review's 75-minute boundary is a progress assessment. When
+required repairs or fresh independent review remain and no human decision is
+needed, call `final_review.continue_review` with the returned `state_ref`, a
+stable `operation_id`, and a concrete `rationale`. The coordinator records that
+assessment, retains the original start time and every blocker, and opens another
+75-minute window. Three consecutive complete finding-free review rounds remain
+required. Retry the exact request after a lost response; conflicting reuse of
+an operation ID fails. Recovery of a legacy escalation hold additionally needs
+`recovery_reference` explaining why its recorded dependency is resolved.
+
+After source changes to a completed session, use `final_review.reopen` with its
+authoritative reference, stable operation ID, reason, current diff identity,
+complete changed-file inventory, and fresh shared test evidence. Reopening
+preserves the pinned baseline and history, clears stale review credit, and
+requires an independent delta assessment followed by all selected review lenses.
+A replayed historical reopen receipt explicitly identifies stale assignments;
+resume current state before launching more reviewers.
+
+For native persistence failures, use the version-matched
+[one-operation replay helper](scripts/replay-review-operation.md) through the
+host's supported approval mechanism. Its fixed writable paths cover the Git
+objects, advisory refs and review replica, the exact per-binding SQLite report
+directory, snapshot objects and private scratch. Source, unrelated refs and
+configuration stay read-only; IP networking is denied. Signing, publication
+locks and concurrency checks still apply. The historical narrow reproduction
+shows that these writes were necessary, without proving every host's original
+permission failure had the same cause.
+
+Independent rejection evidence now travels with subsequent reviewer packets.
+The coordinator uses exact stable identity and actual checked source dependencies,
+so an unrelated documentation change does not discard a valid source-bound
+resolution. A reviewer may challenge it with explicit new evidence and an
+explanation of why the prior resolution fails; reopening requires independent
+adjudication. Unsupported repeats do not create renewed escalation work and
+still prevent a finding-free round.
+
+Read `final_review.yield_report` for actual round counts and separate raw versus
+adjudicated outcomes; use `final_review.evidence` to inspect the associated
+records. Missing legacy evidence is reported as unavailable. Reports never infer
+that a clean round was useless or reduce review requirements. The existing
+serialized-state size limit remains a limitation for evidence-heavy sessions.
