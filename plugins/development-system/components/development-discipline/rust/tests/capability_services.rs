@@ -1608,6 +1608,10 @@ fn plugin_surface_exposes_advisory_coordination_and_denies_project_mutation_tool
     assert!(names.contains(&"workspace-reader.status"));
     assert!(names.contains(&"setup.preview"));
     assert!(names.contains(&"final_review.plan"));
+    assert!(names.contains(&"final_review.reopen"));
+    assert!(names.contains(&"final_review.continue_review"));
+    assert!(names.contains(&"final_review.yield_report"));
+    assert!(names.contains(&"final_review.evidence"));
     assert!(!names.iter().any(|name| name.starts_with("workflow.")));
     assert!(names.iter().all(|name| {
         matches!(
@@ -1629,6 +1633,10 @@ fn plugin_surface_exposes_advisory_coordination_and_denies_project_mutation_tool
                 | "final_review.clean_status"
                 | "final_review.out_of_scope_report"
                 | "final_review.resume_latest"
+                | "final_review.reopen"
+                | "final_review.continue_review"
+                | "final_review.yield_report"
+                | "final_review.evidence"
                 | "final_review.pending_assignments"
                 | "final_review.assess_risk"
         )
