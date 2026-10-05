@@ -50,7 +50,7 @@ run_gate() {
   cmp "$PARENT/.git/config" "$BATS_TEST_TMPDIR/parent.config"
   cmp "$PARENT/.git/index" "$BATS_TEST_TMPDIR/parent.index"
   [ "$(git --git-dir="$GATE_FIXTURE_ROOT" config core.bare)" = true ]
-  [ "$(head -n 1 "$GATE_CALLS")" = 'just validate-marketplace github-actions' ]
+  [ "$(head -n 1 "$GATE_CALLS")" = 'just validate-marketplace github-actions pi-extension' ]
   [[ "$(cat "$GATE_CALLS")" == *'--bin development-discipline-mcp -- --test-threads=1'* ]]
 }
 

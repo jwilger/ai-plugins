@@ -7,13 +7,19 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace github-actions tiber-harness-rust tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
+ci: validate-marketplace github-actions pi-extension tiber-harness-rust tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
 
 # The developer gate runs before every commit. It deliberately excludes
 # acceptance, release, browser, mutation, and shell suites; CI owns those after
 # the push. It still runs formatting, linting, and every Rust unit-test target.
 pre-commit:
     bash scripts/run-pre-commit-gate.sh
+
+# Type-check and behavior-test the pi adapter for development-system.
+pi-extension:
+    scripts/evals/ensure-node-deps.sh
+    node_modules/.bin/tsc -p plugins/development-system/pi/tsconfig.json
+    node --test scripts/tests/pi-extension.test.mts
 
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:

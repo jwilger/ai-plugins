@@ -68,3 +68,29 @@ JSON
   [ "$status" -ne 0 ]
   [[ "$output" == *"redundant-codex-plugin-json"* ]]
 }
+
+@test "accepts a pi package manifest that matches the plugin" {
+  mkdir -p "$ROOT/plugins/alpha/skills" "$ROOT/plugins/alpha/pi"
+  touch "$ROOT/plugins/alpha/pi/extension.ts"
+  printf '%s\n' '{"name":"@example/alpha","version":"1.2.3","keywords":["pi-package"],"pi":{"extensions":["./pi/extension.ts"],"skills":["./skills"]}}' \
+    >"$ROOT/plugins/alpha/package.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "rejects a pi package manifest whose version drifts from the plugin" {
+  mkdir -p "$ROOT/plugins/alpha/skills"
+  printf '%s\n' '{"name":"@example/alpha","version":"1.2.2","keywords":["pi-package"],"pi":{"skills":["./skills"]}}' \
+    >"$ROOT/plugins/alpha/package.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"pi-package-version-mismatch: alpha"* ]]
+}
+
+@test "rejects a pi package resource path that does not exist" {
+  printf '%s\n' '{"name":"@example/alpha","version":"1.2.3","keywords":["pi-package"],"pi":{"extensions":["./pi/missing.ts"]}}' \
+    >"$ROOT/plugins/alpha/package.json"
+  run bash "$SCRIPT" "$ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing-pi-resource: alpha path=./pi/missing.ts"* ]]
+}

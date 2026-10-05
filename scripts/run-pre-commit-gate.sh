@@ -14,7 +14,7 @@ done <<< "$git_local_env_names"
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$project_root"
-just validate-marketplace github-actions
+just validate-marketplace github-actions pi-extension
 bash tiber/scripts/check-lint-policy.sh
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo fmt --manifest-path tiber/Cargo.toml --all --check
 CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo clippy --manifest-path tiber/Cargo.toml --workspace --all-targets --all-features -- -D warnings

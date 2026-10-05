@@ -20,6 +20,10 @@ case "$kind" in
 esac
 jq --arg version "$version" '.version = $version' "$root/plugins/$name/plugin.json" >"$root/plugins/$name/plugin.json.tmp"
 mv "$root/plugins/$name/plugin.json.tmp" "$root/plugins/$name/plugin.json"
+if [[ -f "$root/plugins/$name/package.json" ]]; then
+  jq --arg version "$version" '.version = $version' "$root/plugins/$name/package.json" >"$root/plugins/$name/package.json.tmp"
+  mv "$root/plugins/$name/package.json.tmp" "$root/plugins/$name/package.json"
+fi
 jq --arg name "$name" --arg version "$version" '(.plugins[] | select(.name == $name) | .version) = $version' "$root/.agents/plugins/marketplace.json" >"$root/.agents/plugins/marketplace.json.tmp"
 mv "$root/.agents/plugins/marketplace.json.tmp" "$root/.agents/plugins/marketplace.json"
 if [[ -f "$root/README.md" ]] && grep -Fq "| [$name](" "$root/README.md"; then

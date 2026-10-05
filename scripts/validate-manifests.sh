@@ -34,6 +34,15 @@ for dir in "$root"/plugins/*/; do
     [.plugins[] | select(.name == $name and .version == $version and
       .source.source == "local" and .source.path == ("./plugins/" + $name))] | length == 1
   ' "$marketplace" >/dev/null || fail "marketplace-plugin-mismatch: $name version=$version"
+  if [[ -f "${dir}package.json" ]]; then
+    jq -e 'type == "object" and (.pi | type == "object")' "${dir}package.json" >/dev/null || fail "invalid-pi-package-json: $name"
+    package_version="$(jq -r '.version // empty' "${dir}package.json")"
+    [[ "$package_version" == "$version" ]] || fail "pi-package-version-mismatch: $name package=$package_version plugin=$version"
+    while IFS= read -r resource; do
+      [[ "$resource" == ./* && "$resource" != *..* ]] || fail "invalid-pi-resource: $name path=$resource"
+      [[ -e "${dir}${resource#./}" ]] || fail "missing-pi-resource: $name path=$resource"
+    done < <(jq -r '.pi | to_entries[] | select(.value | type == "array") | .value[]' "${dir}package.json")
+  fi
   [[ ! -e "${dir}.codex-plugin/plugin.json" ]] || fail "redundant-codex-plugin-json: $name"
   [[ ! -e "${dir}.codex-mcp.json" ]] || fail "legacy-codex-mcp-json: $name"
   if [[ -f "${dir}mcp.json" ]]; then

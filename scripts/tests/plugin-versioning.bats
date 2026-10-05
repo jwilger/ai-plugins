@@ -38,3 +38,11 @@ teardown() { rm -rf "$ROOT"; }
   [ "$status" -ne 0 ]
   [[ "$output" == *'without a version bump'* ]]
 }
+
+@test "version bump synchronizes a pi package manifest" {
+  printf '{"name":"@example/alpha","version":"1.2.3","pi":{"skills":["./skills"]}}\n' >"$ROOT/plugins/alpha/package.json"
+  run bash "$ROOT/scripts/bump-plugin-version.sh" alpha patch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .version "$ROOT/plugins/alpha/package.json")" = 1.2.4 ]
+  [ "$(jq -r .pi.skills[0] "$ROOT/plugins/alpha/package.json")" = ./skills ]
+}

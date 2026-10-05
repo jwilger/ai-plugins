@@ -6,6 +6,8 @@ root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 required_paths=(
   "node_modules/.bin/promptfoo"
   "node_modules/@openai/codex-sdk"
+  "node_modules/.bin/tsc"
+  "node_modules/@types/node"
 )
 
 missing=0

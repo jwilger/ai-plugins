@@ -20,9 +20,24 @@ review.
 
 ## Plugin catalog
 
-| Plugin                                                     | Harness | Description                                                                                          | Version |
-| ---------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex   | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.11.1  |
+| Plugin                                                     | Harness                  | Description                                                                                          | Version |
+| ---------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md) | Codex, pi (experimental) | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.12.0  |
+
+## Using development-system with pi (experimental)
+
+`plugins/development-system` is also a [pi](https://github.com/earendil-works/pi)
+package. It reuses the same skills, MCP launchers, binaries, and session-start
+conflict check as the Codex plugin; see
+[ADR-0018](docs/adr/0018-pi-package-delivery.md). Install it in place from a
+checkout:
+
+```shell
+pi install ./plugins/development-system
+```
+
+Codex subagents and pi behavior evals are not available yet, and some skills
+still describe Codex-specific setup.
 
 ## Using the marketplace (Codex)
 

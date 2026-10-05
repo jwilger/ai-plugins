@@ -106,13 +106,72 @@ setup_command() {
 
 inspect_conflicts() {
   local project=$1
-  local found=false
-  local codex_home=${CODEX_HOME:-${HOME:-}/.codex}
-  local codex_config
+  local harness=$2
 
   if [[ ! -f "$project/.development-system.toml" ]]; then
     return
   fi
+
+  case "$harness" in
+    codex) inspect_codex_conflicts "$project" ;;
+    pi) inspect_pi_conflicts "$project" ;;
+  esac
+}
+
+# Pi treats `-` and `_` in MCP server names as the same server.
+pi_owned_mcp_server() {
+  case "${1//_/-}" in
+    development-discipline | tiber) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+inspect_pi_conflicts() {
+  local project=$1
+  local found=false
+  local agent_dir=${PI_CODING_AGENT_DIR:-${HOME:-}/.pi/agent}
+  local file server
+
+  # A file-configured server takes precedence over the extension registration.
+  for file in "$project/.pi/mcp.json" "$agent_dir/mcp.json"; do
+    [[ -f "$file" ]] || continue
+    if ! jq -e '(.mcpServers // {}) | type == "object"' "$file" >/dev/null 2>&1; then
+      warn "unreadable_harness_config harness=pi file=$file"
+      found=true
+      continue
+    fi
+    while IFS= read -r server; do
+      if pi_owned_mcp_server "$server"; then
+        warn "mcp_server_override harness=pi server=$server file=$file recommendation=remove_entry_so_development-system_registers_it"
+        found=true
+      fi
+    done < <(jq -r '(.mcpServers // {}) | keys[]' "$file")
+  done
+
+  # Without built-in MCP support, nothing connects registered servers.
+  for file in "$project/.pi/settings.json" "$agent_dir/settings.json"; do
+    [[ -f "$file" ]] || continue
+    if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+      warn "unreadable_harness_config harness=pi file=$file"
+      found=true
+      continue
+    fi
+    if jq -e '(.extensions // []) | index("-builtin:mcp") != null' "$file" >/dev/null; then
+      warn "incompatible_harness_setting harness=pi setting=builtin_mcp_disabled file=$file"
+      found=true
+    fi
+  done
+
+  if [[ "$found" == "true" ]]; then
+    warn "supply_chain_recommendation harness=pi recommendation=let_development-system_register_its_mcps"
+  fi
+}
+
+inspect_codex_conflicts() {
+  local project=$1
+  local found=false
+  local codex_home=${CODEX_HOME:-${HOME:-}/.codex}
+  local codex_config
 
   for codex_config in "$project/.codex/config.toml" "$codex_home/config.toml"; do
     if [[ -f "$codex_config" ]] &&
@@ -143,15 +202,21 @@ inspect_conflicts() {
 doctor_command() {
   local project=.
   local format=text
+  local harness=codex
   while (($#)); do
     case "$1" in
-      --project | --format)
+      --project | --format | --harness)
         local option=$1
         if (($# < 2)) || [[ "$2" == --* ]]; then
           die "development_system.missing_option_value option=$option"
         fi
         if [[ "$option" == "--project" ]]; then
           project=$2
+        elif [[ "$option" == "--harness" ]]; then
+          case "$2" in
+            codex | pi) harness=$2 ;;
+            *) die "development_system.unsupported_harness harness=$2" ;;
+          esac
         else
           format=$2
         fi
@@ -165,7 +230,7 @@ doctor_command() {
   project="$(cd "$project" && pwd)" ||
     die "development_system.project_not_found project=$project"
   local output
-  output="$(inspect_conflicts "$project")"
+  output="$(inspect_conflicts "$project" "$harness")"
   if [[ -z "$output" ]]; then
     return
   fi

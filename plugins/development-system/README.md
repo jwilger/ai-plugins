@@ -1,6 +1,29 @@
 # Development System
 
-The single personal development plugin for Codex.
+The single personal development plugin for Codex, also packaged for pi.
+
+## pi package (experimental)
+
+This directory is a pi package as well as a Codex plugin
+([ADR-0018](../../docs/adr/0018-pi-package-delivery.md)). Install it in place:
+
+```shell
+pi install ./plugins/development-system
+```
+
+The package loads the skills in `skills/` and the adapter in
+`pi/extension.ts`. The adapter:
+
+- registers both MCP servers from `mcp.json` using the same plugin-root
+  launchers, so binaries are repaired the same way as under Codex;
+- runs `bin/development-system session-start --harness pi` in the background at
+  session start and shows its warnings as notifications;
+- adds `/development-system doctor` to rerun that check on demand.
+
+The check warns when a project or user `mcp.json` entry shadows
+`development-discipline` or `tiber`, and when pi settings disable built-in MCP
+support. Codex subagents are not yet available in pi, and some skills still
+describe Codex-specific setup.
 
 ## Host-local binaries
 

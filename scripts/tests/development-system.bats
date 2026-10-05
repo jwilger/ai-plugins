@@ -193,6 +193,86 @@ teardown() {
   [[ "$output" == *"supply_chain_recommendation"* ]]
 }
 
+@test "pi doctor warns when file-configured MCPs shadow plugin-registered servers" {
+  mkdir -p "$TEST_ROOT/project/.pi" "$TEST_ROOT/agent"
+  touch "$TEST_ROOT/project/.development-system.toml"
+  printf '%s\n' '{"mcpServers":{"tiber":{"command":"tiber"},"docs":{"url":"https://example.com/mcp"}}}' \
+    >"$TEST_ROOT/project/.pi/mcp.json"
+  printf '%s\n' '{"mcpServers":{"development_discipline":{"enabled":false}}}' \
+    >"$TEST_ROOT/agent/mcp.json"
+
+  run env HOME="$TEST_ROOT/home" PI_CODING_AGENT_DIR="$TEST_ROOT/agent" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --harness pi \
+    --project "$TEST_ROOT/project"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mcp_server_override harness=pi server=tiber file=$TEST_ROOT/project/.pi/mcp.json"* ]]
+  [[ "$output" == *"mcp_server_override harness=pi server=development_discipline file=$TEST_ROOT/agent/mcp.json"* ]]
+  [[ "$output" != *"server=docs"* ]]
+  [[ "$output" == *"supply_chain_recommendation harness=pi"* ]]
+  [[ "$output" != *"harness=codex"* ]]
+}
+
+@test "pi doctor warns when built-in MCP support is disabled" {
+  mkdir -p "$TEST_ROOT/project/.pi" "$TEST_ROOT/agent"
+  touch "$TEST_ROOT/project/.development-system.toml"
+  printf '%s\n' '{"extensions":["-builtin:mcp"]}' >"$TEST_ROOT/project/.pi/settings.json"
+  printf '%s\n' '{"extensions":["+builtin:mcp"]}' >"$TEST_ROOT/agent/settings.json"
+
+  run env HOME="$TEST_ROOT/home" PI_CODING_AGENT_DIR="$TEST_ROOT/agent" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --harness pi \
+    --project "$TEST_ROOT/project"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"setting=builtin_mcp_disabled file=$TEST_ROOT/project/.pi/settings.json"* ]]
+  [[ "$output" != *"file=$TEST_ROOT/agent/settings.json"* ]]
+}
+
+@test "pi doctor reports unreadable pi configuration instead of ignoring it" {
+  mkdir -p "$TEST_ROOT/project/.pi" "$TEST_ROOT/agent"
+  touch "$TEST_ROOT/project/.development-system.toml"
+  printf '%s\n' '{not json' >"$TEST_ROOT/project/.pi/mcp.json"
+
+  run env HOME="$TEST_ROOT/home" PI_CODING_AGENT_DIR="$TEST_ROOT/agent" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --harness pi \
+    --project "$TEST_ROOT/project"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unreadable_harness_config harness=pi file=$TEST_ROOT/project/.pi/mcp.json"* ]]
+}
+
+@test "pi doctor ignores Codex configuration" {
+  mkdir -p "$TEST_ROOT/project/.codex" "$TEST_ROOT/agent"
+  touch "$TEST_ROOT/project/.development-system.toml"
+  printf '%s\n' '[features]' 'hooks = false' >"$TEST_ROOT/project/.codex/config.toml"
+
+  run env HOME="$TEST_ROOT/home" PI_CODING_AGENT_DIR="$TEST_ROOT/agent" \
+    "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --harness pi \
+    --project "$TEST_ROOT/project"
+
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "doctor rejects an unsupported harness" {
+  mkdir -p "$TEST_ROOT/project"
+  run "$REPO_ROOT/plugins/development-system/bin/development-system" \
+    doctor \
+    --harness claude \
+    --project "$TEST_ROOT/project"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"development_system.unsupported_harness harness=claude"* ]]
+}
+
 @test "doctor is quiet outside configured projects" {
   mkdir -p "$TEST_ROOT/project" "$TEST_ROOT/home"
   run env HOME="$TEST_ROOT/home" \
