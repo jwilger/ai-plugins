@@ -467,6 +467,10 @@ list_server_tools() {
   [[ "$output" != *'"name":"workflow.start"'* ]]
   run jq -e '
     [.result.tools[].name] as $names |
+    ($names | index("final_review.reopen") != null) and
+    ($names | index("final_review.continue_review") != null) and
+    ($names | index("final_review.yield_report") != null) and
+    ($names | index("final_review.evidence") != null) and
     all($names[];
       . == "workspace-reader.status" or
       . == "workspace-reader.read" or
@@ -483,6 +487,10 @@ list_server_tools() {
       . == "final_review.clean_status" or
       . == "final_review.out_of_scope_report" or
       . == "final_review.resume_latest" or
+      . == "final_review.reopen" or
+      . == "final_review.continue_review" or
+      . == "final_review.yield_report" or
+      . == "final_review.evidence" or
       . == "final_review.pending_assignments" or
       . == "final_review.assess_risk"
     )
