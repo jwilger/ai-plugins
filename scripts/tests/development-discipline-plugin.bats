@@ -265,12 +265,19 @@ setup() {
   printf 'checkpoint-v1 %s\n' "$remote_failure_json" >"$stale"
   run bash -c 'cd "$1" && "$2" remote-ci 1 "$3" "$4"' _ "$repo" "$writer" "$remote_predecessor" "$stale"
   [ "$status" -ne 0 ]
-  remote_recovery_json=$(printf '%s' "$remote_failure_json" | jq -c '.next_action = "enter-ci-recovery"')
+  remote_recovery_json=$(printf '%s' "$remote_failure_json" | jq -c '.next_action = "enter-ci-recovery" | .ci.interrupted_action = "register-exact-sha-ci-monitor"')
   printf 'checkpoint-v1 %s\n' "$remote_recovery_json" >"$stale"
   run bash -c 'cd "$1" && "$2" remote-ci 1 "$3" "$4"' _ "$repo" "$writer" "$remote_predecessor" "$stale"
   [ "$status" -eq 0 ]
   recovered_predecessor=$(sha256sum "$remote_target" | cut -d ' ' -f 1)
   recovered_json=$(printf '%s' "$remote_recovery_json" | jq -c --arg predecessor "$recovered_predecessor" '.generation = 2 | .predecessor_sha256 = $predecessor | .ci.runs += [{provider:"ci",run_id:"recovered",commit_oid:.snapshot.head_oid,status:"success"}] | .ci.terminal_success_run_id = "recovered" | .next_action = "terminal-review"')
+  printf 'checkpoint-v1 %s\n' "$recovered_json" >"$stale"
+  run bash -c 'cd "$1" && "$2" remote-ci 2 "$3" "$4"' _ "$repo" "$writer" "$recovered_predecessor" "$stale"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$remote_target" | cut -d ' ' -f 1)" = "$recovered_predecessor" ]
+  ci_failure_receipt="$records/ci-runner-loss.receipt"
+  printf '%s\n' 'Fixture: runner termination with unchanged source and inputs.' >"$ci_failure_receipt"
+  recovered_json=$(printf '%s' "$recovered_json" | jq -c --arg receipt "$ci_failure_receipt" '.ci.recoveries = [{provider:"ci",run_id:"failed",commit_oid:.snapshot.head_oid,classification:"transient",rationale:"Fixture simulates runner termination with unchanged source and inputs",receipt_ref:$receipt}] | del(.ci.interrupted_action)')
   printf 'checkpoint-v1 %s\n' "$recovered_json" >"$stale"
   run bash -c 'cd "$1" && "$2" remote-ci 2 "$3" "$4"' _ "$repo" "$writer" "$recovered_predecessor" "$stale"
   [ "$status" -eq 0 ]
