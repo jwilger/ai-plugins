@@ -31,8 +31,11 @@ separate; the following build instructions do not install the skill.
   event reject a changed identity, including immediate socket replacement when
   a filesystem reuses its inode. No alternate session discovery is performed.
 - The running compositor's `hyprctl` on PATH, supporting JSON `locked`,
-  `activewindow`, and `monitors`. The package deliberately does not substitute a
-  different compositor client. Unknown lock state fails closed.
+  `activewindow` (including its nonempty `stableId`), and `monitors`. Each
+  observation binds the focused window's stable identity as well as its address
+  and geometry; a replacement window is rejected before helper creation and
+  before each event. The package deliberately does not substitute a different
+  compositor client. Unknown lock state or stable identity fails closed.
 - Compositor support for grim screencopy and
   `zwlr_virtual_pointer_manager_v1`. Portal screen sharing alone does not prove
   pointer support. The source implementation was developed against Hyprland
@@ -43,7 +46,7 @@ separate; the following build instructions do not install the skill.
   closure; Wayland client libraries and generated protocol code are compiled
   into the helper's package. No root access or `/dev/uinput` is needed.
 
-A program name or matching `0.1.2` label is not enough to establish runtime
+A program name or matching `0.1.3` label is not enough to establish runtime
 provenance. Building this package does not replace an older adapter already on
 PATH. Check the selected executable's derivation/source identity before input;
 if it is an older unpatched build or its provenance is unknown, stop for

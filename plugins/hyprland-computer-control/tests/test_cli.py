@@ -28,7 +28,7 @@ class CliTests(unittest.TestCase):
             self.addCleanup(client.close)
         self.state = {
             "locked": {"locked": False},
-            "activewindow": {"address": "0xabc", "monitor": 1, "at": [10, 10], "size": [100, 80]},
+            "activewindow": {"address": "0xabc", "stableId": "18000016", "monitor": 1, "at": [10, 10], "size": [100, 80]},
             "monitors": [{"id": 1, "name": "fixture", "x": 0, "y": 0,
                           "width": 800, "height": 600, "scale": 1, "transform": 0}],
         }
