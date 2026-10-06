@@ -6674,9 +6674,17 @@ fn observe_resolution_inputs(
                 .map(|finding| (finding.id.as_str(), finding.lens.as_str())),
         );
     }
+    // Match decide's newest-resolution lookup: obsolete dependencies must not
+    // introduce reads or failures for a superseded source-bound resolution.
+    let mut latest_keys = HashSet::new();
     let mut paths = retained_resolutions(&state.initial_state.finding_history)
         .iter()
-        .filter(|entry| keys.contains(&(entry.finding_id.as_str(), entry.lens.as_str())))
+        .rev()
+        .filter(|entry| {
+            keys.contains(&(entry.finding_id.as_str(), entry.lens.as_str()))
+                && latest_keys.insert((entry.finding_id.clone(), entry.lens.clone()))
+        })
+        .filter(|entry| entry.outcome == review_resolution::ResolutionOutcome::Rejected)
         .flat_map(|entry| entry.dependency_blobs.keys().cloned())
         .collect::<Vec<_>>();
     if let Some(verifier) = &input.verifier_result {
@@ -40366,6 +40374,156 @@ pre_filter = "project-pre"
                 ),
             "{refused}"
         );
+    }
+
+    #[test]
+    fn json_rpc_carried_resolution_ignores_obsolete_dependency_paths() {
+        fn call(
+            coordinator: &mut ReviewCoordinator,
+            id: u64,
+            name: &str,
+            arguments: Value,
+        ) -> Value {
+            let response = coordinator.handle_json_rpc(&json!({
+                "jsonrpc":"2.0", "id":id, "method":"tools/call", "params":{"name":name,"arguments":arguments}
+            })).expect("RPC response");
+            let text = response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("missing RPC text: {response}"));
+            let result: Value =
+                serde_json::from_str(text).unwrap_or_else(|_| panic!("RPC failed: {response}"));
+            assert_ne!(response["result"]["isError"], true, "{result}");
+            result
+        }
+        let root = test_project_root("latest-carried-resolution-rpc");
+        fs::create_dir_all(root.join("src")).expect("source directory");
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn bounded() -> bool { true }\n",
+        )
+        .expect("source");
+        let mut coordinator = ReviewCoordinator::default();
+        let arguments = add_test_risk_assessment(
+            json!({
+                "session_id":"latest-carried-resolution-rpc", "project_root":root,
+                "changed_files":["src/lib.rs"], "diff_hash":"same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([{
+                "finding_id":"stable-guard","lens":"correctness-behavior","severity":"MAJOR",
+                "causality":"caused","likelihood":"possible","security_impact":"none","safety_impact":"none",
+                "path":"src/lib.rs","message":"Carried guard allegation.",
+                "relevance":{"category":"diff_changed_file","explanation":"Changed guard."}
+            }]),
+        );
+        let plan = call(&mut coordinator, 1, "final_review.plan", arguments);
+        let state = &plan["state"];
+        let mut lens_result =
+            risk_finding_lens_result(state, "correctness-behavior", "stable-guard", "MAJOR");
+        lens_result["findings"][0]["security_impact"] = json!("major");
+        let mut advance =
+            json!({"state":state,"lens_results":[lens_result],"current_diff_hash":"same"});
+        let pending = call(&mut coordinator, 2, "final_review.advance", advance.clone());
+        assert_eq!(
+            pending["transition_status"], "verifier_required",
+            "{pending}"
+        );
+        let assignment = &pending["verifier_assignment"];
+        let blobs = review_resolution::observe_dependencies(
+            root.to_str().expect("root"),
+            &["src/lib.rs".to_string()],
+        )
+        .expect("actual blob");
+        advance["verifier_result"] = json!({
+            "assignment_id":assignment["assignment_id"], "subagent_key":assignment["subagent_key"],
+            "model_role":assignment["model_role"], "status":"verified",
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true},
+            "verdicts":[{"finding_id":"stable-guard","lens":"correctness-behavior","verdict":"rejected",
+                "severity":"MINOR","causality":"incidental","causality_evidence":"Read the guard and verified the bounded input regression.",
+                "security_impact":"none","safety_impact":"none","rationale":"The guard disproves this allegation.",
+                "dependency_blobs":blobs,"assumptions":["Only this public reader accepts input."]}]
+        });
+        let rejected = call(&mut coordinator, 3, "final_review.advance", advance);
+        assert_eq!(rejected["transition_status"], "advanced", "{rejected}");
+        let evidence = &rejected["state"]["finding_history"][0]["resolution_history"][0];
+        assert_eq!(evidence["finding_id"], "stable-guard", "{rejected}");
+        assert_eq!(evidence["dependency_blobs"], json!(blobs));
+        let packet = rejected["next_assignments"]
+            .as_array()
+            .expect("next assignments")
+            .iter()
+            .find(|packet| packet["lens"] == "correctness-behavior")
+            .expect("reviewer packet");
+        assert_eq!(packet["resolution_history"][0], *evidence);
+        assert!(packet["prompt"]
+            .as_str()
+            .expect("prompt")
+            .contains("RESOLUTION_HISTORY_JSON"));
+        fs::write(
+            root.join("src/alternate.rs"),
+            "pub fn bounded() -> bool { true }\n",
+        )
+        .expect("current resolution source");
+        let mut repeated = risk_finding_lens_result(
+            &rejected["state"],
+            "correctness-behavior",
+            "stable-guard",
+            "MAJOR",
+        );
+        repeated["findings"][0]["security_impact"] = json!("major");
+        repeated["findings"][0]["resolution_reopen"] = json!({
+            "resolution_id":evidence["resolution_id"],"reason":"incomplete-prior-verification",
+            "explanation":"The guard assumption must also be checked against the alternate reader.",
+            "evidence_ref":"src/alternate.rs: current reader"
+        });
+        let mut resubmit =
+            json!({"state":rejected["state"],"lens_results":[repeated],"current_diff_hash":"same"});
+        let pending = call(
+            &mut coordinator,
+            4,
+            "final_review.advance",
+            resubmit.clone(),
+        );
+        assert_eq!(
+            pending["transition_status"], "verifier_required",
+            "{pending}"
+        );
+        let assignment = &pending["verifier_assignment"];
+        let current_blobs = review_resolution::observe_dependencies(
+            root.to_str().expect("root"),
+            &["src/alternate.rs".to_string()],
+        )
+        .expect("current source blob");
+        resubmit["verifier_result"] = json!({
+            "assignment_id":assignment["assignment_id"],"subagent_key":assignment["subagent_key"],
+            "model_role":assignment["model_role"],"status":"verified",
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true},
+            "verdicts":[{"finding_id":"stable-guard","lens":"correctness-behavior","verdict":"rejected",
+                "severity":"MINOR","causality":"incidental","causality_evidence":"The current reader enforces the complete guard assumption.",
+                "security_impact":"none","safety_impact":"none","rationale":"The current reader disproves the allegation.",
+                "dependency_blobs":current_blobs,"assumptions":["The alternate reader is the current input boundary."]}]
+        });
+        let latest = call(&mut coordinator, 5, "final_review.advance", resubmit);
+        assert_eq!(latest["transition_status"], "advanced", "{latest}");
+        fs::remove_file(root.join("src/lib.rs")).expect("obsolete file");
+        fs::create_dir(root.join("src/lib.rs"))
+            .expect("obsolete dependency becomes unsupported directory");
+        let advanced = call(
+            &mut coordinator,
+            6,
+            "final_review.advance",
+            json!({
+                "state":latest["state"],"lens_results":clean_lens_results_for(&latest["state"]),"current_diff_hash":"same"
+            }),
+        );
+        assert_eq!(advanced["transition_status"], "advanced", "{advanced}");
+        assert_eq!(
+            advanced["filtered"]["retained_resolution_reuse"][0]["finding_id"],
+            "stable-guard"
+        );
+        assert!(advanced["verifier_assignment"].is_null());
+        assert_eq!(advanced["state"]["clean_streak"], 0);
     }
 
     #[test]
