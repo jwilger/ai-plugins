@@ -26,8 +26,9 @@ def monitor(identifier=1, name="eDP-1", x=0, y=0, width=2880, height=1800, scale
     }
 
 
-def window(address="0xabc", monitor_id=1, x=100, y=50, width=800, height=600):
-    return {"address": address, "monitor": monitor_id, "x": x, "y": y, "width": width, "height": height}
+def window(address="0xabc", stable_id="18000016", monitor_id=1, x=100, y=50, width=800, height=600):
+    return {"address": address, "stable_id": stable_id, "monitor": monitor_id,
+            "x": x, "y": y, "width": width, "height": height}
 
 
 def observation(monitors=None, focused=None, screenshot=None):
@@ -126,6 +127,18 @@ class SchemaAndMappingTests(unittest.TestCase):
             with self.subTest(session=session), self.assertRaises(MODULE.AdapterError):
                 MODULE.validate_observation(observation() | {"session": session})
 
+    def test_active_window_requires_a_stable_lifecycle_identity(self):
+        state = {"address": "0xabc", "stableId": "18000016", "monitor": 1,
+                 "at": [100, 50], "size": [800, 600]}
+        self.assertEqual(MODULE.active_window(state)["stable_id"], "18000016")
+        for invalid in (None, "", "not-hex", "0x18000016", 123):
+            with self.subTest(invalid=invalid), self.assertRaises(MODULE.AdapterError):
+                MODULE.active_window(state | {"stableId": invalid})
+        with self.assertRaises(MODULE.AdapterError):
+            MODULE.validate_observation(observation(focused={
+                key: item for key, item in window().items() if key != "stable_id"
+            }))
+
 
 class StateGateTests(unittest.TestCase):
     def setUp(self):
@@ -152,6 +165,33 @@ class StateGateTests(unittest.TestCase):
         self.assert_rejected(state=changed_layout)
         self.assert_rejected(state=MODULE.AdapterError("session is locked"))
         self.assert_rejected(fresh=False)
+
+    def test_reused_window_address_and_geometry_rejected_before_helper(self):
+        original = MODULE.active_window({
+            "address": "0xabc", "stableId": "18000016", "monitor": 1,
+            "at": [100, 50], "size": [800, 600],
+        })
+        replacement = MODULE.active_window({
+            "address": "0xabc", "stableId": "18000017", "monitor": 1,
+            "at": [100, 50], "size": [800, 600],
+        })
+        value = observation(focused=original)
+        value["monitors"] = MODULE.canonical_monitors(value["monitors"])
+        actions = {"schema_version": 1, "observation_id": value["observation_id"],
+                   "actions": [{"type": "move", "x": 1, "y": 1}]}
+        with patch.object(MODULE, "read_json", side_effect=[value, actions]), \
+             patch.object(MODULE, "session_snapshot", return_value=value["session"]), \
+             patch.object(MODULE, "verify_screenshot"), \
+             patch.object(MODULE, "live_state", return_value={
+                 "focused_window": replacement, "monitors": value["monitors"]}), \
+             patch.object(MODULE, "HelperProcess") as helper:
+            with self.assertRaisesRegex(MODULE.AdapterError, "focused window"):
+                MODULE.execute_actions(
+                    "/private/observation.json", "/private/actions.json",
+                    env={}, uid=1000, now=lambda: 1000.0,
+                    monotonic=lambda: 500.0, which=lambda name: name,
+                )
+            helper.assert_not_called()
 
     def test_same_named_sockets_in_another_private_runtime_cannot_reuse_observation(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -248,6 +248,11 @@ def active_window(value):
         int(address[2:], 16)
     except ValueError as error:
         raise AdapterError("invalid active-window address") from error
+    stable_id = value.get("stableId")
+    if not isinstance(stable_id, str) or not 1 <= len(stable_id) <= 32 or any(
+        character not in "0123456789abcdefABCDEF" for character in stable_id
+    ):
+        raise AdapterError("no stable active-window identity")
     at = value.get("at")
     size = value.get("size")
     monitor = value.get("monitor")
@@ -255,6 +260,7 @@ def active_window(value):
         raise AdapterError("invalid active-window geometry")
     return {
         "address": address.lower(),
+        "stable_id": stable_id.lower(),
         "monitor": integer(monitor, "window monitor", 0, 1024),
         "x": integer(at[0], "window x", -131072, 131072),
         "y": integer(at[1], "window y", -131072, 131072),
@@ -357,7 +363,8 @@ def create_observation(screenshot_path, output_path, target_address, env=None, u
     if not hyprctl or not grim:
         raise AdapterError("required session client is unavailable")
     before = live_state(hyprctl, env)
-    if active_window({"address": target_address, "monitor": before["focused_window"]["monitor"],
+    if active_window({"address": target_address, "stableId": before["focused_window"]["stable_id"],
+                      "monitor": before["focused_window"]["monitor"],
                       "at": [before["focused_window"]["x"], before["focused_window"]["y"]],
                       "size": [before["focused_window"]["width"], before["focused_window"]["height"]]})["address"] != before["focused_window"]["address"]:
         raise AdapterError("requested target window is not focused")
@@ -444,10 +451,11 @@ def validate_observation(value):
     for field in ("device", "inode"):
         integer(runtime_dir[field], f"runtime {field}", 0)
     window = value["focused_window"]
-    if not isinstance(window, dict) or set(window) != {"address", "monitor", "x", "y", "width", "height"}:
+    if not isinstance(window, dict) or set(window) != {"address", "stable_id", "monitor", "x", "y", "width", "height"}:
         raise AdapterError("invalid observed window")
     value["focused_window"] = active_window({
-        "address": window["address"], "monitor": window["monitor"],
+        "address": window["address"], "stableId": window["stable_id"],
+        "monitor": window["monitor"],
         "at": [window["x"], window["y"]], "size": [window["width"], window["height"]],
     })
     value["monitors"] = canonical_monitors(value["monitors"])
