@@ -7,7 +7,11 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace github-actions pi-extension tiber-harness-rust tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
+ci: validate-marketplace github-actions hyprland-computer-control pi-extension tiber-harness-rust tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
+
+# Build the guarded runtime and run offline Python/C checks without desktop input.
+hyprland-computer-control:
+    if [ "$(uname -s)" = Linux ]; then nix build --no-link .#hyprland-computer-control; else echo "Skipping Hyprland on Wayland runtime checks on non-Linux hosts."; fi
 
 # The developer gate runs before every commit. It deliberately excludes
 # acceptance, release, browser, mutation, and shell suites; CI owns those after

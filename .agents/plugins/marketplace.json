@@ -16,6 +16,17 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Developer Tools"
+    },
+    {
+      "name": "hyprland-computer-control",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hyprland-computer-control"
+      },
+      "version": "0.1.0",
+      "category": "Developer Tools",
+      "description": "Guarded session-local pointer control and screenshots for Hyprland on Wayland.",
+      "keywords": ["hyprland", "wayland", "computer-control"]
     }
   ]
 }

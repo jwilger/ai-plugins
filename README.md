@@ -4,7 +4,7 @@ A **Codex marketplace of AI coding-assistant plugins**.
 
 ## Personal development system
 
-This marketplace has one audience and one installable plugin:
+This marketplace includes the personal development workflow plugin
 [`development-system`](plugins/development-system/README.md). It supports Codex
 with one initialization command and one project configuration file.
 
@@ -20,9 +20,10 @@ review.
 
 ## Plugin catalog
 
-| Plugin                                                     | Harness                  | Description                                                                                          | Version |
-| ---------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md) | Codex, pi (experimental) | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.12.0  |
+| Plugin                                                                   | Harness                  | Description                                                                                          | Version |
+| ------------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md)               | Codex, pi (experimental) | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 6.12.0  |
+| [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex                    | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session.         | 0.1.0   |
 
 ## Using development-system with pi (experimental)
 

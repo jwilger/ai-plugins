@@ -1,0 +1,25 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hyprland-computer-control",
+  "version": "0.1.0",
+  "description": "Guarded session-local pointer control and screenshots for Hyprland on Wayland.",
+  "author": {
+    "name": "John Wilger"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["hyprland", "wayland", "computer-control"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Hyprland Computer Control",
+        "shortDescription": "Guarded pointer control for Hyprland on Wayland.",
+        "developerName": "John Wilger",
+        "category": "Developer Tools",
+        "capabilities": ["Read", "Write"],
+        "defaultPrompt": [
+          "Use the guarded adapter for my authorized Hyprland on Wayland task."
+        ]
+      }
+    }
+  }
+}

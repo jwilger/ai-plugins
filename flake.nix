@@ -21,12 +21,14 @@
         let
           pkgs = import nixpkgs { inherit system; };
         in
-        {
+        ({
           # cargo-zigbuild needs an SDK when linking Darwin targets from Linux.
           # Expose the pinned, platform-independent payload without attempting
           # to build Nixpkgs' Darwin-only apple-sdk wrapper derivation.
           apple-sdk-source = pkgs.apple-sdk_15.src;
-        }
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          hyprland-computer-control = pkgs.callPackage ./plugins/hyprland-computer-control/package.nix { };
+        })
       );
 
       devShells = nixpkgs.lib.genAttrs supportedSystems (

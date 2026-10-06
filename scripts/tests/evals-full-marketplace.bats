@@ -319,7 +319,7 @@ JSON
     (.providerLabels | sort) == ([.providerCompositions[].label] | sort)
       and plugins("codex-gpt-6-sol-targeted-plugins") == ["development-system"]
       and plugins("codex-gpt-6-sol-no-plugins") == []
-      and plugins("codex-gpt-6-sol-full-marketplace") == ["development-system"]
+      and plugins("codex-gpt-6-sol-full-marketplace") == ["development-system", "hyprland-computer-control"]
   ' "$generated_metadata"
   run node - "$generated_config" "$generated_metadata" <<'NODE'
 const fs = require('node:fs');

@@ -263,7 +263,7 @@ teardown() {
     IFS=, read -ra plugins <<<"$plugin_csv"
     for plugin in "${plugins[@]}"; do
       [ -n "$plugin" ] || continue
-      find "$ROOT/plugins/development-system/skills" \
+      find "$ROOT/plugins/$plugin/skills" \
         -mindepth 1 -maxdepth 1 -type d -printf "$plugin:%f\n" \
         >>"$expected"
     done

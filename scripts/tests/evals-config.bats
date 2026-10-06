@@ -293,6 +293,7 @@ NODE
 const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
 const namesOnly = [
   'development-system',
+  'hyprland-computer-control',
 ].join('\n');
 
 const result = assertCanary(namesOnly);
@@ -310,6 +311,7 @@ NODE
 const assertCanary = require('./evals/promptfoo/assert-full-marketplace-canary.cjs');
 const natural = [
   'Development System: Agentic Systems',
+  'Hyprland Computer Control: Computer Control',
 ].join('\n');
 
 const result = assertCanary(natural);
