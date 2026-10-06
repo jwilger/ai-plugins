@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import socket
 import stat
 import tempfile
 import time
@@ -40,7 +41,14 @@ def observation(monitors=None, focused=None, screenshot=None):
     return {
         "schema_version": 1, "observation_id": "1" * 32,
         "observed_at_unix_ms": 1_000_000, "observed_at_monotonic_ms": 500_000,
-        "session": {"uid": 1000, "wayland_display": "wayland-1", "hyprland_instance_signature": "instance_1"},
+        "session": {
+            "uid": 1000,
+            "runtime_dir": {"path": "/run/user/1000", "device": 1, "inode": 2},
+            "wayland_display": "wayland-1",
+            "wayland_socket": {"device": 1, "inode": 3},
+            "hyprland_instance_signature": "instance_1",
+            "hyprland_socket": {"device": 1, "inode": 4},
+        },
         "focused_window": focused, "monitors": monitors,
         "target_monitor": next(item["name"] for item in monitors if item["id"] == focused["monitor"]),
         "screenshot": screenshot,
@@ -106,6 +114,17 @@ class SchemaAndMappingTests(unittest.TestCase):
         self.assertFalse(MODULE.observation_is_fresh(value, now=lambda: 1031.0, monotonic=lambda: 531.0))
         self.assertFalse(MODULE.observation_is_fresh(value, now=lambda: 999.0, monotonic=lambda: 499.0))
 
+    def test_observation_requires_canonical_runtime_and_socket_identities(self):
+        value = observation()
+        MODULE.validate_observation(value)
+        for session in (
+            {key: item for key, item in value["session"].items() if key != "runtime_dir"},
+            value["session"] | {"runtime_dir": value["session"]["runtime_dir"] | {"path": "/run/../run/user/1000"}},
+            value["session"] | {"wayland_socket": {"device": 1, "inode": -1}},
+        ):
+            with self.subTest(session=session), self.assertRaises(MODULE.AdapterError):
+                MODULE.validate_observation(observation() | {"session": session})
+
 
 class StateGateTests(unittest.TestCase):
     def setUp(self):
@@ -132,6 +151,43 @@ class StateGateTests(unittest.TestCase):
         self.assert_rejected(state=changed_layout)
         self.assert_rejected(state=MODULE.AdapterError("session is locked"))
         self.assert_rejected(fresh=False)
+
+    def test_same_named_sockets_in_another_private_runtime_cannot_reuse_observation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            sockets = []
+            try:
+                sessions = []
+                for name in ("runtime-a", "runtime-b"):
+                    runtime = Path(temporary) / name
+                    runtime.mkdir(mode=0o700)
+                    hypr = runtime / "hypr" / "instance_1"
+                    hypr.mkdir(parents=True)
+                    for path in (runtime / "wayland-1", hypr / ".socket.sock"):
+                        endpoint = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                        endpoint.bind(str(path))
+                        sockets.append(endpoint)
+                    env = {"XDG_SESSION_TYPE": "wayland", "XDG_RUNTIME_DIR": str(runtime),
+                           "WAYLAND_DISPLAY": "wayland-1", "HYPRLAND_INSTANCE_SIGNATURE": "instance_1"}
+                    sessions.append((env, MODULE.session_snapshot(env, os.getuid())))
+                self.assertNotEqual(sessions[0][1], sessions[1][1])
+                value = observation()
+                value["session"] = sessions[0][1]
+                with patch.object(MODULE, "verify_screenshot"), \
+                     patch.object(MODULE, "live_state", return_value={
+                         "focused_window": value["focused_window"], "monitors": value["monitors"]}), \
+                     patch.object(MODULE, "observation_is_fresh", return_value=True):
+                    with self.assertRaisesRegex(MODULE.AdapterError, "graphical session changed"):
+                        MODULE.assert_live_target(value, sessions[1][0], os.getuid(), "hyprctl")
+                old_identity = sessions[0][1]
+                sockets[0].close()
+                (Path(sessions[0][0]["XDG_RUNTIME_DIR"]) / "wayland-1").unlink()
+                replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                replacement.bind(str(Path(sessions[0][0]["XDG_RUNTIME_DIR"]) / "wayland-1"))
+                sockets.append(replacement)
+                self.assertNotEqual(MODULE.session_snapshot(sessions[0][0], os.getuid()), old_identity)
+            finally:
+                for endpoint in sockets:
+                    endpoint.close()
 
     def test_slow_state_query_crossing_ttl_is_rejected_after_query(self):
         clock = {"wall": 1000.0, "monotonic": 500.0}
@@ -203,7 +259,7 @@ class FileAndCaptureTests(unittest.TestCase):
             return Path("/private/capture.png")
 
         with patch.object(MODULE, "session_snapshot", return_value={
-                 "uid": 1000, "wayland_display": "wayland-1", "hyprland_instance_signature": "instance_1"}), \
+                 **observation()["session"]}), \
              patch.object(MODULE, "live_state", return_value=state), \
              patch.object(MODULE, "capture_screenshot", side_effect=capture), \
              patch.object(MODULE, "read_owned_file", return_value=(Path("/private/capture.png"), info, png)), \

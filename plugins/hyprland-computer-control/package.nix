@@ -1,7 +1,7 @@
 { lib, stdenv, makeWrapper, pkg-config, wayland-scanner, wayland, wlr-protocols, python3, grim }:
 stdenv.mkDerivation {
   pname = "hyprland-pointer-adapter";
-  version = "0.1.0";
+  version = "0.1.1";
   src = ./.;
   nativeBuildInputs = [ makeWrapper pkg-config wayland-scanner ];
   buildInputs = [ wayland ];

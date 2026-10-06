@@ -23,7 +23,7 @@
         "source": "local",
         "path": "./plugins/hyprland-computer-control"
       },
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "Developer Tools",
       "description": "Guarded session-local pointer control and screenshots for Hyprland on Wayland.",
       "keywords": ["hyprland", "wayland", "computer-control"]

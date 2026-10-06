@@ -26,7 +26,9 @@ separate; the following build instructions do not install the skill.
   `WAYLAND_DISPLAY`, and `HYPRLAND_INSTANCE_SIGNATURE` inherited. The runtime
   directory must be absolute, private, and user-owned. The named Wayland socket
   and `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock` must be
-  same-user sockets. No alternate session discovery is performed.
+  same-user sockets. Each observation binds the canonical runtime directory and
+  both socket device/inode identities; capture and every pointer event reject a
+  changed identity. No alternate session discovery is performed.
 - The running compositor's `hyprctl` on PATH, supporting JSON `locked`,
   `activewindow`, and `monitors`. The package deliberately does not substitute a
   different compositor client. Unknown lock state fails closed.
@@ -40,7 +42,7 @@ separate; the following build instructions do not install the skill.
   closure; Wayland client libraries and generated protocol code are compiled
   into the helper's package. No root access or `/dev/uinput` is needed.
 
-A program name or matching `0.1.0` label is not enough to establish runtime
+A program name or matching `0.1.1` label is not enough to establish runtime
 provenance. Building this package does not replace an older adapter already on
 PATH. Check the selected executable's derivation/source identity before input;
 if it is an older unpatched build or its provenance is unknown, stop for

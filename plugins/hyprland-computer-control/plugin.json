@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "hyprland-computer-control",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Guarded session-local pointer control and screenshots for Hyprland on Wayland.",
   "author": {
     "name": "John Wilger"

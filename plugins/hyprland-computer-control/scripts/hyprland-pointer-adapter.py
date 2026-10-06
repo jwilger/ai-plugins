@@ -75,17 +75,27 @@ def session_snapshot(env=None, uid=None):
     instance = env.get("HYPRLAND_INSTANCE_SIGNATURE", "")
     if env.get("XDG_SESSION_TYPE") != "wayland":
         raise AdapterError("not an inherited Wayland session")
-    if not runtime.is_absolute() or owned_path(runtime, "directory", uid, private=True) is None:
+    runtime_info = owned_path(runtime, "directory", uid, private=True) if runtime.is_absolute() else None
+    if runtime_info is None:
         raise AdapterError("unsafe runtime directory")
-    if not safe_component(display) or owned_path(runtime / display, "socket", uid) is None:
+    try:
+        canonical_runtime = runtime.resolve(strict=True)
+    except OSError as error:
+        raise AdapterError("unsafe runtime directory") from error
+    wayland_info = owned_path(runtime / display, "socket", uid) if safe_component(display) else None
+    if wayland_info is None:
         raise AdapterError("unsafe Wayland socket")
     hypr_socket = runtime / "hypr" / instance / ".socket.sock"
-    if not safe_component(instance) or owned_path(hypr_socket, "socket", uid) is None:
+    hypr_info = owned_path(hypr_socket, "socket", uid) if safe_component(instance) else None
+    if hypr_info is None:
         raise AdapterError("unsafe Hyprland socket")
     return {
         "uid": uid,
+        "runtime_dir": {"path": str(canonical_runtime), "device": runtime_info.st_dev, "inode": runtime_info.st_ino},
         "wayland_display": display,
+        "wayland_socket": {"device": wayland_info.st_dev, "inode": wayland_info.st_ino},
         "hyprland_instance_signature": instance,
+        "hyprland_socket": {"device": hypr_info.st_dev, "inode": hypr_info.st_ino},
     }
 
 
@@ -407,12 +417,26 @@ def validate_observation(value):
     integer(value["observed_at_unix_ms"], "observation time", 0)
     integer(value["observed_at_monotonic_ms"], "observation time", 0)
     if not isinstance(value["session"], dict) or set(value["session"]) != {
-        "uid", "wayland_display", "hyprland_instance_signature"
+        "uid", "runtime_dir", "wayland_display", "wayland_socket",
+        "hyprland_instance_signature", "hyprland_socket"
     }:
         raise AdapterError("invalid observation session")
     integer(value["session"]["uid"], "session uid", 0)
     if not safe_component(value["session"]["wayland_display"]) or not safe_component(value["session"]["hyprland_instance_signature"]):
         raise AdapterError("invalid observation session")
+    runtime_dir = value["session"]["runtime_dir"]
+    if not isinstance(runtime_dir, dict) or set(runtime_dir) != {"path", "device", "inode"}:
+        raise AdapterError("invalid observation session")
+    runtime_path = runtime_dir["path"]
+    if not isinstance(runtime_path, str) or not Path(runtime_path).is_absolute() or os.path.normpath(runtime_path) != runtime_path:
+        raise AdapterError("invalid observation session")
+    for identity in (runtime_dir, value["session"]["wayland_socket"], value["session"]["hyprland_socket"]):
+        if not isinstance(identity, dict) or "device" not in identity or "inode" not in identity:
+            raise AdapterError("invalid observation session")
+        if identity is not runtime_dir and set(identity) != {"device", "inode"}:
+            raise AdapterError("invalid observation session")
+        integer(identity["device"], "session device", 0)
+        integer(identity["inode"], "session inode", 0)
     window = value["focused_window"]
     if not isinstance(window, dict) or set(window) != {"address", "monitor", "x", "y", "width", "height"}:
         raise AdapterError("invalid observed window")

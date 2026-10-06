@@ -155,6 +155,21 @@ for line in sys.stdin:
         self.save_state()
         self.assert_refused(self.act(), "changed")
 
+    def test_same_named_sockets_in_another_runtime_refuse_input_before_helper(self):
+        self.prepare()
+        runtime = self.root / "other-runtime"
+        runtime.mkdir(mode=0o700)
+        (runtime / "hypr" / "fixture").mkdir(parents=True)
+        for path in (runtime / "wayland-fixture", runtime / "hypr/fixture/.socket.sock"):
+            endpoint = socket.socket(socket.AF_UNIX)
+            endpoint.bind(str(path))
+            self.addCleanup(endpoint.close)
+        result = self.run_cli("act", "--observation", str(self.root / "observation.json"),
+                              "--actions", str(self.root / "actions.json"),
+                              env=self.env | {"XDG_RUNTIME_DIR": str(runtime)})
+        self.assert_refused(result, "graphical session changed")
+        self.assertFalse((self.root / "helper-started").exists())
+
     def test_locked_session_refuses_input(self):
         self.prepare()
         self.state["locked"]["locked"] = True
