@@ -118,8 +118,8 @@ deduplicated union of plugins declared by the selected behavior cases;
 set. Full-marketplace mode installs the complete Codex catalog, while no-plugin
 mode installs none. The generated config records the exact installed composition
 separately from the plugins targeted by an individual case. An unfiltered
-targeted run equals the full catalog today because the marketplace has one
-public plugin and the selected cases target it. The two modes remain distinct
+targeted run equals the full catalog today because the selected cases
+collectively target every catalog plugin. The two modes remain distinct
 controls for filtered runs and future catalog changes.
 Promptfoo is pinned at `0.121.19`; Promptfoo and the Codex SDK are pinned in
 `package.json` and `package-lock.json`. The runner disables prompt response caching and hosted
