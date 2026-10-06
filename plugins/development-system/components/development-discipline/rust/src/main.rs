@@ -6651,7 +6651,7 @@ fn observe_resolution_inputs(
     // This boundary is called only after authoritative-state validation and
     // before EventCore execution. Never observe files from a replay/fold.
     let state = ReviewSessionState::parse_legacy_wire(&arguments["state"])?;
-    let keys = input
+    let mut keys = input
         .lens_results
         .iter()
         .flat_map(|result| {
@@ -6664,6 +6664,16 @@ fn observe_resolution_inputs(
             })
         })
         .collect::<HashSet<_>>();
+    // Resolution checking also visits findings carried by the risk plan even
+    // when the current reviewers report no new allegation.
+    if let Some(plan) = state.risk.risk_plan.as_deref() {
+        keys.extend(
+            plan.findings
+                .iter()
+                .chain(plan.out_of_scope_findings.iter())
+                .map(|finding| (finding.id.as_str(), finding.lens.as_str())),
+        );
+    }
     let mut paths = retained_resolutions(&state.initial_state.finding_history)
         .iter()
         .filter(|entry| keys.contains(&(entry.finding_id.as_str(), entry.lens.as_str())))
@@ -40232,6 +40242,130 @@ pre_filter = "project-pre"
         assert!(reused["verifier_assignment"].is_null());
         assert_eq!(reused["state"]["clean_streak"], 0);
         assert_eq!(reused["complete"], false);
+    }
+
+    #[test]
+    fn json_rpc_carried_resolution_observes_dependencies_without_new_allegation() {
+        fn call(
+            coordinator: &mut ReviewCoordinator,
+            id: u64,
+            name: &str,
+            arguments: Value,
+        ) -> Value {
+            let response = coordinator.handle_json_rpc(&json!({
+                "jsonrpc":"2.0", "id":id, "method":"tools/call", "params":{"name":name,"arguments":arguments}
+            })).expect("RPC response");
+            let text = response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("missing RPC text: {response}"));
+            let result: Value =
+                serde_json::from_str(text).unwrap_or_else(|_| panic!("RPC failed: {response}"));
+            assert_ne!(response["result"]["isError"], true, "{result}");
+            result
+        }
+        let root = test_project_root("carried-resolution-rpc");
+        fs::create_dir_all(root.join("src")).expect("source directory");
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn bounded() -> bool { true }\n",
+        )
+        .expect("source");
+        let mut coordinator = ReviewCoordinator::default();
+        let arguments = add_test_risk_assessment(
+            json!({
+                "session_id":"carried-resolution-rpc", "project_root":root,
+                "changed_files":["src/lib.rs"], "diff_hash":"same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([{
+                "finding_id":"stable-guard","lens":"correctness-behavior","severity":"MAJOR",
+                "causality":"caused","likelihood":"possible","security_impact":"none","safety_impact":"none",
+                "path":"src/lib.rs","message":"Carried guard allegation.",
+                "relevance":{"category":"diff_changed_file","explanation":"Changed guard."}
+            }]),
+        );
+        let plan = call(&mut coordinator, 1, "final_review.plan", arguments);
+        let state = &plan["state"];
+        let mut lens_result =
+            risk_finding_lens_result(state, "correctness-behavior", "stable-guard", "MAJOR");
+        lens_result["findings"][0]["security_impact"] = json!("major");
+        let mut advance =
+            json!({"state":state,"lens_results":[lens_result],"current_diff_hash":"same"});
+        let pending = call(&mut coordinator, 2, "final_review.advance", advance.clone());
+        assert_eq!(
+            pending["transition_status"], "verifier_required",
+            "{pending}"
+        );
+        let assignment = &pending["verifier_assignment"];
+        let blobs = review_resolution::observe_dependencies(
+            root.to_str().expect("root"),
+            &["src/lib.rs".to_string()],
+        )
+        .expect("actual blob");
+        advance["verifier_result"] = json!({
+            "assignment_id":assignment["assignment_id"], "subagent_key":assignment["subagent_key"],
+            "model_role":assignment["model_role"], "status":"verified",
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true},
+            "verdicts":[{"finding_id":"stable-guard","lens":"correctness-behavior","verdict":"rejected",
+                "severity":"MINOR","causality":"incidental","causality_evidence":"Read the guard and verified the bounded input regression.",
+                "security_impact":"none","safety_impact":"none","rationale":"The guard disproves this allegation.",
+                "dependency_blobs":blobs,"assumptions":["Only this public reader accepts input."]}]
+        });
+        let rejected = call(&mut coordinator, 3, "final_review.advance", advance);
+        assert_eq!(rejected["transition_status"], "advanced", "{rejected}");
+        let evidence = &rejected["state"]["finding_history"][0]["resolution_history"][0];
+        assert_eq!(evidence["finding_id"], "stable-guard", "{rejected}");
+        assert_eq!(evidence["dependency_blobs"], json!(blobs));
+        let packet = rejected["next_assignments"]
+            .as_array()
+            .expect("next assignments")
+            .iter()
+            .find(|packet| packet["lens"] == "correctness-behavior")
+            .expect("reviewer packet");
+        assert_eq!(packet["resolution_history"][0], *evidence);
+        assert!(packet["prompt"]
+            .as_str()
+            .expect("prompt")
+            .contains("RESOLUTION_HISTORY_JSON"));
+        let advanced = call(
+            &mut coordinator,
+            4,
+            "final_review.advance",
+            json!({"state":rejected["state"],"lens_results":clean_lens_results_for(&rejected["state"]),"current_diff_hash":"same"}),
+        );
+        assert_eq!(advanced["transition_status"], "advanced", "{advanced}");
+        assert_eq!(
+            advanced["filtered"]["retained_resolution_reuse"][0]["finding_id"],
+            "stable-guard"
+        );
+        assert!(advanced["verifier_assignment"].is_null());
+        assert_eq!(advanced["state"]["clean_streak"], 0);
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn bounded() -> bool { false }\n",
+        )
+        .expect("actual dependency change");
+        let refused = coordinator
+            .handle_json_rpc(&json!({
+                "jsonrpc":"2.0","id":5,"method":"tools/call","params":{
+                    "name":"final_review.advance","arguments":{
+                        "state":advanced["state"],
+                        "lens_results":clean_lens_results_for(&advanced["state"]),
+                        "current_diff_hash":"same"
+                    }
+                }
+            }))
+            .expect("RPC refusal");
+        assert!(
+            refused["error"]["message"]
+                .as_str()
+                .expect("error")
+                .contains(
+                    "resolution_reopen_evidence_required=true dependency_or_scope_changed=true"
+                ),
+            "{refused}"
+        );
     }
 
     #[test]
