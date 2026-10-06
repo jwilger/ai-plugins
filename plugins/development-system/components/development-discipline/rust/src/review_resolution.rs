@@ -70,6 +70,7 @@ pub(crate) enum ReuseDecision {
     NoResolution,
     Reuse { resolution_id: String },
     VerifyReopening { resolution_id: String },
+    VerifyDependencyChange { resolution_id: String },
 }
 
 fn nonblank(value: &str) -> bool {
@@ -150,6 +151,47 @@ pub(crate) fn decide(
     dependencies: &BTreeMap<String, String>,
     reopening: Option<&ReopenEvidence>,
 ) -> Result<ReuseDecision, String> {
+    decide_inner(
+        history,
+        finding_id,
+        lens,
+        scope,
+        dependencies,
+        reopening,
+        false,
+    )
+}
+
+/// Carried history is not a new reviewer challenge. Actual changed source
+/// dependencies require fresh adjudication without inventing caller evidence.
+pub(crate) fn decide_carried(
+    history: &[ResolutionEvidence],
+    finding_id: &str,
+    lens: &str,
+    scope: &ResolutionScope,
+    dependencies: &BTreeMap<String, String>,
+    reopening: Option<&ReopenEvidence>,
+) -> Result<ReuseDecision, String> {
+    decide_inner(
+        history,
+        finding_id,
+        lens,
+        scope,
+        dependencies,
+        reopening,
+        true,
+    )
+}
+
+fn decide_inner(
+    history: &[ResolutionEvidence],
+    finding_id: &str,
+    lens: &str,
+    scope: &ResolutionScope,
+    dependencies: &BTreeMap<String, String>,
+    reopening: Option<&ReopenEvidence>,
+    reverify_carried: bool,
+) -> Result<ReuseDecision, String> {
     let Some(prior) = history
         .iter()
         .rev()
@@ -184,6 +226,18 @@ pub(crate) fn decide(
             return Err("resolution_reopen_relevant_change_not_observed=true".to_string());
         }
         return Ok(ReuseDecision::VerifyReopening {
+            resolution_id: prior.resolution_id.clone(),
+        });
+    }
+    if reverify_carried
+        && same_scope
+        && !unchanged
+        && prior
+            .dependency_blobs
+            .keys()
+            .all(|path| dependencies.contains_key(path))
+    {
+        return Ok(ReuseDecision::VerifyDependencyChange {
             resolution_id: prior.resolution_id.clone(),
         });
     }
@@ -586,6 +640,55 @@ mod tests {
     }
 
     #[test]
+    fn carried_reverification_requires_actual_complete_changed_dependencies() {
+        let prior = capture(rejection()).expect("rejection");
+        let mut changed = prior.dependency_blobs.clone();
+        let path = changed.keys().next().expect("dependency").clone();
+        changed.insert(path, format!("100644:{}", "c".repeat(40)));
+        assert!(matches!(
+            decide_carried(
+                std::slice::from_ref(&prior),
+                &prior.finding_id,
+                &prior.lens,
+                &prior.scope,
+                &changed,
+                None
+            )
+            .expect("reverify"),
+            ReuseDecision::VerifyDependencyChange { .. }
+        ));
+        assert!(decide(
+            std::slice::from_ref(&prior),
+            &prior.finding_id,
+            &prior.lens,
+            &prior.scope,
+            &changed,
+            None
+        )
+        .is_err());
+        assert!(decide_carried(
+            std::slice::from_ref(&prior),
+            &prior.finding_id,
+            &prior.lens,
+            &prior.scope,
+            &BTreeMap::new(),
+            None
+        )
+        .is_err());
+        let mut foreign_scope = prior.scope.clone();
+        foreign_scope.baseline_commit = "c".repeat(40);
+        assert!(decide_carried(
+            std::slice::from_ref(&prior),
+            &prior.finding_id,
+            &prior.lens,
+            &foreign_scope,
+            &changed,
+            None
+        )
+        .is_err());
+    }
+
+    #[test]
     fn reused_allegation_stays_nonclean_but_does_not_request_verification_or_escalation() {
         let retained = capture(rejection()).expect("resolution");
         let finding = serde_json::json!({"id":"guard-1","finding_id":"guard-1","lens":"production-risk-footguns",
@@ -600,6 +703,10 @@ mod tests {
             std::slice::from_ref(&retained),
             &retained.scope,
             &retained.dependency_blobs,
+            &std::collections::HashSet::from([crate::ReviewFindingKey {
+                id: "guard-1".into(),
+                lens: "production-risk-footguns".into(),
+            }]),
             &mut filtered,
         )
         .expect("reuse");

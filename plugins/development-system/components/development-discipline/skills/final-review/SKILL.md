@@ -684,6 +684,22 @@ requires independent adjudication. Source dependency changes invalidate reuse;
 unrelated documentation changes do not. Missing historical dependency evidence
 cannot establish reusable rejection credit.
 
+When a carried previously rejected finding has actually changed source
+dependencies, submit the preserved complete `lens_results` unchanged. The host
+observes the current dependency identities and returns `verifier_required`
+for independent reverification of the historical finding. This is not a new
+reviewer allegation: do not edit a completed clean result or invent
+`resolution_reopen` evidence to make the verifier eligible. Preserve the original
+baseline and authoritative `state_ref`; use only the returned assignment.
+After the fresh verifier closes, resubmit the same review request with its real
+`verifier_result` and lifecycle attestation. A rejection can refresh reusable
+resolution evidence only with all actually checked dependency identities; a
+confirmed or uncertain result leaves the finding open. Stale assignments,
+invented blobs and incomplete results remain invalid. Finding-free submitted
+rounds retain normal clean credit after successful adjudication; a newly
+submitted allegation still makes its round non-clean even if later rejected.
+The required three consecutive complete finding-free rounds are unchanged.
+
 Independent verifiers rejecting a finding should name the concrete evidence in
 `causality_evidence`, state the rationale and actually checked `assumptions`,
 and supply all actual repository-relative `dependency_blobs` as Git

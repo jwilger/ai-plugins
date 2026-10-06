@@ -6565,6 +6565,7 @@ fn apply_retained_resolution_evidence(
     history: &[review_resolution::ResolutionEvidence],
     scope: &review_resolution::ResolutionScope,
     dependencies: &BTreeMap<String, String>,
+    reported: &HashSet<ReviewFindingKey>,
     filtered: &mut FilteredReviewFindings,
 ) -> Result<(), String> {
     let mut reused = Vec::new();
@@ -6577,7 +6578,12 @@ fn apply_retained_resolution_evidence(
     ] {
         let mut retained = Vec::new();
         for mut finding in std::mem::take(bucket) {
-            match review_resolution::decide(
+            let decide = if reported.contains(&finding.key()) {
+                review_resolution::decide
+            } else {
+                review_resolution::decide_carried
+            };
+            match decide(
                 history,
                 &finding.id,
                 &finding.lens,
@@ -6593,6 +6599,13 @@ fn apply_retained_resolution_evidence(
                     );
                     filtered.retained_resolution_reuse.push(json!({"finding_id":finding.id,"lens":finding.lens,"resolution_id":resolution_id}));
                     reused.push(finding);
+                }
+                review_resolution::ReuseDecision::VerifyDependencyChange { resolution_id } => {
+                    finding.verification_reason = Some(format!(
+                        "independently reverify carried rejection {resolution_id}: observed source dependencies changed"
+                    ));
+                    filtered.reopened_resolutions.push(json!({"finding_id":finding.id,"lens":finding.lens,"resolution_id":resolution_id}));
+                    reopened.push(finding);
                 }
                 review_resolution::ReuseDecision::VerifyReopening { resolution_id } => {
                     finding.verification_reason = Some(format!(
@@ -6615,7 +6628,11 @@ fn apply_retained_resolution_evidence(
     filtered
         .follow_up_tickets_required
         .retain(|finding| !reused_keys.contains(&finding.key()));
-    if !reused.is_empty() || !reopened.is_empty() {
+    if reused
+        .iter()
+        .any(|finding| reported.contains(&finding.key()))
+        || !reopened.is_empty()
+    {
         filtered.clean = false;
     }
     filtered.already_tracked.extend(reused);
@@ -6655,7 +6672,10 @@ fn observe_resolution_inputs(
     // A scope-changing advance requests or resolves independent delta risk;
     // that path does not consume retained resolution dependencies. Fresh
     // verifier evidence still requires the strict observation boundary.
-    if input.current_diff_hash != state.scope.diff_hash && input.verifier_result.is_none() {
+    if input.current_diff_hash != state.scope.diff_hash
+        && state.risk.risk_plan.is_some()
+        && input.verifier_result.is_none()
+    {
         input.observed_dependency_blobs.clear();
         return Ok(());
     }
@@ -9665,6 +9685,22 @@ fn decide_review_iteration(
         &retained_resolutions(&authoritative_state.finding_history),
         &resolution_scope(&effective_scope),
         &input.observed_dependency_blobs,
+        &input
+            .lens_results
+            .iter()
+            .flat_map(|result| {
+                result.findings.iter().filter_map(|finding| {
+                    finding
+                        .finding_id
+                        .as_ref()
+                        .or(finding.id.as_ref())
+                        .map(|id| ReviewFindingKey {
+                            id: id.clone(),
+                            lens: result.lens.clone(),
+                        })
+                })
+            })
+            .collect(),
         &mut typed_filtered,
     )?;
     let terminal_malformed_iteration = authoritative_state.iteration_index == MAX_REVIEW_ITERATIONS
@@ -40261,6 +40297,116 @@ pre_filter = "project-pre"
     }
 
     #[test]
+    fn legacy_scope_change_observes_unchanged_resolution_dependencies() {
+        fn call(
+            coordinator: &mut ReviewCoordinator,
+            id: u64,
+            name: &str,
+            arguments: Value,
+        ) -> Value {
+            let response = coordinator.handle_json_rpc(&json!({
+                "jsonrpc":"2.0", "id":id, "method":"tools/call", "params":{"name":name,"arguments":arguments}
+            })).expect("RPC response");
+            let text = response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_else(|| panic!("missing RPC text: {response}"));
+            let result: Value =
+                serde_json::from_str(text).unwrap_or_else(|_| panic!("RPC failed: {response}"));
+            assert_ne!(response["result"]["isError"], true, "{result}");
+            result
+        }
+        let root = test_project_root("legacy-scope-resolution");
+        fs::create_dir_all(root.join("src")).expect("source directory");
+        fs::write(
+            root.join("src/lib.rs"),
+            "pub fn bounded() -> bool { true }\n",
+        )
+        .expect("source");
+        let mut coordinator = ReviewCoordinator::default();
+        let arguments = add_test_risk_assessment(
+            json!({
+                "session_id":"legacy-scope-resolution", "project_root":root,
+                "changed_files":["src/lib.rs"], "diff_hash":"same"
+            }),
+            "high",
+            &[("correctness-behavior", "high")],
+            json!([{
+                "finding_id":"stable-guard","lens":"correctness-behavior","severity":"MAJOR",
+                "causality":"caused","likelihood":"possible","security_impact":"none","safety_impact":"none",
+                "path":"src/lib.rs","message":"Carried guard allegation.",
+                "relevance":{"category":"diff_changed_file","explanation":"Changed guard."}
+            }]),
+        );
+        let plan = call(&mut coordinator, 1, "final_review.plan", arguments);
+        let state = &plan["state"];
+        let mut lens_result =
+            risk_finding_lens_result(state, "correctness-behavior", "stable-guard", "MAJOR");
+        lens_result["findings"][0]["security_impact"] = json!("major");
+        let mut advance =
+            json!({"state":state,"lens_results":[lens_result],"current_diff_hash":"same"});
+        let pending = call(&mut coordinator, 2, "final_review.advance", advance.clone());
+        assert_eq!(
+            pending["transition_status"], "verifier_required",
+            "{pending}"
+        );
+        let assignment = &pending["verifier_assignment"];
+        let blobs = review_resolution::observe_dependencies(
+            root.to_str().expect("root"),
+            &["src/lib.rs".to_string()],
+        )
+        .expect("actual blob");
+        advance["verifier_result"] = json!({
+            "assignment_id":assignment["assignment_id"], "subagent_key":assignment["subagent_key"],
+            "model_role":assignment["model_role"], "status":"verified",
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true},
+            "verdicts":[{"finding_id":"stable-guard","lens":"correctness-behavior","verdict":"rejected",
+                "severity":"MINOR","causality":"incidental","causality_evidence":"Read the guard and verified the bounded input regression.",
+                "security_impact":"none","safety_impact":"none","rationale":"The guard disproves this allegation.",
+                "dependency_blobs":blobs,"assumptions":["Only this public reader accepts input."]}]
+        });
+        let rejected = call(&mut coordinator, 3, "final_review.advance", advance);
+        assert_eq!(rejected["transition_status"], "advanced", "{rejected}");
+        let evidence = &rejected["state"]["finding_history"][0]["resolution_history"][0];
+        assert_eq!(evidence["finding_id"], "stable-guard", "{rejected}");
+        assert_eq!(evidence["dependency_blobs"], json!(blobs));
+        let packet = rejected["next_assignments"]
+            .as_array()
+            .expect("next assignments")
+            .iter()
+            .find(|packet| packet["lens"] == "correctness-behavior")
+            .expect("reviewer packet");
+        assert_eq!(packet["resolution_history"][0], *evidence);
+        assert!(packet["prompt"]
+            .as_str()
+            .expect("prompt")
+            .contains("RESOLUTION_HISTORY_JSON"));
+        let mut legacy = rejected["state"].clone();
+        legacy["risk_plan"] = Value::Null;
+        let arguments = json!({"state":legacy,
+            "lens_results":[risk_finding_lens_result(&legacy, "correctness-behavior", "stable-guard", "MAJOR")],
+            "current_diff_hash":"unrelated-change"});
+        let mut input = parse_advance_review_input(&arguments).expect("legacy advance");
+        observe_resolution_inputs(&arguments, &mut input).expect("observe legacy dependencies");
+        assert_eq!(input.observed_dependency_blobs, blobs);
+        let parsed = ReviewSessionState::parse_legacy_wire(&legacy).expect("legacy state");
+        assert!(parsed.risk.risk_plan.is_none());
+        let mut scope = resolution_scope(&parsed.scope);
+        scope.diff_hash = "unrelated-change".to_string();
+        assert!(matches!(
+            review_resolution::decide(
+                &[serde_json::from_value(evidence.clone()).expect("resolution evidence")],
+                "stable-guard",
+                "correctness-behavior",
+                &scope,
+                &input.observed_dependency_blobs,
+                None
+            )
+            .expect("unchanged dependency remains reusable"),
+            review_resolution::ReuseDecision::Reuse { .. }
+        ));
+    }
+
+    #[test]
     fn json_rpc_carried_resolution_observes_dependencies_without_new_allegation() {
         fn call(
             coordinator: &mut ReviewCoordinator,
@@ -40293,7 +40439,15 @@ pre_filter = "project-pre"
                 "changed_files":["src/lib.rs"], "diff_hash":"same"
             }),
             "high",
-            &[("correctness-behavior", "high")],
+            &[
+                ("correctness-behavior", "high"),
+                ("tests-verification", "high"),
+                ("operability-user-impact", "high"),
+                ("release-integration", "high"),
+                ("production-risk-footguns", "high"),
+                ("security-safety", "high"),
+                ("architecture-maintainability", "high"),
+            ],
             json!([{
                 "finding_id":"stable-guard","lens":"correctness-behavior","severity":"MAJOR",
                 "causality":"caused","likelihood":"possible","security_impact":"none","safety_impact":"none",
@@ -40356,32 +40510,92 @@ pre_filter = "project-pre"
             "stable-guard"
         );
         assert!(advanced["verifier_assignment"].is_null());
-        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["state"]["clean_streak"], 1);
         fs::write(
             root.join("src/lib.rs"),
             "pub fn bounded() -> bool { false }\n",
         )
         .expect("actual dependency change");
-        let refused = coordinator
-            .handle_json_rpc(&json!({
-                "jsonrpc":"2.0","id":5,"method":"tools/call","params":{
-                    "name":"final_review.advance","arguments":{
-                        "state":advanced["state"],
-                        "lens_results":clean_lens_results_for(&advanced["state"]),
-                        "current_diff_hash":"same"
-                    }
-                }
-            }))
-            .expect("RPC refusal");
-        assert!(
-            refused["error"]["message"]
-                .as_str()
-                .expect("error")
-                .contains(
-                    "resolution_reopen_evidence_required=true dependency_or_scope_changed=true"
-                ),
-            "{refused}"
+        let mut recovery = json!({"state":advanced["state"],
+            "lens_results":clean_lens_results_for(&advanced["state"]),"current_diff_hash":"same"});
+        let preserved_reviews = recovery["lens_results"].clone();
+        assert_eq!(
+            preserved_reviews
+                .as_array()
+                .expect("completed reviews")
+                .len(),
+            7
         );
+        let pending = call(
+            &mut coordinator,
+            5,
+            "final_review.advance",
+            recovery.clone(),
+        );
+        assert_eq!(
+            pending["transition_status"], "verifier_required",
+            "{pending}"
+        );
+        assert_eq!(
+            pending["state"]["iteration_index"],
+            advanced["state"]["iteration_index"]
+        );
+        assert_eq!(
+            pending["state"]["clean_streak"],
+            advanced["state"]["clean_streak"]
+        );
+        let assignment = &pending["verifier_assignment"];
+        assert_eq!(assignment["findings"][0]["id"], "stable-guard");
+        assert!(assignment["findings"][0]["resolution_reopen"].is_null());
+        let current_blobs = review_resolution::observe_dependencies(
+            root.to_str().expect("root"),
+            &["src/lib.rs".to_string()],
+        )
+        .expect("changed blob");
+        recovery["verifier_result"] = json!({
+            "assignment_id":assignment["assignment_id"], "subagent_key":assignment["subagent_key"],
+            "model_role":assignment["model_role"], "status":"verified",
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true},
+            "verdicts":[{"finding_id":"stable-guard","lens":"correctness-behavior","verdict":"rejected",
+                "severity":"MINOR","causality":"incidental","causality_evidence":"Independently inspected the changed dependency.",
+                "security_impact":"none","safety_impact":"none","rationale":"Current source still disproves the carried allegation.",
+                "dependency_blobs":current_blobs,"assumptions":[]}]});
+        let mut wrong_assignment = recovery.clone();
+        wrong_assignment["verifier_result"]["assignment_id"] = json!("invented-assignment");
+        let mut forged_blob = recovery.clone();
+        forged_blob["verifier_result"]["verdicts"][0]["dependency_blobs"]["src/lib.rs"] =
+            json!(format!("100644:{}", "0".repeat(40)));
+        for invalid in [wrong_assignment, forged_blob] {
+            let refused = coordinator
+                .handle_json_rpc(&json!({"jsonrpc":"2.0","id":60,"method":"tools/call",
+                "params":{"name":"final_review.advance","arguments":invalid}}))
+                .expect("invalid recovery response");
+            assert!(refused.get("error").is_some(), "{refused}");
+        }
+        let recovered = call(
+            &mut coordinator,
+            6,
+            "final_review.advance",
+            recovery.clone(),
+        );
+        assert_eq!(recovery["lens_results"], preserved_reviews);
+        assert_eq!(recovered["transition_status"], "advanced", "{recovered}");
+        assert_eq!(recovered["state"]["clean_streak"], 2);
+        assert_eq!(
+            recovered["state"]["finding_history"][2]["resolution_history"][0]["dependency_blobs"],
+            json!(current_blobs)
+        );
+        let next = call(
+            &mut coordinator,
+            7,
+            "final_review.advance",
+            json!({"state":recovered["state"],
+            "lens_results":clean_lens_results_for(&recovered["state"]),"current_diff_hash":"same"}),
+        );
+        assert_eq!(next["transition_status"], "advanced", "{next}");
+        assert!(next["verifier_assignment"].is_null());
+        assert_eq!(next["state"]["clean_streak"], 3);
+        assert_eq!(next["complete"], true);
     }
 
     #[test]
@@ -40480,7 +40694,7 @@ pre_filter = "project-pre"
             "stable-guard"
         );
         assert!(advanced["verifier_assignment"].is_null());
-        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["state"]["clean_streak"], 1);
         fs::remove_file(root.join("src/lib.rs")).expect("retained file");
         fs::create_dir(root.join("src/lib.rs")).expect("unneeded nonfile path");
         let response = coordinator.handle_json_rpc(&json!({
@@ -40596,7 +40810,7 @@ pre_filter = "project-pre"
             "stable-guard"
         );
         assert!(advanced["verifier_assignment"].is_null());
-        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["state"]["clean_streak"], 1);
         fs::remove_file(root.join("src/lib.rs")).expect("old dependency file");
         fs::create_dir(root.join("src/lib.rs")).expect("refactored directory");
         fs::write(
@@ -40622,7 +40836,7 @@ pre_filter = "project-pre"
             delta["state"]["scope"]["baseline_commit"],
             advanced["state"]["scope"]["baseline_commit"]
         );
-        assert_eq!(delta["state"]["clean_streak"], 0);
+        assert_eq!(delta["state"]["clean_streak"], 1);
         assert!(!delta["delta_risk_assignments"]
             .as_array()
             .expect("delta assignments")
@@ -40776,7 +40990,7 @@ pre_filter = "project-pre"
             "stable-guard"
         );
         assert!(advanced["verifier_assignment"].is_null());
-        assert_eq!(advanced["state"]["clean_streak"], 0);
+        assert_eq!(advanced["state"]["clean_streak"], 1);
     }
 
     #[test]

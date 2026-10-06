@@ -12,6 +12,28 @@ configuration, or with invalid configuration, inspection remains available but
 the plugin cannot provide configured workflow guidance. This advisory state
 does not deny ordinary host mutation capabilities.
 
+## Carried rejection evidence recovery
+
+If an old `final_review.advance` was rejected after a carried independently
+rejected finding's source dependencies changed, read the authoritative session
+with `final_review.resume_latest` after updating and restarting the runtime.
+Preserve the original baseline and all completed `lens_results` exactly.
+When the fingerprint and reviewed source still match, retry the saved advance
+unchanged. The corrected host observes changed dependency identities and
+returns `verifier_required`; use that exact returned assignment in a fresh
+independent verifier context. Do not invent a new reviewer allegation, alter
+completed clean results, fabricate `resolution_reopen` evidence or replace state.
+After the verifier finishes and closes, resubmit the same review request with
+its genuine `verifier_result` and the caller's actual assigned-model,
+fresh-context and post-close lifecycle attestation. A rejection refreshes
+source-bound evidence only with all actually checked current dependency blobs,
+which the host independently observes. A confirmed or uncertain verdict leaves
+the finding open. A genuinely finding-free submitted round can retain normal
+clean credit after successful adjudication; a newly submitted allegation still
+resets it even if later rejected. Completion still requires three consecutive
+complete finding-free rounds. If source or fingerprint changed, reconcile the
+authoritative pending assignment and required delta review before resubmitting.
+
 ## Proportional and interruptible execution
 
 Before expanding active scope for advisory or non-blocking feedback, run the
