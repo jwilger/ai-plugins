@@ -93,9 +93,15 @@ def session_snapshot(env=None, uid=None):
         "uid": uid,
         "runtime_dir": {"path": str(canonical_runtime), "device": runtime_info.st_dev, "inode": runtime_info.st_ino},
         "wayland_display": display,
-        "wayland_socket": {"device": wayland_info.st_dev, "inode": wayland_info.st_ino},
+        "wayland_socket": {
+            "device": wayland_info.st_dev, "inode": wayland_info.st_ino,
+            "ctime_ns": wayland_info.st_ctime_ns, "mtime_ns": wayland_info.st_mtime_ns,
+        },
         "hyprland_instance_signature": instance,
-        "hyprland_socket": {"device": hypr_info.st_dev, "inode": hypr_info.st_ino},
+        "hyprland_socket": {
+            "device": hypr_info.st_dev, "inode": hypr_info.st_ino,
+            "ctime_ns": hypr_info.st_ctime_ns, "mtime_ns": hypr_info.st_mtime_ns,
+        },
     }
 
 
@@ -430,13 +436,13 @@ def validate_observation(value):
     runtime_path = runtime_dir["path"]
     if not isinstance(runtime_path, str) or not Path(runtime_path).is_absolute() or os.path.normpath(runtime_path) != runtime_path:
         raise AdapterError("invalid observation session")
-    for identity in (runtime_dir, value["session"]["wayland_socket"], value["session"]["hyprland_socket"]):
-        if not isinstance(identity, dict) or "device" not in identity or "inode" not in identity:
+    for identity in (value["session"]["wayland_socket"], value["session"]["hyprland_socket"]):
+        if not isinstance(identity, dict) or set(identity) != {"device", "inode", "ctime_ns", "mtime_ns"}:
             raise AdapterError("invalid observation session")
-        if identity is not runtime_dir and set(identity) != {"device", "inode"}:
-            raise AdapterError("invalid observation session")
-        integer(identity["device"], "session device", 0)
-        integer(identity["inode"], "session inode", 0)
+        for field in ("device", "inode", "ctime_ns", "mtime_ns"):
+            integer(identity[field], f"session {field}", 0)
+    for field in ("device", "inode"):
+        integer(runtime_dir[field], f"runtime {field}", 0)
     window = value["focused_window"]
     if not isinstance(window, dict) or set(window) != {"address", "monitor", "x", "y", "width", "height"}:
         raise AdapterError("invalid observed window")

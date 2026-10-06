@@ -45,9 +45,9 @@ def observation(monitors=None, focused=None, screenshot=None):
             "uid": 1000,
             "runtime_dir": {"path": "/run/user/1000", "device": 1, "inode": 2},
             "wayland_display": "wayland-1",
-            "wayland_socket": {"device": 1, "inode": 3},
+            "wayland_socket": {"device": 1, "inode": 3, "ctime_ns": 5, "mtime_ns": 6},
             "hyprland_instance_signature": "instance_1",
-            "hyprland_socket": {"device": 1, "inode": 4},
+            "hyprland_socket": {"device": 1, "inode": 4, "ctime_ns": 7, "mtime_ns": 8},
         },
         "focused_window": focused, "monitors": monitors,
         "target_monitor": next(item["name"] for item in monitors if item["id"] == focused["monitor"]),
@@ -120,7 +120,8 @@ class SchemaAndMappingTests(unittest.TestCase):
         for session in (
             {key: item for key, item in value["session"].items() if key != "runtime_dir"},
             value["session"] | {"runtime_dir": value["session"]["runtime_dir"] | {"path": "/run/../run/user/1000"}},
-            value["session"] | {"wayland_socket": {"device": 1, "inode": -1}},
+            value["session"] | {"wayland_socket": value["session"]["wayland_socket"] | {"inode": -1}},
+            value["session"] | {"hyprland_socket": value["session"]["hyprland_socket"] | {"ctime_ns": -1}},
         ):
             with self.subTest(session=session), self.assertRaises(MODULE.AdapterError):
                 MODULE.validate_observation(observation() | {"session": session})
@@ -179,12 +180,29 @@ class StateGateTests(unittest.TestCase):
                     with self.assertRaisesRegex(MODULE.AdapterError, "graphical session changed"):
                         MODULE.assert_live_target(value, sessions[1][0], os.getuid(), "hyprctl")
                 old_identity = sessions[0][1]
+                wayland = Path(sessions[0][0]["XDG_RUNTIME_DIR"]) / "wayland-1"
+                original_info = wayland.lstat()
                 sockets[0].close()
-                (Path(sessions[0][0]["XDG_RUNTIME_DIR"]) / "wayland-1").unlink()
+                wayland.unlink()
                 replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-                replacement.bind(str(Path(sessions[0][0]["XDG_RUNTIME_DIR"]) / "wayland-1"))
+                replacement.bind(str(wayland))
                 sockets.append(replacement)
-                self.assertNotEqual(MODULE.session_snapshot(sessions[0][0], os.getuid()), old_identity)
+                # Some filesystems immediately reuse the removed socket inode.
+                # Force that case while retaining the replacement's new times.
+                reused = SimpleNamespace(
+                    st_dev=original_info.st_dev, st_ino=original_info.st_ino,
+                    st_ctime_ns=original_info.st_ctime_ns + 1_000_000_000,
+                    st_mtime_ns=original_info.st_mtime_ns + 1_000_000_000,
+                )
+                original_owned_path = MODULE.owned_path
+
+                def reused_inode(path, kind, uid, private=False):
+                    if path == wayland:
+                        return reused
+                    return original_owned_path(path, kind, uid, private)
+
+                with patch.object(MODULE, "owned_path", side_effect=reused_inode):
+                    self.assertNotEqual(MODULE.session_snapshot(sessions[0][0], os.getuid()), old_identity)
             finally:
                 for endpoint in sockets:
                     endpoint.close()
