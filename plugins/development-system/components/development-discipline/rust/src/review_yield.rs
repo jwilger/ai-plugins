@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct RoundEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_kind: Option<String>,
     pub schema_version: u32,
     pub completed_lens_round: bool,
     pub expected_lenses: Vec<String>,
@@ -90,7 +92,26 @@ const BUCKETS: [(&str, &str); 6] = [
 ];
 
 pub(super) fn report(state: &Value) -> Result<Value, String> {
-    analyze(state).map(|(report, _)| report)
+    let (mut report, _) = analyze(state)?;
+    if let Some(coverage) = state
+        .pointer("/risk_plan/coverage")
+        .filter(|v| v.is_object())
+    {
+        report["scoped_review_coverage"] = coverage.clone();
+        let rounds = report["rounds"]
+            .as_array()
+            .ok_or("review_yield_rounds_missing=true")?;
+        let mut counts = BTreeMap::<String, u64>::new();
+        for round in rounds {
+            let kind = round["batch_kind"]
+                .as_str()
+                .unwrap_or("legacy-or-unavailable");
+            *counts.entry(kind.into()).or_default() += 1;
+        }
+        report["observed_batch_counts"] = json!(counts);
+        report["batch_count_guidance"] = json!("Counts cover retained recorded batches only. Complete rounds, scoped repair reviews, extra risk samples, assignment replacements, and verifier replacements are distinct. Reused receipts retain their original source and reviewer identities; they are not fresh reviewer runs.");
+    }
+    Ok(report)
 }
 
 pub(super) fn evidence(state: &Value, reference: &str) -> Result<Value, String> {
@@ -230,7 +251,7 @@ fn analyze(state: &Value) -> Result<(Value, EvidenceIndex), String> {
                 && row.get("reset_reason").and_then(Value::as_str).is_none_or(|reason|reason=="none"),
             "finding_free":if !round.raw_findings.is_empty() {json!(false)} else if raw_complete {json!(true)} else {Value::Null},
             "raw_findings_complete":raw_complete,"reset_reason":row.get("reset_reason"),
-            "scope":round.scope,"prior_scope":round.prior_scope,"scope_changed":round.scope_changed,"source_changed":reported_source_change(&round),
+            "scope":round.scope,"prior_scope":round.prior_scope,"scope_changed":round.scope_changed,"source_changed":reported_source_change(&round),"batch_kind":round.batch_kind,
             "counts":counts,"review_counts":round_review_counts,"evidence_ref":round_reference,"evidence_refs":references}));
     }
     // Missing or pruned facts cannot establish full-history totals or novelty.
@@ -289,6 +310,18 @@ fn analyze(state: &Value) -> Result<(Value, EvidenceIndex), String> {
 }
 
 fn validate(round: &RoundEvidence) -> Result<(), String> {
+    if round.batch_kind.as_ref().is_some_and(|kind| {
+        !matches!(
+            kind.as_str(),
+            "complete-round"
+                | "scoped-repair"
+                | "additional-risk-sample"
+                | "assignment-replacement"
+                | "verifier-replacement"
+        )
+    }) {
+        return Err("review_yield_batch_kind_invalid=true".into());
+    }
     if round.completed_lens_round && round.raw_findings_complete == Some(false) {
         return Err("review_yield_complete_round_raw_evidence_required=true".into());
     }
@@ -342,7 +375,13 @@ fn validate(round: &RoundEvidence) -> Result<(), String> {
     if let Some(attempts) = &round.review_attempts {
         // Native input admits at most 24 lenses. Reuse that hard boundary while
         // preserving legacy rows with no ledger and the outer 1 MiB state limit.
-        if attempts.is_empty() || attempts.len() > 24 {
+        if (attempts.is_empty()
+            && !(round.batch_kind.as_deref() == Some("verifier-replacement")
+                && round.verifier_evidence.is_some()
+                && round.expected_lenses.is_empty()
+                && !round.completed_lens_round))
+            || attempts.len() > 24
+        {
             return Err("review_yield_review_attempts_invalid=true".into());
         }
         for attempt in attempts {

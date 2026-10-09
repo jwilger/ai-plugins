@@ -12,6 +12,24 @@ configuration, or with invalid configuration, inspection remains available but
 the plugin cannot provide configured workflow guidance. This advisory state
 does not deny ordinary host mutation capabilities.
 
+## Workflow explanation checklist
+
+When explaining implementation increments or terminal-review remediation, cover
+these points explicitly; do not replace them with a generic reference to gates:
+
+- The recorded RED causal claim when applicable, immediate focused tests and
+  lightweight review; comprehensive suites belong in CI, without a duplicate
+  local comprehensive exact-commit gate.
+- Installed Lefthook commit/push gates without manual duplication, signed commits,
+  exact commit/message/signature verification, and authorized delivery.
+- Record the delivered identity together with its required exact-SHA CI runs.
+  A completed required failure activates the existing **Tiber recovery hold**.
+- Every planned increment and acceptance criterion must be checkpoint-delivered
+  before terminal review. Explain the complete remediation checkpoint.
+- Independent delta assessment renews affected behavior/dependencies while
+  preserving proven peer receipts and all recorded responsibilities/sample floors.
+  Full renewal requires material whole-scope impact or unisolatable provenance.
+
 ## Carried rejection evidence recovery
 
 If an old `final_review.advance` was rejected after a carried independently
@@ -30,8 +48,7 @@ source-bound evidence only with all actually checked current dependency blobs,
 which the host independently observes. A confirmed or uncertain verdict leaves
 the finding open. A genuinely finding-free submitted round can retain normal
 clean credit after successful adjudication; a newly submitted allegation still
-resets it even if later rejected. Completion still requires three consecutive
-complete finding-free rounds. If source or fingerprint changed, reconcile the
+remains visible even after rejection. V3 can retain valid coverage after genuine independent adjudication; v2 keeps its recorded complete clean rounds until explicit migration. If source or fingerprint changed, reconcile the
 authoritative pending assignment and required delta review before resubmitting.
 
 ## Proportional and interruptible execution
@@ -43,8 +60,7 @@ does not authorize broader implementation. Keep materially required causal
 work and mechanical gates fail-closed. Report distinct improvements and offer
 the user a choice; worthwhile distinct work may enter the backlog without
 expanding or delaying the active goal, while implementation requires the user
-to explicitly expand the goal. A canonical final-review finding still makes
-its iteration non-clean regardless of its backlog or report-only disposition.
+to explicitly expand the goal. V3 can preserve valid coverage after genuine independent rejection or proper report-only disposition. Confirmed blockers remain required work.
 In every checkpoint result, explicitly name all four boundaries and the outcome
 for each; never substitute a bare reference to "the proportionality
 checkpoint."
@@ -320,9 +336,12 @@ Any terminal-review finding remediation must leave review and complete the
 normal immediate-test and lightweight-review checkpoint. Then use a
 signed additive commit plus exact verification and authorized push for remote
 modes, or a signed local commit only when required/authorized and otherwise a
-new exact no-commit snapshot for local-only. Submit the diff-bound delta
-assessment and rerun the complete selected lens set under the normal clean-streak
-reset. Comprehensive, slow, integration, mutation, and pipeline-scale suites
+new exact no-commit snapshot for local-only. Submit the diff-bound independent
+delta assessment and obtain fresh affected-behavior/dependency review under v3,
+preserving proven peer receipts and every recorded responsibility and sample
+floor. An ordinary delta cannot omit an obligation or lower its sample count.
+Full renewal requires whole-scope impact or unisolatable
+provenance; v2 retains its recorded full-reset contract. Comprehensive, slow, integration, mutation, and pipeline-scale suites
 remain in CI rather than being duplicated in a local exact-commit gate. A
 completed exact-SHA CI failure immediately preempts review or other work through
 the existing Tiber-owned recovery hold.
@@ -338,13 +357,6 @@ for local causal work: after the next increment's immediate focused test, the
 successor may enter `failing` or the initial `passing-awaiting-gates-or-review`
 stage while retaining the complete CI observation history.
 
-When explaining this workflow, explicitly state the RED pair's recorded causal
-claim, comprehensive-suite ownership in CI with no duplicate comprehensive
-local exact-commit gate, that every planned increment and acceptance criterion
-must be checkpoint-delivered before terminal review begins, and the complete
-terminal-remediation checkpoint. Do not leave any of them implied by a generic
-reference to repository gates or final-review reset.
-
 ## Final-review protocol preflight
 
 For every final-review path, complete this checklist before creating any risk
@@ -352,43 +364,28 @@ or review state:
 
 1. Call `workspace-reader.status` through the same connected MCP that would run
    final review.
-2. Require one `final_review_protocol` object with all three predicates:
-   `contract_version >= 2`, `minimum_clean_iterations >= 3`, and
+2. Require one `final_review_protocol` object with `contract_version >= 3`,
+   `minimum_clean_iterations: 1`, `scoped_coverage: true`,
+   `explicit_policy_migration: true`, and
    `durable_pending_assignment_recovery: true`.
-3. If any predicate is missing or weaker, classify the skill and connected MCP
-   as stale or mismatched. Do not call `final_review.assess_risk` or
-   `final_review.plan`; if a plan was already created, discard that entire
-   session. State that zero clean iterations are accepted, launch no reviewers,
-   and reject terminal delivery, pull/merge-request creation or update, merge,
-   and readiness claims. Preserve separately authorized intermediate or
-   terminal-finding-remediation checkpoints: their normal commit and push may
-   proceed, but neither is terminal delivery or readiness evidence.
-4. Recover by installing the current-host binaries from the updated marketplace
-   checkout with `just install-development-system-binaries` (or
-   `scripts/install-development-system-binaries.sh`), then update the Development System plugin and restart the harness.
-   Codex loads both MCP servers from the plugin-root `mcp.json`. Start a new review session only after the same-MCP status call
-   passes all three predicates; another plan call is never the runtime probe.
-5. After planning, require the returned coordinator-owned
-   `required_clean_iterations` to be at least the attested minimum. A lower
-   value invalidates and discards that session; it cannot schedule reviewers or
-   authorize terminal delivery. Reject terminal delivery, PR/MR creation or
-   update, merge, and readiness until a fresh coordinator-compatible session
-   succeeds. Preserve any separately authorized intermediate or
-   terminal-finding-remediation commit/push checkpoint; it is not terminal
-   delivery or readiness evidence.
+3. Missing or mismatched capability accepts zero enforced credit and blocks
+   terminal delivery, PR/MR publication, merge, and readiness. Preserve separately
+   authorized causal checkpoint work under its ordinary gates. Do not bypass the
+   coordinator with manual claims or caller-edited state.
+4. Update the plugin and version-matched current-host binaries, restart the
+   harness, and repeat `workspace-reader.status` through the same connected MCP.
+   A local build, configured path, plan call, or installation alone does not prove
+   adoption by that connected process.
+5. Read the recorded session policy. V2 sessions retain their existing three-round
+   requirements; use explicit independently assessed `final_review.migrate_policy`
+   to change an active contract. Preserve baseline, history, blockers, holds,
+   and original evidence. Missing historical dependency/freshness/lifecycle
+   bindings cannot become invented narrow reusable credit.
 
-When reporting a protocol mismatch, do not abbreviate this checklist. Name the
-same-MCP status requirement and all three predicate names and thresholds; say
-that `final_review.assess_risk` and `final_review.plan` are prohibited; say the
-old session is discarded with zero accepted clean iterations and no reviewers;
-name terminal delivery, pull/merge-request creation or update, merge, and
-readiness as rejected actions while preserving separately authorized
-intermediate or terminal-finding-remediation commit/push checkpoints; require current-host binary installation, rerunning
-Development System setup for the current harness to rewrite the project-local
-absolute MCP binding, and harness restart; and require a fresh plan whose
-coordinator-owned minimum is at least the attested minimum. A generic
-instruction to refresh, reconnect, or require
-"three passes" is not a complete fail-closed recovery record.
+Read the [proportional review policy](../../components/development-discipline/skills/final-review/references/proportional-review-policy.md)
+for v3 requirements, source/behavior/scope/freshness invalidation, visual continuity,
+legacy compatibility, and exact recovery operations. Never waive a gate because
+of elapsed time, budget, pressure, tool failure, or a stuck task.
 
 For every workflow question, load [workflow
 rules](references/workflow-rules.md). Before editing, classify artifact impact
@@ -440,20 +437,21 @@ delivery detail:
   helper stdout for plan `diff_hash` and every advance `current_diff_hash`, and
   delete the temporary file after each call. Reject triple-dot, index-only,
   bare-worktree, symbolic-baseline, and caller-invented hashes.
-- Use a fresh-context subagent for every assigned lens in every iteration.
-  Always include an independent `production-risk-footguns` lens for latent
-  traps, fragile defaults, production-scale data/resource access, and
-  burst/DOS-like load behavior; add other repository-agnostic lenses according
-  to assessed risk.
-- Every submitted canonical finding—including out-of-scope, report-only,
-  already-known, defended, or later rejected feedback—makes that iteration
-  non-clean, clears the clean streak and verified-clean receipts, and requires
-  the complete selected lens set again in fresh contexts. Disposition controls
-  remediation or reporting only; never carry unaffected peer evidence forward.
-- Feed every defense or caller decision back to the relevant fresh lens
-  reviewers. Never accept a defense only in the caller context. A defense
-  cannot make its finding-bearing iteration clean; completion still requires
-  three later consecutive complete finding-free iterations.
+- Use a genuine fresh-context reviewer for every applicable assigned responsibility.
+  One complete risk-selected round is the v3 default. Additional 2–10 samples
+  require explicit consequential high/exceptional risk, residual uncertainty,
+  affected scope, and count rationale; exceptional dimensions need at least two.
+- Select production-risk-footguns for concrete deployment/resource/data-access
+  consequences. Keep model/document, instruction, visual, tooling, and production
+  code obligations distinct. Actual security/safety boundaries still select scrutiny.
+- Submit source-bound inspected dependencies and real model-role, fresh-context,
+  post-close lifecycle attestations. Missing/forged/stale/reused evidence earns no
+  credit. Execute the exact returned fresh pending assignments.
+- Freshly verify and review repaired behavior, callers, contracts, consumers,
+  and dependencies. Retain proven unaffected receipts with original identities
+  and current applicability proofs. Whole renewal needs concrete whole-scope
+  impact or unisolatable shared provenance. Independent rejection/report-only
+  disposition can retain coverage; caller defense never substitutes for adjudication.
 - When Tiber's opt-in final-review policy applies, explicitly require every
   fresh independent clean review and every substantive finding to be recorded
   through the durable `tiber.review.record` surface. Prose instructions,
@@ -473,15 +471,12 @@ delivery detail:
      for an exceptional overall profile.
   3. Keep supported triggers recorded on a lower profile when concrete
      mitigations keep risk below exceptional.
-  4. Give the extra independent discovery sample only to dimensions explicitly
-     rated exceptional.
+  4. Require at least two samples for exceptional dimensions; other extra samples require explicit consequential high residual risk and justified scope/count.
   5. Validate every later delta with the same supported-trigger and
      explicitly-exceptional-dimension rules.
-  6. For a legitimate material-delta reassessment, merge and preserve trigger
-     evidence in authoritative state, clear the clean streak and verified-clean
-     receipts, invalidate every old peer result, and require three fresh,
-     consecutive, complete, finding-free iterations of the entire selected
-     lens set.
+  6. Preserve trigger/history evidence, independently reassess affected behavior
+     and dependencies, invalidate their receipts, and retain proven unaffected
+     coverage. Whole-scope renewal requires concrete whole-scope impact.
 
 ## Review recovery and evidence operations
 
@@ -498,17 +493,14 @@ invent identifiers or source-change facts to complete a report.
 - After a 75-minute checkpoint, use `final_review.continue_review` with the
   authoritative `state_ref`, a stable `operation_id`, and concrete progress
   rationale. Retry the exact request after a lost response. It preserves the
-  original start, unresolved blockers, and at least three consecutive complete
-  finding-free rounds. Resolve a legacy escalation with its concrete recovery
+  original start, unresolved blockers, recorded coverage obligations, and failure holds. Resolve a legacy escalation with its concrete recovery
   reference. A locked signer blocks signing; continue independent authorized
   work and never bypass its signature gate. Elapsed time alone needs no human
   permission.
 - For a required source change after completion, use `final_review.reopen`
   with the authoritative `state_ref`, stable `operation_id`, reason, current
   scope hash, complete changed-file inventory, and fresh bound test evidence.
-  Preserve baseline, history, and unresolved obligations; invalidate prior
-  clean credit, obtain independent delta assessment, then run every selected
-  lens until three new consecutive complete finding-free rounds.
+  Preserve baseline, history, and unresolved obligations; suspend completion, obtain independent delta assessment, and renew affected coverage while retaining proven peers. V2 keeps its recorded full-reset policy until migration.
 - For independent adjudication of a new ordinary disputed finding, include
   `verification_requests` with its exact `finding_id` and `lens` on the initial
   `final_review.advance`. Run the returned fresh verifier and preserve its frozen
@@ -545,13 +537,11 @@ append no event, change no revision, fingerprint, scope, or hash, and never
 reassign a lens or role. If a pre-upgrade pending verifier or delta-risk record
 lacks recoverable assignment facts, follow its explicit
 `recovery=restart_final_review` guidance; never reconstruct it from partial
-projection state. A missing or invalid lifecycle/model attestation is malformed
-assigned evidence: accept the coordinator's non-clean reset transition, discard
-the full iteration, and execute every fresh next-iteration assignment. Never
-repair the old assignment or preserve peer results from that invalidated
-iteration. Apply the same rule to malformed verifier evidence and invalid
-verifier assignment provenance or verdict coverage: close the pending verifier
-and rerun the full selected lens set returned by the reset transition.
+projection state. A missing or invalid lifecycle/model attestation earns no credit. Execute the
+actual returned fresh pending scope; never repair or re-credit an invalid
+assignment. V3 retains independent valid peers and replaces malformed adjudication
+over frozen targets. Shared provenance compromise invalidates all dependent
+coverage. V2 retains its original reset rules until explicit migration.
 
 The pinned ticket-start Git baseline plus in-repository paths, contents, modes, and untracked
 inventory define reviewed source scope. Coordinator events, snapshots, state

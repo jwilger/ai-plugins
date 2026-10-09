@@ -104,12 +104,13 @@ codex plugin add development-system@ai-plugins
 codex plugin list --json
 ```
 
-Verify the installed version is 6.9.6 or newer. Restart the harness and resume
+Verify the installed version is 7.0.0 or newer for protocol-v3 terminal review. Restart the harness and resume
 the work in a fresh thread with its original request, immutable baseline, and
 checkpoint ID. The startup hook repairs version-matched host binaries; verify
 both MCP servers use the new plugin root and call `workspace-reader.status`
 through the connected Development Discipline MCP. Its final-review attestation
-must report `contract_version >= 2`, `minimum_clean_iterations >= 3`, and
+must report `contract_version >= 3`, `minimum_clean_iterations: 1`,
+`scoped_coverage: true`, `explicit_policy_migration: true`, and
 `durable_pending_assignment_recovery: true` before terminal review.
 If the release is not yet available, build from the updated marketplace
 checkout into the installed MCP's exact data directory:
@@ -185,20 +186,9 @@ It does not generate privileged agents or
 profiles and never changes global Codex, marketplace, MCP, shell, or
 SSH settings.
 
-Within that advisory boundary, final-review state fails closed: risk planning
-must select a lens, every selected lens and assigned verifier reruns in each
-iteration, and completion requires at least three consecutive complete
-finding-free iterations. Findings, malformed results, and material deltas reset
-the streak; the review-budget `ship` choice cannot bypass it. The reader status
-attests the connected final-review protocol, and current workflow guidance
-refuses to create review state when that attestation is missing or too old, so
-a newly installed skill cannot silently coordinate through a stale one-pass MCP
-runtime. The planned
-Tiber can additionally enforce those receipts at the task boundary when a
-project opts into `[final_review].minimum_clean_reviews`: its Git-backed task
-history then blocks both task completion and trailer-driven delivery until the
-required clean sequence is current. This gate is available through the same
-CLI and MCP surface in Codex.
+Within that advisory boundary, final-review state fails closed. Protocol v3 requires one complete independently risk-selected coverage set, with justified additional samples for consequential risks. Repairs renew affected behavior and dependencies, retaining proven unchanged evidence. Whole-scope impact or unisolatable provenance requires full renewal; malformed assignments are replaced without counting invalid evidence. Model/document responsibilities and rendered behavior are assessed separately from production-code responsibilities. Exact-source binding, current regression verification, security scrutiny, actual lifecycle attestations, CI, CodeRabbit, and signed delivery remain required. V2 sessions retain three complete rounds unless explicitly migrated.
+
+Tiber can additionally enforce receipts at the task boundary through `[final_review].minimum_clean_reviews`. Values one and two are valid explicit policies; larger requirements remain enforced. Task completion and trailer-driven delivery still require current independent evidence. See [the proportional policy](components/development-discipline/skills/final-review/references/proportional-review-policy.md).
 
 The editor, runner, repository, and diagnostic services are retained as
 unexposed reusable components for the standalone Tiber harness. Ordinary Codex
@@ -267,16 +257,20 @@ required repairs or fresh independent review remain and no human decision is
 needed, call `final_review.continue_review` with the returned `state_ref`, a
 stable `operation_id`, and a concrete `rationale`. The coordinator records that
 assessment, retains the original start time and every blocker, and opens another
-75-minute window. Three consecutive complete finding-free review rounds remain
-required. Retry the exact request after a lost response; conflicting reuse of
+75-minute window. Preserve the recorded coverage and sample obligations: v3
+requires complete scoped independent coverage, and retained v2 sessions keep
+their original three-round contract. No budget decision bypasses these gates. Retry the exact request after a lost response; conflicting reuse of
 an operation ID fails. Recovery of a legacy escalation hold additionally needs
 `recovery_reference` explaining why its recorded dependency is resolved.
 
 After source changes to a completed session, use `final_review.reopen` with its
 authoritative reference, stable operation ID, reason, current diff identity,
 complete changed-file inventory, and fresh shared test evidence. Reopening
-preserves the pinned baseline and history, clears stale review credit, and
-requires an independent delta assessment followed by all selected review lenses.
+preserves the pinned baseline and history and suspends completion until an
+independent delta assessment. V3 renews affected behavior/dependencies and retains
+proven unchanged receipts and sample floors; whole renewal needs material
+whole-scope impact or unisolatable provenance. V2 retains its recorded full-reset
+contract unless explicitly migrated.
 A replayed historical reopen receipt explicitly identifies stale assignments;
 resume current state before launching more reviewers.
 

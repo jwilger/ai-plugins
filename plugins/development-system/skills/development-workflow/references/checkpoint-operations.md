@@ -163,7 +163,7 @@ registration or observation is pending; a failed CI hold takes precedence.
 An observation for a newer current-SHA run invalidates older success credit.
 Unresolved failures in retained history preempt readiness; a historical success
 for another SHA adds evidence without crediting the current candidate. CI
-observation never completes terminal review. After three consecutive complete
-finding-free rounds from fresh independent reviewers and successful required CI
-for the unchanged delivered SHA, record the actual review evidence with
+observation never completes terminal review. After the recorded final-review contract completes its required independent
+coverage and adjudication, and required CI succeeds for the unchanged delivered
+SHA, record the actual review evidence with
 `terminal-review-pass`. Only that separate transition sets `complete`.

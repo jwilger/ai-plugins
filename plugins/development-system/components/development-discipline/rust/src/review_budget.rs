@@ -137,6 +137,11 @@ fn continuation_response(
         Vec::new()
     } else {
         build_typed_review_assignments(ReviewAssignmentMaterial {
+            coverage: material
+                .contract
+                .risk_plan
+                .as_ref()
+                .and_then(|p| p.coverage.as_ref()),
             resolutions: &retained_resolutions(&material.finding_history),
             iteration: material.iteration_index,
             session_id: &material.contract.session_id,

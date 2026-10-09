@@ -2,7 +2,7 @@
   {
     "case_id": "final-review-relevance-gate-keeps-review-in-scope",
     "behavior": "Keeps final-review findings tied to the active diff, request, acceptance criteria, explicit user concern, or real cross-cutting release risk.",
-    "prompt": "A user asks for a final review of a PR that only changes the task dashboard's in-progress sorting. One review lens reports that the product should also add an abandoned-task column, but the user explicitly said abandoned tasks were intentionally left off this dashboard. How should the final-review skill handle that finding while preserving the normal review cycle?",
+    "prompt": "Under protocol v3, A user asks for a final review of a PR that only changes the task dashboard's in-progress sorting. One review lens reports that the product should also add an abandoned-task column, but the user explicitly said abandoned tasks were intentionally left off this dashboard. How should the final-review skill handle that finding while preserving the normal review cycle?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -24,7 +24,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response treats the abandoned-column suggestion as an out-of-scope wishlist observation because it contradicts an explicit user decision and is not tied to the in-progress sorting diff, says it is report-only rather than implementation or backlog work, but also says any reported canonical finding makes this iteration non-clean and restarts the complete risk-selected lens set. It must require final_review.advance to report three later consecutive complete finding-free iterations with no unresolved blocking caused security or human-safety finding, while separately requiring the ticket's actual acceptance criteria. Fail if it expands the task to add the abandoned column, creates backlog work for a generic wishlist item, lets disposition count the finding-bearing iteration as clean, preserves only unaffected lens evidence, or uses disposition to skip an acceptance criterion.",
+    "semanticRubric": "Pass if the response keeps the explicitly excluded wishlist observation report-only, does not implement or backlog it, records honest disposition, obtains independent relevance/adjudication where required, and permits genuinely clean applicable coverage to complete without three ritual full rounds. Acceptance criteria and caused blocking security/human-safety findings remain mandatory. Fail if it expands scope, treats caller defense as independent verdict, credits malformed evidence, or resets every valid peer merely because an unrelated observation was reported.",
     "hardAssertions": [
       {
         "id": "no-out-of-scope-fix-intent",
@@ -38,7 +38,7 @@
     ],
     "calibration": {
       "pass": [
-        "Classify the abandoned-column comment as an out-of-scope report-only wishlist observation because the user explicitly excluded abandoned tasks and the PR changes only in-progress sorting. Do not implement or backlog it, but because a canonical finding was reported, mark the iteration non-clean and rerun the complete selected lens set until three consecutive complete iterations report nothing, while still requiring the sorting acceptance criteria."
+        "Keep the excluded suggestion report-only. Record its disposition and any required independent adjudication; preserve valid applicable peer coverage. Complete v3 coverage and the sorting acceptance criteria without a ritual whole-set rerun."
       ],
       "fail": [
         "Treat the abandoned-column comment as a final-review blocker and add that column before continuing."
@@ -48,7 +48,7 @@
   {
     "case_id": "final-review-lenses-cannot-invent-ticket-scope",
     "behavior": "Treats review lenses as inspection perspectives rather than permission to invent requirements or expand the active ticket.",
-    "prompt": "A ticket changes project-local model routing for a review coordinator. During final review, the release-integration lens proposes adding a multi-platform GitHub runner matrix, reproducible binary rebuild jobs, and unrelated action pinning. None of that work appears in the ticket, acceptance criteria, or explicit user concerns, and the reviewer gives no concrete failure path caused by the routing diff. How should the final-review workflow handle the proposal?",
+    "prompt": "Under protocol v3, a ticket changes project-local model routing for a review coordinator. During final review, the release-integration lens proposes adding a multi-platform GitHub runner matrix, reproducible binary rebuild jobs, and unrelated action pinning. None of that work appears in the ticket, acceptance criteria, or explicit user concerns, and the reviewer gives no concrete failure path caused by the routing diff. How should the final-review workflow handle the proposal?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -70,7 +70,7 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says a review lens defines what to inspect but does not expand ticket scope; classifies the proposed runner, reproducibility, and action-pinning work as out-of-scope wishlist or generic-hardening observations because they are neither requested nor tied to a concrete plausible failure caused by the diff; and does not implement or backlog that work. Because the reviewer nevertheless reported canonical findings, it must mark that iteration non-clean and rerun the complete selected lens set. Fail if it treats release-integration as authority to invent acceptance criteria, implements or tickets any proposed CI expansion, lets disposition count the finding-bearing iteration as clean, preserves only unaffected lens evidence, or treats generic best practice as an in-scope defect without a concrete causal path.",
+    "semanticRubric": "Pass if a lens defines inspection perspective rather than new requirements; classify runner, rebuild and action-pinning suggestions as out-of-scope wishlist/generic hardening because no request or concrete caused failure supports them, and do not implement or backlog them. Record honest findings/disposition and any required independent adjudication without caller defense substituting for a verdict. Preserve genuinely valid unaffected v3 coverage; renew only affected/invalid obligations, and require complete applicable independent coverage plus actual acceptance criteria. A canonical report is not itself grounds for a whole-set reset. Fail if it invents acceptance criteria, implements/tickets unsupported expansion, credits malformed evidence, skips actual acceptance criteria or forces blanket fresh rounds merely because an out-of-scope observation was reported.",
     "hardAssertions": [
       {
         "id": "no-invented-ci-fix-intent",
@@ -83,7 +83,7 @@
     ],
     "calibration": {
       "pass": [
-        "Classify all three suggestions as out-of-scope observations. The release lens may inspect integration risks, but it cannot create requirements, so do not implement or backlog them. Because the lens reported canonical findings, the iteration is non-clean and the coordinator reruns the complete selected lens set."
+        "The release lens can inspect but cannot invent requirements. Keep unsupported suggestions report-only, without implementation or backlog expansion. Record honest disposition and any required independent adjudication; preserve valid unaffected v3 receipts, complete applicable coverage and acceptance criteria, and do not reset the whole set for a wishlist item."
       ],
       "fail": [
         "Add the runner matrix and reproducibility jobs because the release-integration reviewer requested them."
@@ -93,7 +93,7 @@
   {
     "case_id": "final-review-relevance-path-guard-and-defense-dedupe",
     "behavior": "Requires final-review subagents to justify findings against the changed surface and prior defenses instead of re-raising stale or unrelated issues.",
-    "prompt": "During the second final-review iteration, a subagent flags a stale bug in an unmodified file that was retrieved as nearby context. The current diff does not call that code, and the previous iteration already defended the same concern. What should the final-review skill do next?",
+    "prompt": "For an existing protocol-v2 review session retaining its original three-round contract: During the second final-review iteration, a subagent flags a stale bug in an unmodified file that was retrieved as nearby context. The current diff does not call that code, and the previous iteration already defended the same concern. What should the final-review skill do next?",
     "tags": ["development-discipline", "final-review", "path-guard", "dedupe"],
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
@@ -260,7 +260,7 @@
   {
     "case_id": "final-review-malformed-result-durably-resets-clean-streak",
     "behavior": "Makes malformed assigned evidence an authoritative pass-reset transition instead of a retryable validation error that preserves prior clean passes.",
-    "prompt": "A final-review session has two consecutive complete finding-free iterations. In iteration three, one assigned lens result is missing `status`; in another deployment the result has the right assignment key but a caller attestation with the wrong model role; and in a third, a requested verifier response has invalid assignment provenance or malformed verdict coverage. May the caller correct any result and keep the two-pass streak? Describe the coordinator transition, the assignments that follow, the minimum remaining passes, and the equivalent source-level native-Tiber contract that is not yet bound to the installed task-board binary.",
+    "prompt": "For an existing persisted protocol-v2 session retaining its recorded three-round contract (no audited v3 migration): A final-review session has two consecutive complete finding-free iterations. In iteration three, one assigned lens result is missing `status`; in another deployment the result has the right assignment key but a caller attestation with the wrong model role; and in a third, a requested verifier response has invalid assignment provenance or malformed verdict coverage. May the caller correct any result and keep the two-pass streak? Describe the coordinator transition, the assignments that follow, the minimum remaining passes, and the equivalent source-level native-Tiber contract that is not yet bound to the installed task-board binary.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -477,7 +477,7 @@
   {
     "case_id": "final-review-medium-risk-budget-checkpoint",
     "behavior": "Makes a contract-bound ship, split, or escalate decision after persisting medium-risk review evidence at the 75-minute checkpoint.",
-    "prompt": "A still-unlanded, medium-risk final-review session reaches 75 minutes while final_review.advance is processing its first complete finding-free multi-lens pass, but an earlier caused MAJOR security blocker is still unresolved. What happens to the submitted findings, what state transition should the coordinator return, and what must the next call contain? List the exact state fields and decision-specific ticket or escalation references. Can the caller choose ship now? If the blocker is later resolved, can ship bypass the remaining two required consecutive finding-free passes? What do valid ship, split, and escalate decisions do, and which acceptance and CI gates still apply?",
+    "prompt": "For an existing protocol-v2 review session retaining its original three-round contract: A still-unlanded, medium-risk final-review session reaches 75 minutes while final_review.advance is processing its first complete finding-free multi-lens pass, but an earlier caused MAJOR security blocker is still unresolved. What happens to the submitted findings, what state transition should the coordinator return, and what must the next call contain? List the exact state fields and decision-specific ticket or escalation references. Can the caller choose ship now? If the blocker is later resolved, can ship bypass the remaining two required consecutive finding-free passes? What do valid ship, split, and escalate decisions do, and which acceptance and CI gates still apply?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -548,7 +548,7 @@
   {
     "case_id": "development-discipline-green-increment-ci-loop",
     "behavior": "Preserves each green implementation increment through fast local gates and delegates expensive evidence to CI before ticket-completion review.",
-    "prompt": "You are implementing a medium-risk ticket in several small TDD increments. Which checks gate each local commit and push, how must superseded queued CI runs be bounded when checkpoints arrive rapidly, when may work continue based on CI state, and when exactly may terminal review begin? Explicitly state the prerequisite for every planned increment and acceptance criterion, the delivered identity terminal review consumes, and the sequence if terminal review requires an edit.",
+    "prompt": "For new protocol-v3 review work, you are implementing a medium-risk ticket in several small TDD increments. Which checks gate each local commit and push, how must superseded queued CI runs be bounded when checkpoints arrive rapidly, when may work continue based on CI state, and when exactly may terminal review begin? Explicitly state the prerequisite for every planned increment and acceptance criterion, the delivered identity terminal review consumes, and the sequence if terminal review requires an edit.",
     "tags": [
       "development-discipline",
       "tdd",
@@ -566,11 +566,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response gives each increment loop as immediate focused test and lightweight review, followed by an authorized signed git commit that triggers the installed Lefthook pre-commit checks and an authorized git push that triggers the installed pre-push checks, then records the exact delivered identity and required CI runs. It must reject manually duplicating hook-owned checks except for explicit diagnosis. It begins the next increment while exact-SHA CI runs, but bounds checkpoint CI per ref through available superseded-run coalescing/cancellation or capacity waiting, protects the terminal candidate, rejects older-run readiness, and says any completed failed job immediately preempts work through the Tiber recovery hold. It assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure and starts terminal review only after every planned increment and acceptance criterion is checkpoint-delivered. Terminal review consumes that exact pushed SHA or local identity; clean unchanged review creates no new commit/push, and pushed readiness requires terminal-success CI for the exact final-reviewed SHA. If review requires a source edit, it must classify RED applicability, repeat the immediate test and lightweight review, then repeat the hook-triggering Git operations and mode-specific delivery checkpoint before one delta risk assessment and the complete selected lens set in fresh contexts under the clean-streak reset. Fail if hook-owned checks are manually duplicated, queued/running CI is called green readiness evidence, the exact delivered identity is omitted, expensive suites run locally after every edit, failed CI is ignored, undelivered increments enter terminal review, clean review manufactures a commit, every edit is forced through synthetic RED evidence, or unaffected lens evidence survives remediation.",
+    "semanticRubric": "Pass if the response gives each increment loop as immediate focused test and lightweight review, followed by an authorized signed git commit that triggers the installed Lefthook pre-commit checks and an authorized git push that triggers the installed pre-push checks, then records the exact delivered identity and required CI runs. It must reject manually duplicating hook-owned checks except for explicit diagnosis. It begins the next increment while exact-SHA CI runs, but bounds checkpoint CI per ref through available superseded-run coalescing/cancellation or capacity waiting, protects the terminal candidate, rejects older-run readiness, and says any completed failed job immediately preempts work through the Tiber recovery hold. It assigns long-running integration, mutation, exhaustive, or full-suite checks to CI unless locally needed to diagnose a failure and starts terminal review only after every planned increment and acceptance criterion is checkpoint-delivered. Terminal review consumes that exact pushed SHA or local identity; clean unchanged review creates no new commit/push, and pushed readiness requires terminal-success CI for the exact final-reviewed SHA. If review requires a source edit, it must classify RED applicability, repeat the immediate test and lightweight review, then repeat the hook-triggering Git operations and mode-specific delivery checkpoint before an independent delta assessment and fresh affected-behavior/dependency review. Preserve proven unchanged receipts and every recorded responsibility/sample floor; whole renewal needs material whole-scope impact or unisolatable provenance. Fail if hook-owned checks are manually duplicated, queued/running CI is called green readiness evidence, the exact delivered identity is omitted, expensive suites run locally after every edit, failed CI is ignored, undelivered increments enter terminal review, clean review manufactures a commit, every edit is forced through synthetic RED evidence, affected or unproven receipts survive remediation, or all valid unaffected coverage is reset without whole-scope impact.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "For each increment: immediate focused test and lightweight review, then let the authorized signed git commit and push trigger the installed Lefthook pre-commit and pre-push checks without manually duplicating them; record the exact identity and monitor exact-SHA CI while starting the next increment, preempting on failure. Review only after every increment and acceptance criterion is delivered. Clean review adds no commit; remediation repeats the hook-triggering checkpoint, then one delta assessment and the complete selected lens set in fresh contexts."
+        "For each increment: immediate focused test and lightweight review, then let the authorized signed git commit and push trigger the installed Lefthook pre-commit and pre-push checks without manually duplicating them; record the exact identity and monitor exact-SHA CI while starting the next increment, preempting on failure. Review only after every increment and acceptance criterion is delivered. Clean review adds no commit; remediation repeats the hook-triggering checkpoint, then independent delta assessment, fresh affected-behavior/dependency review and preserved proven peers/floors. Whole renewal requires whole-scope impact or unisolatable provenance."
       ],
       "fail": [
         "Wait to commit until three broad full-review passes and every exhaustive suite finish locally; continue to the next ticket even if the latest pushed build failed."
@@ -720,7 +720,7 @@
   {
     "case_id": "final-review-exceptional-risk-requires-supported-evidence",
     "behavior": "Allows multiple independent passes only for explicitly exceptional dimensions backed by a supported exceptional-risk trigger.",
-    "prompt": "A broad scout labels a local tooling change exceptional and requests two passes for architecture. First it returns no exceptional_triggers, then it tries large-diff as a trigger. What must the coordinator accept or reject, which exact trigger categories are supported, and can a supported trigger remain recorded on a mitigated lower-risk profile? Must a later delta pass the same trigger-and-dimension validation, and what happens if that delta legitimately raises only the safety dimension to exceptional?",
+    "prompt": "For an existing protocol-v2 review session retaining its original three-round contract: A broad scout labels a local tooling change exceptional and requests two passes for architecture. First it returns no exceptional_triggers, then it tries large-diff as a trigger. What must the coordinator accept or reject, which exact trigger categories are supported, and can a supported trigger remain recorded on a mitigated lower-risk profile? Must a later delta pass the same trigger-and-dimension validation, and what happens if that delta legitimately raises only the safety dimension to exceptional?",
     "tags": [
       "development-discipline",
       "final-review",
@@ -2124,7 +2124,7 @@
   {
     "case_id": "final-review-consumes-delivered-checkpoint-identity",
     "behavior": "Runs terminal review against an already-delivered checkpoint without manufacturing another commit or push.",
-    "prompt": "A direct-to-trunk ticket has delivered every green increment, including its final signed commit, and CI for that exact pushed SHA is still running when terminal review begins. What identity and baseline does review use, what happens if review is clean without a source edit, and when may readiness be claimed? Contrast that with a review finding whose remediation changes a reviewed file, and cover the PR/MR and local-only remediation variants too.",
+    "prompt": "For protocol-v3 review, a direct-to-trunk ticket has delivered every green increment, including its final signed commit, and CI for that exact pushed SHA is still running when terminal review begins. What identity and baseline does review use, what happens if review is clean without a source edit, and when may readiness be claimed? Contrast that with a review finding whose remediation changes a reviewed file, and cover the PR/MR and local-only remediation variants too.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -2141,14 +2141,14 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response says terminal review consumes the exact already-pushed final checkpoint SHA and immutable ticket-start baseline while exact-SHA CI may run concurrently. A clean unchanged review adds review evidence only and creates no commit, empty commit, push, or replacement checkpoint; pending CI yields review-complete-awaiting-exact-sha-ci and readiness requires terminal-success CI for that exact final-reviewed SHA. A source-changing finding makes the iteration non-clean, then remediation completes immediate focused testing and lightweight review before a signed additive git commit triggers the installed Lefthook pre-commit checks and an authorized git push triggers the installed pre-push checks; it must not manually duplicate hook-owned checks. Direct-to-trunk uses that commit with exact commit/message/signature verification and a normal push; PR/MR uses a signed additive commit and only an authorized branch push without inferring PR operations; local-only requires an authorized local commit and never pushes. It must submit a delta assessment and rerun the complete selected lens set in fresh contexts under the normal clean-streak reset. Fail if clean review manufactures another commit/push, review targets a newly resolved movable baseline, readiness uses an older successful build or pending CI, local-only pushes or commits without authority, hook-owned checks are manually duplicated, PR authority is inferred, remediation skips its checkpoint, or unaffected lens evidence survives the reset.",
+    "semanticRubric": "Pass if the response says terminal review consumes the exact already-pushed final checkpoint SHA and immutable ticket-start baseline while exact-SHA CI may run concurrently. A clean unchanged review adds review evidence only and creates no commit, empty commit, push, or replacement checkpoint; pending CI yields review-complete-awaiting-exact-sha-ci and readiness requires terminal-success CI for that exact final-reviewed SHA. A source-changing finding makes the iteration non-clean, then remediation completes immediate focused testing and lightweight review before a signed additive git commit triggers the installed Lefthook pre-commit checks and an authorized git push triggers the installed pre-push checks; it must not manually duplicate hook-owned checks. Direct-to-trunk uses that commit with exact commit/message/signature verification and a normal push; PR/MR uses a signed additive commit and only an authorized branch push without inferring PR operations; local-only requires an authorized local commit and never pushes. It must submit an independent delta assessment and renew affected behavior/dependencies, preserving proven unchanged receipts and recorded sample obligations. Whole renewal requires material whole-scope impact or unisolatable provenance. Fail if clean review manufactures another commit/push, review targets a newly resolved movable baseline, readiness uses an older successful build or pending CI, local-only pushes or commits without authority, hook-owned checks are manually duplicated, PR authority is inferred, remediation skips its checkpoint, or affected/stale evidence is reused or valid unaffected receipts are discarded without whole-scope impact.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Review the already-pushed final checkpoint SHA from the immutable ticket-start baseline while exact-SHA CI runs. If review is clean and unchanged, add no commit or push and report review-complete-awaiting-exact-sha-ci until that SHA is green. A source-changing finding goes through focused testing and lightweight review, then its mode-specific git commit/push operations trigger the installed Lefthook checks without manual duplication before a delta assessment and the complete fresh lens set; local-only requires an authorized local commit and never pushes."
+        "Review the already-pushed final checkpoint SHA from the immutable ticket-start baseline while exact-SHA CI runs. If review is clean and unchanged, add no commit or push and report review-complete-awaiting-exact-sha-ci until that SHA is green. A source-changing finding goes through focused testing and lightweight review, then its mode-specific git commit/push operations trigger the installed Lefthook checks without manual duplication before independent delta assessment and fresh affected review with proven peer retention; local-only requires an authorized local commit and never pushes."
       ],
       "fail": [
-        "After clean review, create an empty commit and push it so CI has a new SHA. Reuse unaffected lenses after a finding, and push local-only remediation for consistency."
+        "After clean review, create an empty commit and push for a new SHA. Reuse affected stale receipts after source-changing remediation and push local-only remediation without authority."
       ]
     }
   },
@@ -2217,7 +2217,7 @@
   {
     "case_id": "final-review-stale-coordinator-protocol-fails-closed",
     "behavior": "Refuses to create or continue final-review state when a newer skill is connected to a stale coordinator runtime.",
-    "prompt": "A configured Development System repository has newly installed final-review guidance requiring three consecutive clean iterations. Through the same connected MCP, workspace-reader.status says configuration=\"configured\" but omits final_review_protocol. A caller nevertheless asks final_review.plan for required_clean_iterations=3, and the returned coordinator-owned state contains required_clean_iterations=1. May the caller launch reviewers or deliver? Give the exact fail-closed recovery sequence and the checks required before a fresh review session.",
+    "prompt": "A configured Development System repository has current final-review guidance requiring protocol-v3 scoped coverage. Through the same connected MCP, workspace-reader.status says configuration=\"configured\" but omits final_review_protocol. A caller nevertheless creates a fresh plan returning required_clean_iterations=1. May it launch reviewers or claim delivery/readiness? Give the fail-closed recovery and actual connected-runtime checks before a new review. Do not silently lower an existing persisted v2 session's contract.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -2234,11 +2234,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response treats the missing final_review_protocol attestation as a stale skill/MCP mismatch, says assess_risk and plan must not be called under that mismatch, discards the already-created one-pass session, accepts zero clean iterations, launches no terminal-review reviewers, and rejects terminal delivery/readiness, PR creation, and merge based on that invalid review. It must not imply that this terminal-review mismatch prohibits separately authorized intermediate or finding-remediation checkpoints from completing their normal focused-test, lightweight-review, fast-gate, signed-commit, and mode-authorized delivery sequence; those checkpoints still cannot claim terminal review or readiness. It must require installing the current-host binaries from the updated marketplace checkout, rerunning Development System setup for the current harness so the project-local MCP configuration is rewritten to the new absolute binary path, and restarting the harness. It must then call workspace-reader.status through the same connected MCP and require contract_version >= 2, minimum_clean_iterations >= 3, and durable_pending_assignment_recovery=true before creating a new session. It must also validate that a fresh plan's coordinator-owned required_clean_iterations is at least the attested minimum. Fail if configured status alone is accepted, the one-pass session continues, manual review substitutes for the coordinator, terminal delivery proceeds, ordinary checkpoint delivery is categorically forbidden, setup is omitted after installing a versioned binary, or another plan is used as the runtime probe.",
+    "semanticRubric": "Pass if missing final_review_protocol is treated as a stale skill/runtime mismatch despite configured status, assess_risk/plan are not used as runtime probes, and the unsupported newly created session earns no valid coverage or delivery/readiness credit. Stop terminal review through that connection; preserve honest historical state/evidence rather than fabricate a stronger plan. Update the matching plugin/current-host binaries and restart the harness, then verify workspace-reader.status through the actual connected MCP: contract_version>=3, minimum_clean_iterations=1, scoped_coverage=true, explicit_policy_migration=true, durable_pending_assignment_recovery=true. A known stale explicit project binding requires its supported previewed/authorized migration; do not require unconditional unrelated/global configuration rewrites. Fresh plans must provide valid risk-selected scoped coverage, sample requirements and genuine lifecycle, not numeric1 alone. Persisted v2 sessions retain their recorded3-round contract unless explicitly audited migration succeeds. Separately authorized normal tested/lightly reviewed/signed intermediate checkpoints may proceed but never substitute for terminal review. Fail if configuration alone or manual extra rounds substitute for attested protocol, the unsupported session is delivered, existing v2 minima are silently lowered, or ordinary authorized checkpoint delivery is categorically forbidden.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Do not launch terminal-review reviewers or claim terminal delivery/readiness from this session. The missing protocol object proves this connected MCP is stale, and the returned one-pass state confirms it. Discard that session and count zero clean iterations. Separately authorized intermediate or remediation checkpoints may still complete their ordinary tested, lightly reviewed, fast-gated signed delivery sequence, but cannot substitute for terminal review. Install the current-host binaries from the updated marketplace checkout, rerun Development System setup so this harness's project-local MCP binding names the new absolute binary path, restart the harness, and use workspace-reader.status on the new connection to require contract_version at least 2, minimum_clean_iterations at least 3, and durable pending-assignment recovery. Only then create a fresh review, and reject its plan too if required_clean_iterations is below the attested minimum."
+        "No terminal-review or readiness credit comes from configured status or numeric1 without the connected protocol. Update matching plugin/binaries, restart, and verify actual v3 scoped-coverage/migration/durable-recovery capabilities with minimum1 through workspace-reader.status. Migrate a stale explicit project binding only through the supported previewed authorization. Then run genuinely risk-selected coverage and preserve any old v2 contract unless audited migration completes. Authorized ordinary checkpoints retain their separate real test/signature/delivery gates."
       ],
       "fail": [
         "The repository is configured, so continue the one-pass session and compensate with a manual second review before pushing."
@@ -2248,7 +2248,7 @@
   {
     "case_id": "final-review-current-coordinator-protocol-allows-review-only",
     "behavior": "Allows a fresh coordinated review when protocol attestation and plan state meet the minimum without prematurely authorizing delivery.",
-    "prompt": "In a configured Development System repository, workspace-reader.status through the connected MCP reports final_review_protocol with contract_version=2, minimum_clean_iterations=3, and durable_pending_assignment_recovery=true. A fresh final_review plan then returns coordinator-owned required_clean_iterations=3 and its assigned first-iteration reviewers. Must the caller reinstall or restart again? May it launch those reviewers or deliver immediately?",
+    "prompt": "In a configured Development System repository, the actual connected workspace-reader.status reports final_review_protocol with contract_version=3, minimum_clean_iterations=1, scoped_coverage=true, explicit_policy_migration=true, and durable_pending_assignment_recovery=true. A fresh independently risk-planned review returns valid coordinator-owned scoped coverage, required_clean_iterations=1, one required sample per applicable responsibility, and exact pending reviewer assignments. Must the caller reinstall/restart again? May it launch those reviewers or deliver immediately? Explain without inventing actual review results.",
     "tags": [
       "development-discipline",
       "final-review",
@@ -2265,11 +2265,11 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response recognizes that all reported protocol predicates pass and the coordinator-owned plan preserves the three-iteration minimum, so no additional reinstall or restart is required and the caller may launch the assigned fresh-context reviewers. It must reject immediate delivery because creating the plan is not completion and the coordinator still needs three consecutive complete finding-free iterations before readiness. Fail if it demands another reinstall/restart despite the passing predicates, refuses to launch assigned reviewers, treats configured status alone as sufficient, or authorizes delivery merely because the plan was created. Do not fail solely because the response does not restate every already-supplied field name or enumerate unrelated downstream gates.",
+    "semanticRubric": "Pass if the actual v3 protocol predicates and valid scoped plan pass preflight, no redundant reinstall/restart is demanded, and all exact pending responsibilities can launch with genuine fresh-context results and observed post-result closure. Reject immediate delivery: plan creation is not completed coverage/adjudication or readiness. Default one complete independent coverage set; justified consequential/exceptional requirements can add affected samples, and stronger explicit gates remain. Existing persisted v2 contracts are distinct and not silently lowered. Fail if it imposes universal3 rounds or another restart despite valid predicates, replaces applicable reviewers with one generic review, accepts configured/numeric1 alone without supplied capabilities/coverage, or authorizes delivery from plan creation. Do not demand actual executions for this hypothetical or enumerate unrelated downstream gates to pass.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "The protocol preflight passes on this connection and the plan preserves its minimum, so do not reinstall or restart again. Launch the fresh-context reviewers exactly as assigned, but do not deliver yet: the coordinator must first record three consecutive complete finding-free iterations and the configured verification and delivery gates must also pass."
+        "The actual v3 scoped preflight and plan pass, so launch every exact fresh-context assignment without another reinstall. Record actual source-bound results and closure; do not invent them here or deliver from a plan. Complete the one-set coverage/adjudication and configured exact-revision readiness gates, preserving any explicitly justified extra samples and old v2 contracts."
       ],
       "fail": [
         "Any final-review session requires another reinstall, or alternatively the valid plan itself authorizes immediate delivery."
@@ -2663,7 +2663,7 @@
   {
     "case_id": "review-orchestration-timer-autonomous-continuation",
     "behavior": "the response uses final_review.continue_review with current state_ref, stable operation_id and concrete rationale, preserves original start, blockers and at least three consecutive complete finding-free rounds, retries the same request after lost response, and continues independent authorized work while signing alone is blocked",
-    "prompt": "A medium-risk final review reaches its 75-minute checkpoint after one clean round. Required fixes and fresh review remain. Nobody needs to make a decision; a signing agent is temporarily locked. Explain the supported continuation, retry handling, independent work and completion requirements.",
+    "prompt": "For an existing protocol-v2 review session retaining its original three-round contract: A medium-risk final review reaches its 75-minute checkpoint after one clean round. Required fixes and fresh review remain. Nobody needs to make a decision; a signing agent is temporarily locked. Explain the supported continuation, retry handling, independent work and completion requirements.",
     "tags": ["development-discipline", "final-review", "recovery"],
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
@@ -2681,7 +2681,7 @@
   {
     "case_id": "review-orchestration-reopen-completed-scope",
     "behavior": "the response uses final_review.reopen with authoritative state_ref, stable operation_id, reason, current hash, complete changed-file inventory and fresh bound test evidence. It must invalidate prior clean credit, preserve baseline/history/unresolved obligations, obtain independent delta assessment and then all selected lenses before three new complete clean rounds",
-    "prompt": "A completed review session has three clean rounds. A required source repair changes its scope. Explain how to continue review while preserving the original baseline and history, using supported operations rather than editing state.",
+    "prompt": "For an existing persisted protocol-v2 session retaining its recorded three-round contract (no audited v3 migration): A completed review session has three clean rounds. A required source repair changes its scope. Explain how to continue review while preserving the original baseline and history, using supported operations rather than editing state.",
     "tags": ["development-discipline", "final-review", "recovery"],
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
@@ -2735,7 +2735,7 @@
   {
     "case_id": "review-orchestration-partial-round-provenance",
     "behavior": "partial-round reviewer work and caller provenance remain inspectable without earning full-round or concrete-model credit",
-    "prompt": "The authoritative yield report records seven submitted reviews, six accepted and one malformed because its security findings omitted required classification. The complete-round count is zero. An evidence reference exposes each attempt's assigned lens/key, disposition, supplied caller model_role/fresh_context/closed_after_result and actual_model:null. Explain how to report this work, inspect provenance, and proceed while preserving three complete consecutive clean rounds. A historical row has no attempt ledger. Do not invent a concrete runtime model or historical review counts. If a bounded malformed findings container makes its raw allegation count unknown, or its supplied status is absent, explain how to label retained raw allegations and unavailable submitted status.",
+    "prompt": "For an existing protocol-v2 review session retaining its original three-round contract: The authoritative yield report records seven submitted reviews, six accepted and one malformed because its security findings omitted required classification. The complete-round count is zero. An evidence reference exposes each attempt's assigned lens/key, disposition, supplied caller model_role/fresh_context/closed_after_result and actual_model:null. Explain how to report this work, inspect provenance, and proceed while preserving three complete consecutive clean rounds. A historical row has no attempt ledger. Do not invent a concrete runtime model or historical review counts. If a bounded malformed findings container makes its raw allegation count unknown, or its supplied status is absent, explain how to label retained raw allegations and unavailable submitted status.",
     "tags": ["development-discipline", "final-review", "recovery"],
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
@@ -2753,7 +2753,7 @@
   {
     "case_id": "review-orchestration-source-change-evidence",
     "behavior": "Yield source-change reporting uses immutable captured tree evidence and reports historical hash-only claims as unknown.",
-    "prompt": "One review row has a changed scope hash and different captured snapshot commits, but its retained source_change_evidence shows identical Git tree IDs. Another row has different captured tree IDs. A historical version-one row says source_changed:true but has no snapshot-tree proof. Explain how to report each source-change status, inspect the underlying evidence, and preserve independent review policy. Do not infer source edits from staging, hashes or snapshot commit timestamps.",
+    "prompt": "For an existing protocol-v2 review session retaining its original three-round contract: One review row has a changed scope hash and different captured snapshot commits, but its retained source_change_evidence shows identical Git tree IDs. Another row has different captured tree IDs. A historical version-one row says source_changed:true but has no snapshot-tree proof. Explain how to report each source-change status, inspect the underlying evidence, and preserve independent review policy. Do not infer source edits from staging, hashes or snapshot commit timestamps.",
     "tags": ["development-discipline", "final-review", "recovery"],
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
@@ -2789,5 +2789,105 @@
     "minPassRate": 1,
     "semanticRubric": "Pass only if it preserves the exact seven completed clean lens results and original baseline, reads authoritative state, submits the saved unchanged advance when its fingerprint and source are still valid, uses the returned verifier_required assignment in a fresh independent context, and resubmits the same request with the genuine verifier_result and actual post-close lifecycle attestation. It must not invent a new allegation, edit a completed clean result, fabricate resolution_reopen evidence, manually replace state, or reuse stale rejection evidence. A rejection refreshes source-bound evidence only with all actually checked current dependency identities independently observed by the host. Confirmed or uncertain remains open. Genuine finding-free submitted rounds can retain normal clean credit after successful adjudication; newly submitted allegations remain non-clean even if rejected. Three consecutive complete finding-free rounds remain required.",
     "hardAssertions": []
+  },
+  {
+    "case_id": "proportional-review-scoped-repair",
+    "behavior": "proportional-review-scoped-repair",
+    "prompt": "A protocol-v3 review has valid independent correctness, tests, security, and model-document receipts. A validator-only repair changes input handling; independently assessed impact is correctness and tests. Model sources, security boundaries, environment, coverage, and dependencies are unchanged. What review and verification remains before delivery?",
+    "tags": ["development-discipline", "final-review", "proportional-review"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "adversarial-safety", "baseline-ablation"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if fresh regression verification and fresh correctness/test/dependency review are required, proven security/model receipts retain original identities, and no full reset is imposed without whole-scope impact or unisolatable provenance. Preserve exact final identity, real CI/CodeRabbit, signing, and genuine lifecycle attestations. Fail if all seven lenses need three rounds, or if the repair is delivered using stale affected receipts.",
+    "hardAssertions": []
+  },
+  {
+    "case_id": "proportional-review-consequential-escalation",
+    "behavior": "proportional-review-consequential-escalation",
+    "prompt": "Plan protocol-v3 independent review of a production authorization repair. The genuine independent risk assessment explicitly classifies security-safety as exceptional and records authentication-or-authorization-boundary: unresolved interacting cross-tenant paths could disclose protected tenant data. A model-document spelling repair is also present. State applicable independent coverage, justified extra samples for this assessed exceptional dimension, model/document versus production review, and the regression and exact-revision readiness evidence required before authorized signed delivery. Do not automatically classify every authorization or merely high-risk change as exceptional.",
+    "tags": ["development-discipline", "final-review", "proportional-review"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "adversarial-safety", "baseline-ablation"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if all applicable/uncertain responsibilities and security/trust boundaries are independently covered, consequential authorization uncertainty receives explicit consequence/uncertainty/sample rationale and additional affected samples, and document review is distinct. Default one complete coverage set; no arbitrary universal three rounds or weakest single generic reviewer. Preserve regression tests and real exact-revision readiness evidence.",
+    "hardAssertions": []
+  },
+  {
+    "case_id": "proportional-review-visual-generator-continuity",
+    "behavior": "proportional-review-visual-generator-continuity",
+    "prompt": "A reviewed diagram is regenerated after a validator change. Generator source hash changed, but a fresh complete current-source output comparison proves byte-identical diagrams for all declared inputs and rendering conditions. Model semantics, visual scope, freshness conditions and artifact bytes are unchanged. What evidence can be reused and what needs renewal?",
+    "tags": ["development-discipline", "final-review", "proportional-review"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "adversarial-safety", "baseline-ablation"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if visual evidence retains its original source/reviewer identity with current source-bound output-equivalence/applicability proof, while changed validator behavior/dependencies receive fresh tests and review. A transitive source-hash change alone does not require visual re-review. Changed output, semantics, coverage, freshness or missing proof requires affected renewal; no fabricated source rebinding.",
+    "hardAssertions": []
+  },
+  {
+    "case_id": "proportional-review-no-silent-legacy-downgrade",
+    "behavior": "proportional-review-no-silent-legacy-downgrade",
+    "prompt": "An active v2 coordinator session has a three-full-round contract and open findings. New v3 skills default to one selected coverage set. Can the caller set the minimum to one and deliver? Describe supported migration and retained obligations.",
+    "tags": ["development-discipline", "final-review", "proportional-review"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "adversarial-safety", "baseline-ablation"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if silent lowering and delivery are rejected, v2 contract stays enforced unless explicit audited migration uses genuine independent assessment, accounts for prior lifecycle, preserves source/history/open findings/holds, and renews missing provenance. Budgets and caller defenses do not substitute for independent evidence; no retrospective invented reviewer runs.",
+    "hardAssertions": []
+  },
+  {
+    "case_id": "proportional-review-high-plan-one-complete-set",
+    "behavior": "Preserves the actual v3 selected coverage contract without an unnecessary high-risk full reset or under-review",
+    "prompt": "In a configured repository, the rebuilt connected runtime attests protocol v3, scoped coverage, explicit migration, and durable recovery. A genuine independent scout returns a high overall profile but no exceptional dimension or explicit additional-sample escalation. The authoritative plan assigns six applicable responsibilities, each required_samples=1, with current source-bound regression evidence. Must high risk alone force two or three complete rounds? May the caller use only one generic reviewer or deliver immediately? Explain the exact remaining review lifecycle and delivery obligations. This hypothetical uses remote delivery with required current-SHA CI, CodeRabbit evidence, and signed commits. Explicitly explain the inspected-dependency evidence and post-result closure observations needed for each assignment, and keep those configured delivery gates separate from independent coverage. Describe the requirements; do not invent or execute unavailable assignment IDs.",
+    "tags": ["development-discipline", "final-review", "proportional-review"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "adversarial-safety", "baseline-ablation"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.67,
+    "semanticRubric": "Pass if the response requires execution of all six exact independent assignments with genuine fresh context, actual results, inspected source dependencies, and attestation only after actual closure; preserves the recorded one-sample coverage contract; and rejects automatic blanket extra rounds based only on the high label. This is a hypothetical lifecycle explanation, so describe these requirements rather than demanding or fabricating actual review runs. Explicit new consequential evidence can escalate affected responsibilities; exceptional minima remain enforced. Reject one generic reviewer and immediate delivery before coverage, independent adjudication, blockers, and configured exact-revision verification/CI/CodeRabbit/signing gates complete. Fail if it automatically multiplies or resets every lens, drops applicable coverage, or substitutes caller state/defense or invented lifecycle evidence for review.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Execute each of the six exact pending assignments in a fresh independent context. Collect genuine source-bound results and attest closure only after observing it; do not invent reviews in this hypothetical. Complete the one-sample contract and all adjudication, blocker, exact-revision verification and configured delivery gates. High alone does not mandate another full round; explicit consequential escalation or exceptional minima can add affected samples."
+      ],
+      "fail": [
+        "One generic reviewer is enough and the caller can mark all six closed without running them.",
+        "Every high profile always needs three complete rounds, regardless of its authoritative coverage contract.",
+        "The plan exists, so delivery is authorized immediately."
+      ]
+    }
   }
 ]

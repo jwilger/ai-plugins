@@ -56,19 +56,9 @@ restrict ordinary harness tools. Editor, runner, local-repository,
 remote-repository, and diagnostics services remain withheld for standalone
 Tiber to authorize behind its own isolation boundary.
 
-The advisory final-review coordinator nevertheless rejects zero-lens plans and
-does not record completion until every selected lens and assigned verifier has
-produced at least three consecutive complete finding-free iterations. Any
-reported finding, malformed result, or material delta resets the streak, and a
-review-budget `ship` decision cannot lower or bypass the requirement.
-`workspace-reader.status` exposes a versioned final-review protocol attestation;
-the installed workflow requires the current attestation before creating risk or
-review state and rejects any plan that returns a lower clean-iteration minimum.
-Schema-invalid lens or verifier evidence and verifier provenance/coverage
-failures are normalized to bounded malformed-result records inside the
-authoritative advance transition. The coordinator closes any pending verifier,
-invalidates the whole iteration, and reissues every selected lens, so correcting
-and retrying the submission cannot preserve an earlier clean streak.
+The advisory final-review coordinator rejects zero-lens plans and completes one risk-selected independent coverage set by default under protocol v3. Every applicable or uncertain responsibility is selected; additional samples require explicit consequential risks. Genuine reviewer lifecycle, exact source dependencies, current shared verification, and independent adjudication remain mandatory. Repairs invalidate affected behavior and dependencies, preserving proven unchanged receipts. Whole-scope impact or unisolatable provenance requires full renewal. Malformed results replace affected assignments; malformed adjudication replaces the verifier while preserving valid source reviews. Budget decisions cannot bypass these gates.
+
+`workspace-reader.status` attests protocol v3, scoped coverage, explicit migration, and durable recovery. V2 sessions keep their three-round contract until an audited explicit migration; old evidence is historical unless its scope and provenance support reuse. See [the proportional policy](skills/final-review/references/proportional-review-policy.md) for escalation and invalidation rules.
 
 ## Harness
 

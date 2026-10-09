@@ -209,9 +209,9 @@ There is no runtime bypass flag. To opt out deliberately, remove the
 committed project configuration change. Completion and delivery evaluate the
 committed policy and reject an uncommitted policy change. That Git-visible change is the audit
 record; ordinary CLI, MCP, local completion, and trailer-driven CI delivery
-cannot silently bypass an enabled policy. Nonzero values below three are
-rejected as invalid configuration; an enabled policy can strengthen the
-minimum, but cannot weaken the required three-review floor.
+cannot silently bypass an enabled policy. Explicit nonzero minima one and two
+are supported; larger configured minima remain enforced. The committed policy,
+independence, source/verification fingerprints, and trailer gate remain mandatory.
 
 Existing projects remain opted out after upgrade because a missing table
 defaults to zero. Existing Tiber event histories need no migration: review

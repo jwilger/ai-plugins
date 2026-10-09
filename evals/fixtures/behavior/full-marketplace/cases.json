@@ -785,14 +785,15 @@
       "baselineLiftThreshold": 0.1
     },
     "minPassRate": 0.67,
-    "semanticRubric": "Pass if the response reviews the diff against origin/main by default while checking for and including unexcluded index/worktree changes, respects explicit user-specified scopes and read-only review requests, uses fresh-context subagents for each repository-agnostic lens and each iteration, includes a production-risk or footgun lens for latent traps and scale/burst data-access failure modes, fixes valid findings only when remediation was requested or otherwise reports them, passes defenses back to relevant lens reviewers, and proceeds only after three consecutive full iterations raise no issues. Fail if it runs one generic review, hardcodes marketplace-specific lenses for all repositories, omits production-risk footguns, ignores user-specified baselines, silently excludes dirty local changes, edits during review-only requests, or treats a defended finding as final without another clean iteration.",
+    "semanticRubric": "Pass if the response reviews the requested immutable baseline/scope including unexcluded dirty changes, respects read-only requests, uses fresh independent risk-selected applicable coverage and genuine lifecycle attestations, selects production footguns when deployment/resource behavior warrants them, and defaults to one complete coverage set. Extra samples require consequential risk rationale; repairs renew affected behavior/dependencies while retaining proven unchanged evidence. Fail if it uses one generic reviewer despite applicable dimensions, mandates universal three rounds, treats caller defense as independent rejection, expands scope, or ignores exact-source verification/security/readiness gates.",
     "hardAssertions": [],
     "calibration": {
       "pass": [
-        "Review origin/main...HEAD plus unexcluded local changes by default, spawn fresh reviewers per lens and iteration, include production footgun and scale-risk checks, respect review-only scope, fix or defend findings only when appropriate, feed defenses into the next pass, and stop only after three clean full iterations."
+        "Review the requested baseline and all unexcluded changes through fresh independent applicable lenses, including deployment footguns when warranted. Complete one risk-selected coverage set by default; justify consequential extra samples and renew affected behavior/dependencies after repair. Preserve proven peer receipts and exact-source/security/readiness gates."
       ],
       "fail": [
-        "Run one review pass over the PR and open it if nothing obvious shows up."
+        "A single generic reviewer is enough despite multiple applicable dimensions.",
+        "Every change always requires three full clean rounds across every lens."
       ]
     }
   },

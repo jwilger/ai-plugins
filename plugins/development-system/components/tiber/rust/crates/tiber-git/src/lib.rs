@@ -10071,12 +10071,6 @@ fn parse_project_config(contents: &str) -> Result<ProjectConfig, Error> {
     let config: ProjectConfig = toml::from_str(contents).map_err(|error| {
         Error::Parse(format!("config_invalid file={CONFIG_FILE} source={error}"))
     })?;
-    let minimum = config.final_review.minimum_clean_reviews;
-    if (1..3).contains(&minimum) {
-        return Err(Error::Parse(format!(
-                "config_invalid file={CONFIG_FILE} field=final_review.minimum_clean_reviews expected=0_or_at_least_3 actual={minimum}"
-            )));
-    }
     Ok(config)
 }
 

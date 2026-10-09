@@ -6,6 +6,8 @@ pub(super) struct ReviewReopenIntent {
     pub(super) operation_id: String,
     pub(super) request_fingerprint: String,
     pub(super) reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) migration: Option<Box<review_policy_migration::Migration>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -14,6 +16,8 @@ pub(super) struct ReviewReopenedFacts {
     pub(super) operation_id: String,
     pub(super) request_fingerprint: String,
     pub(super) reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) policy_migration: Option<review_policy_migration::MigrationAudit>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,6 +35,10 @@ struct ReopenReviewInput {
     current_diff_hash: String,
     current_changed_files: Vec<String>,
     current_shared_test_evidence: SharedTestEvidenceFacts,
+    #[serde(default)]
+    risk_assessment: Option<PlanRiskAssessmentInput>,
+    #[serde(default)]
+    prior_assignment_closures: Vec<review_policy_migration::PriorAssignmentClosure>,
 }
 
 pub(super) fn review_reopen_schema() -> Value {
@@ -48,10 +56,13 @@ pub(super) fn review_reopen_schema() -> Value {
 
 pub(super) fn reset_completed_review(
     state: &SubmitReviewIterationMaterial,
-    _intent: &ReviewReopenIntent,
+    intent: &ReviewReopenIntent,
     submission: &ReviewIterationSubmission,
     now: u64,
 ) -> Result<SubmitReviewIterationMaterial, String> {
+    if let Some(migration) = &intent.migration {
+        return review_policy_migration::migrate(state, migration, submission);
+    }
     // This is authoritative command replay, never caller-carried state repair.
     state.contract.validate_current_protocol()?;
     if !typed_review_complete(state) {
@@ -85,6 +96,12 @@ pub(super) fn reset_completed_review(
     plan.active_lenses.clone_from(&plan.selected_lenses);
     plan.active_lens_passes.clone_from(&plan.lens_passes);
     reset.contract.lenses.clone_from(&plan.selected_lenses);
+    if let Some(coverage) = plan.coverage.as_mut() {
+        coverage.pending_reassessment = true;
+        reset.contract.lenses = coverage.pending();
+        plan.active_lenses = coverage.pending();
+        plan.active_lens_passes.clear();
+    }
     reset.clean_streak = 0;
     reset.verified_clean_iterations.clear();
     // Retain the iteration index so old assignment keys can never gain new credit.
@@ -94,6 +111,18 @@ pub(super) fn reset_completed_review(
 
 impl ReviewCoordinator {
     pub(super) fn reopen_review(&mut self, arguments: &Value) -> Result<Value, String> {
+        self.reopen_review_with_policy(arguments, false)
+    }
+
+    pub(super) fn migrate_policy(&mut self, arguments: &Value) -> Result<Value, String> {
+        self.reopen_review_with_policy(arguments, true)
+    }
+
+    fn reopen_review_with_policy(
+        &mut self,
+        arguments: &Value,
+        migrating: bool,
+    ) -> Result<Value, String> {
         let input: ReopenReviewInput = serde_json::from_value(arguments.clone())
             .map_err(|error| format!("review_reopen_input_invalid source={error}"))?;
         if input.operation_id.trim().is_empty() || input.operation_id.len() > 256 {
@@ -111,7 +140,16 @@ impl ReviewCoordinator {
             persistence,
         )?;
         let stream = review_stream_id(session_id)?;
-        let request_fingerprint = arguments.to_string();
+        if !migrating
+            && (input.risk_assessment.is_some() || !input.prior_assignment_closures.is_empty())
+        {
+            return Err("review_reopen_migration_fields_forbidden=true".into());
+        }
+        let request_fingerprint = if migrating {
+            format!("policy-migration:{}", arguments)
+        } else {
+            arguments.to_string()
+        };
         // Search durable facts before rejecting the old reference: the caller may
         // have lost the successful response, including its replacement reference.
         let events = read_review_stream(&path, Some(Path::new(root)), stream.clone(), persistence)?;
@@ -145,8 +183,9 @@ impl ReviewCoordinator {
                 .is_none_or(|latest| latest.revision != revision);
 
             return Ok(text_content(json!({
-                "state":state,"complete":false,"transition_status":"delta_risk_assessment_required",
-                "delta_risk_assignments":[response.delta_risk_assignment],"next_assignments":[],
+                "state":state,"complete":false,"transition_status":if migrating {"policy_migrated"} else {"delta_risk_assessment_required"},
+                "delta_risk_assignments":if migrating {json!([])} else {json!([response.delta_risk_assignment])},"next_assignments":if migrating {json!(response.next_assignments)} else {json!([])},
+                "migration_applied":migrating,
                 "completion_blockers":unresolved_findings(&state), "subagent_shutdown":response.subagent_shutdown,
                 "operation_id":input.operation_id,"operation_replayed":true,
                 "response_historical":historical, "assignments_current":!historical,
@@ -164,9 +203,42 @@ impl ReviewCoordinator {
                     .to_string(),
             );
         }
+        let migration = if migrating {
+            if input.current_diff_hash != state["scope"]["diff_hash"].as_str().unwrap_or_default()
+                || json!(input.current_changed_files) != state["scope"]["changed_files"]
+            {
+                return Err("review_migration_scope_changed=true recovery=perform_bound_source_delta_review".into());
+            }
+            if state
+                .pointer("/risk_plan/coverage")
+                .is_some_and(Value::is_object)
+            {
+                return Err("review_policy_already_v3=true".into());
+            }
+            let (assignment, expected, prior, current) = review_policy_migration::prepare(
+                &state,
+                &input.operation_id,
+                &input.current_shared_test_evidence,
+            )?;
+            let Some(assessment) = input.risk_assessment.clone() else {
+                return Ok(text_content(json!({"migration_applied":false,"state_ref":state_reference(&state)?,"assignments":[assignment],
+                    "prior_assignment_closure_required":state["lenses"],"next_tool":"final_review.migrate_policy",
+                    "guidance":"The recorded legacy policy remains authoritative. Run the returned genuine fresh independent risk scout, close or attest never-started prior assignments, then resubmit this operation with its actual assessment and prior_assignment_closures."}).to_string()));
+            };
+            Some(Box::new(review_policy_migration::Migration {
+                assessment,
+                expected_assignment: expected,
+                prior_source_tree: prior,
+                observed_source_tree: current,
+                prior_assignment_closures: input.prior_assignment_closures.clone(),
+            }))
+        } else {
+            None
+        };
         let now = (self.now_epoch_seconds)();
         let intent = SubmitReviewIterationIntent {
             reopen: Some(ReviewReopenIntent {
+                migration,
                 operation_id: input.operation_id.clone(),
                 request_fingerprint,
                 reason: input.reason,

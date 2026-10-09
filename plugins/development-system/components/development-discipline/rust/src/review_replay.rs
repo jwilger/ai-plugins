@@ -31,6 +31,7 @@ fn allowed(tool: &str) -> bool {
             | "final_review.advance"
             | "final_review.confirm_split"
             | "final_review.reopen"
+            | "final_review.migrate_policy"
             | "final_review.continue_review"
             | "final_review.resume_latest"
             | "final_review.pending_assignments"

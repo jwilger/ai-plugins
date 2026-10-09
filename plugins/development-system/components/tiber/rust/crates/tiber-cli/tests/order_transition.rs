@@ -518,25 +518,52 @@ fn transition_to_done_rejects_missing_final_reviews_when_policy_is_enabled() {
 }
 
 #[test]
-fn final_review_policy_rejects_a_nonzero_minimum_below_three() {
+fn final_review_policy_rejects_a_negative_minimum() {
     let repo = TempRepo::initialized();
     fs::write(
         repo.path().join(".tiber.toml"),
-        "[final_review]\nminimum_clean_reviews = 2\n",
+        "[final_review]\nminimum_clean_reviews = -1\n",
     )
     .expect("write tiber config");
 
     assert_success(repo.tiber(["init"]));
     let create = repo.tiber(["create", "Weakly reviewed work"]);
 
-    assert!(!create.status.success(), "weak policy should be rejected");
+    assert!(
+        !create.status.success(),
+        "invalid policy should be rejected"
+    );
     let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
     assert!(
-        stderr.contains("final_review.minimum_clean_reviews")
-            && stderr.contains("expected=0_or_at_least_3")
-            && stderr.contains("actual=2"),
+        stderr.contains("minimum_clean_reviews") && stderr.contains("config_invalid"),
         "stderr should explain the invalid policy minimum: {stderr}"
     );
+}
+
+#[test]
+fn final_review_policy_enforces_one_or_two_independent_current_reviews() {
+    for minimum in [1, 2] {
+        let repo = TempRepo::initialized();
+        enable_final_review_policy_with_minimum(&repo, minimum);
+        assert_success(repo.tiber(["init"]));
+        assert_success(repo.tiber(["create", "Reviewed work"]));
+        assert_success(repo.tiber(["transition", "reviewed-work", "in-progress"]));
+        assert!(!repo
+            .tiber(["transition", "reviewed-work", "done"])
+            .status
+            .success());
+        for iteration in 1..=minimum {
+            record_review(&repo, iteration, "clean");
+            if iteration < minimum {
+                assert!(!repo
+                    .tiber(["transition", "reviewed-work", "done"])
+                    .status
+                    .success());
+            }
+        }
+        assert_success(repo.tiber(["transition", "reviewed-work", "done"]));
+        task_stem(&repo, "done", "reviewed-work");
+    }
 }
 
 #[test]

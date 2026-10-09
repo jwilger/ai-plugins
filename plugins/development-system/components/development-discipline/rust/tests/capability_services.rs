@@ -115,8 +115,11 @@ fn assert_current_final_review_protocol(status: &Value) {
     assert_eq!(
         status.pointer("/result/structuredContent/final_review_protocol"),
         Some(&json!({
-            "contract_version": 2,
-            "minimum_clean_iterations": 3,
+            "contract_version": 3,
+            "minimum_clean_iterations": 1,
+            "scoped_coverage": true,
+            "explicit_policy_migration": true,
+            "legacy_contract_versions": [2],
             "durable_pending_assignment_recovery": true
         })),
         "unexpected final-review protocol attestation: {status}"
@@ -1609,6 +1612,7 @@ fn plugin_surface_exposes_advisory_coordination_and_denies_project_mutation_tool
     assert!(names.contains(&"setup.preview"));
     assert!(names.contains(&"final_review.plan"));
     assert!(names.contains(&"final_review.reopen"));
+    assert!(names.contains(&"final_review.migrate_policy"));
     assert!(names.contains(&"final_review.continue_review"));
     assert!(names.contains(&"final_review.yield_report"));
     assert!(names.contains(&"final_review.evidence"));
@@ -1634,6 +1638,7 @@ fn plugin_surface_exposes_advisory_coordination_and_denies_project_mutation_tool
                 | "final_review.out_of_scope_report"
                 | "final_review.resume_latest"
                 | "final_review.reopen"
+                | "final_review.migrate_policy"
                 | "final_review.continue_review"
                 | "final_review.yield_report"
                 | "final_review.evidence"

@@ -102,11 +102,7 @@ For a terminal pushed-CI failure, retain four records:
   predicted observation, and a discriminating experiment. Repair the earliest
   controllable cause supported by that evidence.
 - Final review is required before a readiness claim.
-- Final review is clean only after at least three consecutive complete
-  finding-free iterations. Every risk-selected lens and required verifier must
-  participate in each iteration; any finding or material delta resets the
-  streak, and neither a review-budget decision nor caller-carried state may
-  bypass it.
+- Version 3 final review completes one independently risk-selected coverage set by default. Include every applicable or uncertain responsibility; additional samples require explicit consequential high/exceptional escalation and a justified affected scope and count; exceptional minima remain mandatory. After repairs, verify current behavior and renew affected coverage and dependencies. Preserve demonstrably unchanged evidence; invalidate the whole set only for material whole-scope impact or unisolatable provenance. V2 sessions retain their original three-round contract unless explicitly migrated. Neither budgets nor caller defenses bypass coverage, blockers, or lifecycle checks.
 - Verification evidence is fresh only when collected after the last in-scope
   mutation against the exact revision or worktree snapshot and current
   configuration. It is scope-complete only when it includes repository-required

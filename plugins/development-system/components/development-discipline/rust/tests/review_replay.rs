@@ -54,6 +54,924 @@ fn git(root: &Path, args: &[&str]) -> String {
         .to_string()
 }
 
+fn proportional_plan(fixture: &Fixture) -> Value {
+    let mut arguments = fixture.plan_args();
+    arguments["risk_assessment"]["coverage_policy"] = json!({
+        "artifact_kind":"code", "freshness_identity":"fixture-environment-and-inputs-v1",
+        "requirements":[{"lens":"correctness-behavior", "scope_paths":["source.txt"],
+            "required_samples":1, "escalation":null}]
+    });
+    fixture.call("final_review.plan", &arguments)
+}
+
+fn proportional_results(fixture: &Fixture, planned: &Value) -> Value {
+    let results: Vec<_> = planned["assignments"].as_array().unwrap().iter().map(|assignment| {
+        json!({"lens":assignment["lens"], "subagent_key":assignment["subagent_key"],
+            "status":"clean", "findings":[], "additional_broad_test_run":false,
+            "shared_test_evidence_id":assignment["shared_test_evidence"]["id"],
+            "coverage_evidence":{"dependency_blobs":{"source.txt":format!("100644:{}",git(&fixture.root,&["hash-object","source.txt"]))}},
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true}})
+    }).collect();
+    json!(results)
+}
+
+#[test]
+fn proportional_review_accepts_host_verified_deletion_and_rejects_forged_absence() {
+    for forged in [true, false] {
+        let fixture = Fixture::new();
+        std::fs::remove_file(fixture.root.join("source.txt")).unwrap();
+        let planned = proportional_plan(&fixture);
+        let assignment = &planned["assignments"][0];
+        let result = json!({"lens":assignment["lens"],"subagent_key":assignment["subagent_key"],"status":"clean","findings":[],"additional_broad_test_run":false,
+            "shared_test_evidence_id":assignment["shared_test_evidence"]["id"],"coverage_evidence":{"dependency_blobs":{"source.txt":"absent"}},
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true}});
+        if forged {
+            std::fs::write(fixture.root.join("source.txt"), "restored source\n").unwrap();
+        }
+        let output = fixture.run("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":[result]}));
+        if forged {
+            assert_eq!(
+                payload(output)["complete"],
+                false,
+                "forged absence earned credit"
+            );
+        } else {
+            assert_eq!(payload(output)["complete"], true);
+        }
+    }
+}
+
+#[test]
+fn proportional_review_completes_one_independent_round() {
+    let fixture = Fixture::new();
+    let planned = proportional_plan(&fixture);
+    assert_eq!(planned["assignments"].as_array().unwrap().len(), 1);
+    let finished = fixture.call(
+        "final_review.advance",
+        &json!({
+        "state_ref":planned["state_ref"], "current_diff_hash":"replay-fixture",
+        "lens_results":proportional_results(&fixture,&planned)}),
+    );
+    assert_eq!(finished["complete"], true, "{finished}");
+    assert_eq!(finished["next_assignments"], json!([]));
+}
+
+#[test]
+fn proportional_review_rejects_forged_source_receipt() {
+    let fixture = Fixture::new();
+    let planned = proportional_plan(&fixture);
+    let mut results = proportional_results(&fixture, &planned);
+    results[0]["coverage_evidence"]["dependency_blobs"]["source.txt"] =
+        json!(format!("100644:{}", fixture.baseline));
+    let result = fixture.run("final_review.advance", &json!({
+        "state_ref":planned["state_ref"], "current_diff_hash":"replay-fixture", "lens_results":results}));
+    assert_eq!(
+        payload(result)["complete"],
+        false,
+        "forged evidence acquired clean credit"
+    );
+    let resumed = fixture.call(
+        "final_review.resume_latest",
+        &json!({"session_id":"replay-persistence","project_root":fixture.root}),
+    );
+    assert_ne!(resumed["complete"], true);
+}
+
+fn multi_lens_proportional_arguments(fixture: &Fixture, samples: u64) -> Value {
+    let mut arguments = fixture.plan_args();
+    arguments["risk_assessment"]["overall_risk"] =
+        json!(if samples > 1 { "high" } else { "medium" });
+    for dimension in arguments["risk_assessment"]["dimensions"]
+        .as_array_mut()
+        .unwrap()
+    {
+        if dimension["lens"] == "correctness-behavior" || dimension["lens"] == "tests-verification"
+        {
+            dimension["risk"] = json!(if samples > 1 { "high" } else { "medium" });
+            dimension["evidence"] = json!("The changed input can invalidate required data.");
+            dimension["plausible_failure"] = json!("An input loses an accepted record.");
+            dimension["material_impact"] = json!("Required data integrity fails.");
+        }
+    }
+    arguments["risk_assessment"]["coverage_policy"] = json!({"artifact_kind":"code","freshness_identity":"fixture-environment-and-inputs-v1",
+        "requirements":[
+            {"lens":"correctness-behavior","scope_paths":["source.txt"],"required_samples":samples,
+                "escalation":if samples > 1 {json!({"consequence":"Irrecoverable accepted-record loss", "residual_uncertainty":"Interacting paths are not fully captured by regression fixtures", "sample_count_rationale":"Three independent discovery samples cover the interacting paths"})} else {Value::Null}},
+            {"lens":"tests-verification","scope_paths":["source.txt"],"required_samples":1,"escalation":null}]});
+    arguments
+}
+
+#[test]
+fn proportional_review_rejects_unjustified_samples_and_missing_coverage() {
+    for violation in [
+        "no-escalation",
+        "low-risk-extra",
+        "empty-freshness",
+        "missing-path",
+        "uncertain-omission",
+    ] {
+        let fixture = Fixture::new();
+        let mut args = multi_lens_proportional_arguments(&fixture, 3);
+        match violation {
+            "no-escalation" => {
+                args["risk_assessment"]["coverage_policy"]["requirements"][0]["escalation"] =
+                    Value::Null
+            }
+            "low-risk-extra" => args["risk_assessment"]["dimensions"][0]["risk"] = json!("low"),
+            "empty-freshness" => {
+                args["risk_assessment"]["coverage_policy"]["freshness_identity"] = json!("")
+            }
+            "missing-path" => {
+                args["risk_assessment"]["coverage_policy"]["requirements"] = json!([{ "lens":"correctness-behavior", "scope_paths":["unrelated.txt"], "required_samples":1,"escalation":null}])
+            }
+            _ => {
+                for dimension in args["risk_assessment"]["dimensions"]
+                    .as_array_mut()
+                    .unwrap()
+                {
+                    if dimension["lens"] == "security-safety" {
+                        dimension["uncertain"] = json!(true);
+                    }
+                }
+            }
+        }
+        assert!(
+            !fixture.run("final_review.plan", &args).status.success(),
+            "accepted {violation}"
+        );
+    }
+}
+
+#[test]
+fn proportional_review_exceptional_requires_supported_trigger_and_two_samples() {
+    for (samples, trigger, valid) in [
+        (1, "authentication-or-authorization-boundary", false),
+        (2, "invented-trigger", false),
+        (2, "authentication-or-authorization-boundary", true),
+    ] {
+        let fixture = Fixture::new();
+        let mut args = multi_lens_proportional_arguments(&fixture, 2);
+        args["risk_assessment"]["overall_risk"] = json!("exceptional");
+        args["risk_assessment"]["exceptional_triggers"] = json!([trigger]);
+        args["risk_assessment"]["dimensions"][0]["risk"] = json!("exceptional");
+        args["risk_assessment"]["coverage_policy"]["requirements"][0]["required_samples"] =
+            json!(samples);
+        let output = fixture.run("final_review.plan", &args);
+        assert_eq!(
+            output.status.success(),
+            valid,
+            "{samples} {trigger}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        if valid {
+            let mut current = payload(output);
+            for sample in 0..2 {
+                let assignments = if sample == 0 {
+                    current.clone()
+                } else {
+                    json!({"assignments":current["next_assignments"]})
+                };
+                current = fixture.call("final_review.advance", &json!({"state_ref":current["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&assignments)}));
+                assert_eq!(current["complete"], sample == 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn proportional_review_extra_samples_only_repeat_the_consequential_lens() {
+    let fixture = Fixture::new();
+    let planned = fixture.call(
+        "final_review.plan",
+        &multi_lens_proportional_arguments(&fixture, 3),
+    );
+    let mut response = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&planned)}));
+    assert_eq!(response["complete"], false);
+    assert_eq!(response["next_assignments"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        response["next_assignments"][0]["lens"],
+        "correctness-behavior"
+    );
+    for expected_complete in [false, true] {
+        let pending = json!({"assignments":response["next_assignments"]});
+        response = fixture.call("final_review.advance", &json!({"state_ref":response["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&pending)}));
+        assert_eq!(response["complete"], expected_complete);
+    }
+    assert_eq!(
+        response["state"]["risk_plan"]["coverage"]["receipts"]["tests-verification"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let report = fixture.call(
+        "final_review.yield_report",
+        &json!({"state_ref":response["state_ref"]}),
+    );
+    assert_eq!(report["observed_review_counts"]["accepted"], 4);
+    assert_eq!(report["observed_batch_counts"]["complete-round"], 1);
+    assert_eq!(report["observed_batch_counts"]["additional-risk-sample"], 2);
+}
+
+#[test]
+fn proportional_review_invalid_lifecycle_preserves_valid_peer_receipts() {
+    let fixture = Fixture::new();
+    let planned = fixture.call(
+        "final_review.plan",
+        &multi_lens_proportional_arguments(&fixture, 1),
+    );
+    let mut results = proportional_results(&fixture, &planned);
+    results[1]["caller_attestation"]["closed_after_result"] = json!(false);
+    let response = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":results}));
+    assert_eq!(response["complete"], false);
+    assert_eq!(response["next_assignments"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        response["next_assignments"][0]["lens"],
+        "tests-verification"
+    );
+    let pending = json!({"assignments":response["next_assignments"]});
+    let finished = fixture.call("final_review.advance", &json!({"state_ref":response["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&pending)}));
+    assert_eq!(finished["complete"], true);
+}
+
+#[test]
+fn proportional_review_malformed_coverage_replaces_only_invalid_assignment() {
+    for invalid in ["missing", "empty", "wrong-blob"] {
+        let fixture = Fixture::new();
+        let planned = fixture.call(
+            "final_review.plan",
+            &multi_lens_proportional_arguments(&fixture, 1),
+        );
+        let mut results = proportional_results(&fixture, &planned);
+        match invalid {
+            "missing" => {
+                results[1]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("coverage_evidence");
+            }
+            "empty" => results[1]["coverage_evidence"]["dependency_blobs"] = json!({}),
+            _ => {
+                results[1]["coverage_evidence"]["dependency_blobs"]["source.txt"] =
+                    json!(format!("100644:{}", fixture.baseline))
+            }
+        }
+        let response = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":results}));
+        assert_eq!(
+            response["complete"], false,
+            "invalid evidence earned completion: {invalid}"
+        );
+        assert_eq!(
+            response["next_assignments"].as_array().unwrap().len(),
+            1,
+            "valid peer was discarded: {invalid}"
+        );
+        assert_eq!(
+            response["next_assignments"][0]["lens"],
+            "tests-verification"
+        );
+        assert_ne!(
+            response["next_assignments"][0]["subagent_key"],
+            planned["assignments"][1]["subagent_key"]
+        );
+        let peer =
+            response["state"]["risk_plan"]["coverage"]["receipts"]["correctness-behavior"].clone();
+        assert_eq!(peer.as_array().unwrap().len(), 1);
+        assert_eq!(
+            peer[0]["subagent_key"],
+            planned["assignments"][0]["subagent_key"]
+        );
+        let report = fixture.call(
+            "final_review.yield_report",
+            &json!({"state_ref":response["state_ref"]}),
+        );
+        assert_eq!(report["observed_review_counts"]["accepted"], 1);
+        assert_eq!(report["observed_review_counts"]["malformed"], 1);
+        let pending = json!({"assignments":response["next_assignments"]});
+        let finished = fixture.call("final_review.advance", &json!({"state_ref":response["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&pending)}));
+        assert_eq!(finished["complete"], true);
+        assert_eq!(
+            finished["state"]["risk_plan"]["coverage"]["receipts"]["correctness-behavior"],
+            peer
+        );
+    }
+}
+
+#[test]
+fn proportional_review_cannot_omit_an_applicable_security_dimension() {
+    let fixture = Fixture::new();
+    let mut arguments = multi_lens_proportional_arguments(&fixture, 1);
+    for dimension in arguments["risk_assessment"]["dimensions"]
+        .as_array_mut()
+        .unwrap()
+    {
+        if dimension["lens"] == "security-safety" {
+            dimension["risk"] = json!("medium");
+        }
+    }
+    let result = fixture.run("final_review.plan", &arguments);
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8_lossy(&result.stdout).contains("review_coverage_applicable_lens_missing")
+    );
+}
+
+fn check_proportional_source_delta(whole_scope: bool, variant: &str) {
+    let mut fixture = Fixture::new();
+    std::fs::write(fixture.root.join("peer.txt"), "peer baseline\n").unwrap();
+    if variant == "reordered-peer" {
+        std::fs::write(fixture.root.join("peer-two.txt"), "peer two baseline\n").unwrap();
+    }
+    git(&fixture.root, &["add", "peer.txt"]);
+    if variant == "reordered-peer" {
+        git(&fixture.root, &["add", "peer-two.txt"]);
+    }
+    git(&fixture.root, &["commit", "--quiet", "-m", "peer fixture"]);
+    fixture.baseline = git(&fixture.root, &["rev-parse", "HEAD"]);
+    std::fs::write(fixture.root.join("peer.txt"), "changed peer\n").unwrap();
+    let mut arguments = multi_lens_proportional_arguments(&fixture, 3);
+    arguments["changed_files"] = json!(["source.txt", "peer.txt"]);
+    arguments["risk_assessment"]["coverage_policy"]["requirements"][1]["scope_paths"] =
+        json!(["peer.txt"]);
+    if variant == "reordered-peer" {
+        std::fs::write(fixture.root.join("peer-two.txt"), "changed peer two\n").unwrap();
+        arguments["changed_files"] = json!(["source.txt", "peer.txt", "peer-two.txt"]);
+        arguments["risk_assessment"]["coverage_policy"]["requirements"][1]["scope_paths"] =
+            json!(["peer.txt", "peer-two.txt"]);
+    }
+    if matches!(variant, "lower-peer" | "omitted-peer") {
+        arguments["risk_assessment"]["coverage_policy"]["requirements"][1]["required_samples"] =
+            json!(3);
+        arguments["risk_assessment"]["coverage_policy"]["requirements"][1]["escalation"] =
+            arguments["risk_assessment"]["coverage_policy"]["requirements"][0]["escalation"]
+                .clone();
+    }
+    let scout = fixture.call("final_review.assess_risk", &arguments);
+    for field in ["assignment_id", "subagent_key"] {
+        arguments["risk_assessment"][field] = scout["assignments"][0][field].clone();
+    }
+    let planned = fixture.call("final_review.plan", &arguments);
+    let mut results = proportional_results(&fixture, &planned);
+    results[1]["coverage_evidence"]["dependency_blobs"] =
+        json!({"peer.txt":format!("100644:{}",git(&fixture.root,&["hash-object","peer.txt"]))});
+    if variant == "reordered-peer" {
+        results[1]["coverage_evidence"]["dependency_blobs"]["peer-two.txt"] = json!(format!(
+            "100644:{}",
+            git(&fixture.root, &["hash-object", "peer-two.txt"])
+        ));
+    }
+    let reviewed = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":results}));
+    std::fs::write(fixture.root.join("source.txt"), "causal repair\n").unwrap();
+    let evidence = json!({"id":"repair-evidence","diff_hash":"repair-snapshot","status":"passed","summary":"Fresh repaired behavior and regression evidence.","commands":["fixture:repair"]});
+    let mut delta_arguments = json!({"state_ref":reviewed["state_ref"],"current_diff_hash":"repair-snapshot","current_changed_files":["source.txt","peer.txt"],"current_shared_test_evidence":evidence,"lens_results":[]});
+    delta_arguments["current_changed_files"] = arguments["changed_files"].clone();
+    let delta = fixture.call("final_review.advance", &delta_arguments);
+    let assignment = &delta["delta_risk_assignments"][0];
+    let mut assessment = arguments["risk_assessment"].clone();
+    assessment["assignment_id"] = assignment["assignment_id"].clone();
+    assessment["subagent_key"] = assignment["subagent_key"].clone();
+    assessment["shared_test_evidence_id"] = json!("repair-evidence");
+    assessment["caller_attestation"]["model_role"] = assignment["model_role"].clone();
+    assessment["prior_diff_hash"] = json!("replay-fixture");
+    assessment["current_diff_hash"] = json!("repair-snapshot");
+    assessment["whole_scope_affected"] = json!(whole_scope);
+    assessment["invalidation_rationale"] =
+        json!("The repaired source has no dependency on the unchanged peer behavior.");
+    for dimension in assessment["dimensions"].as_array_mut().unwrap() {
+        dimension["affected"] = json!(dimension["lens"] == "correctness-behavior");
+    }
+    if variant == "lower-peer" {
+        assessment["coverage_policy"]["requirements"][1]["required_samples"] = json!(1);
+        assessment["coverage_policy"]["requirements"][1]["escalation"] = Value::Null;
+    }
+    if variant == "omitted-peer" {
+        for dimension in assessment["dimensions"].as_array_mut().unwrap() {
+            if dimension["lens"] == "tests-verification" {
+                dimension["risk"] = json!("none");
+                dimension["plausible_failure"] = json!("none");
+                dimension["material_impact"] = json!("none");
+            }
+        }
+        assessment["coverage_policy"]["requirements"]
+            .as_array_mut()
+            .unwrap()
+            .remove(1);
+        assessment["coverage_policy"]["requirements"][0]["scope_paths"] =
+            json!(["source.txt", "peer.txt"]);
+    }
+    if variant == "split-hold" {
+        assessment["split_required"] = json!(true);
+        assessment["split_rationale"] =
+            json!("The source and peer are independently buildable and shippable packages.");
+        assessment["scope_growth_triggers"] = json!(["new-subsystem"]);
+        assessment["split_candidates"] = json!([("source", "source.txt"), ("peer", "peer.txt")].iter().map(|(component, path)| json!({
+            "id": component, "title":format!("Ship {component}"), "scope_paths":[path],
+            "acceptance_criteria":[format!("{component} is independently usable")],
+            "independently_shippable_reason":format!("{component} has its own tests and release artifact"),
+            "delivery_boundaries":{
+                "build":{"evidence_kind":"independent-build","command":format!("build {component}"),"artifact":format!("{component} package")},
+                "test":{"evidence_kind":"independent-test","command":format!("test {component}")},
+                "shipping":{"evidence_kind":"independent-shipping","artifact":format!("{component} package"),"mechanism":"package-publish"}
+            }
+        })).collect::<Vec<_>>());
+    }
+    if variant == "reordered-peer" {
+        assessment["coverage_policy"]["requirements"][1]["scope_paths"] =
+            json!(["peer-two.txt", "peer.txt"]);
+    }
+    delta_arguments["state_ref"] = delta["state_ref"].clone();
+    delta_arguments["delta_risk_assessment"] = assessment;
+    if matches!(variant, "lower-peer" | "omitted-peer") {
+        let before = fixture.authority();
+        let output = fixture.run("final_review.advance", &delta_arguments);
+        assert!(
+            !output.status.success(),
+            "unchanged outstanding samples were silently dropped"
+        );
+        let expected = if variant == "omitted-peer" {
+            "review_coverage_prior_requirement_missing"
+        } else {
+            "review_coverage_sample_requirement_weakened"
+        };
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(expected),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert_eq!(
+            fixture.authority(),
+            before,
+            "invalid reassessment must not mutate authoritative history"
+        );
+        return;
+    }
+    let renewed = fixture.call("final_review.advance", &delta_arguments);
+    if variant == "split-hold" {
+        assert_eq!(renewed["transition_status"], "split_confirmation_required");
+        assert_eq!(renewed["complete"], false);
+        assert_eq!(renewed["next_assignments"], json!([]));
+        assert_eq!(renewed["state"]["lenses"], json!([]));
+        assert_eq!(renewed["state"]["risk_plan"]["active_lenses"], json!([]));
+        assert_eq!(
+            renewed["state"]["risk_plan"]["active_lens_passes"],
+            json!({})
+        );
+        let request = json!({"state_ref":renewed["state_ref"],"confirmation_id":renewed["scope_split"]["confirmation_id"],"explicit_user_confirmation":true,"tracker_representation":"delivery-tickets"});
+        for extra in ["state", "unexpected"] {
+            let mut invalid = request.clone();
+            invalid[extra] = if extra == "state" {
+                renewed["state"].clone()
+            } else {
+                json!("not part of the confirmation contract")
+            };
+            let before = fixture.authority();
+            let rejected = fixture.run("final_review.confirm_split", &invalid);
+            assert!(!rejected.status.success(), "accepted extra field {extra}");
+            assert!(
+                String::from_utf8_lossy(&rejected.stdout)
+                    .contains("split_confirmation_explicit_user_confirmation_required"),
+                "{}",
+                String::from_utf8_lossy(&rejected.stdout)
+            );
+            assert_eq!(
+                fixture.authority(),
+                before,
+                "rejected confirmation changed authoritative history"
+            );
+        }
+        let confirmed = fixture.call("final_review.confirm_split", &request);
+        assert_eq!(confirmed["tracker_mutation_authorized"], false);
+        assert_eq!(confirmed["blocking_dependencies_authorized"], false);
+        assert_eq!(confirmed["scope_split"]["confirmation_required"], false);
+        assert_eq!(
+            confirmed["scope_split"]["confirmed_representation"],
+            "delivery-tickets"
+        );
+        let resumed = fixture.call(
+            "final_review.resume_latest",
+            &json!({"project_root":fixture.root,"session_id":"replay-persistence"}),
+        );
+        assert_eq!(resumed["state_ref"], confirmed["state_ref"]);
+        assert_eq!(resumed["complete"], false);
+        return;
+    }
+    assert_eq!(
+        renewed["next_assignments"].as_array().unwrap().len(),
+        if whole_scope { 2 } else { 1 }
+    );
+    assert_eq!(
+        renewed["next_assignments"][0]["lens"],
+        "correctness-behavior"
+    );
+    assert_eq!(
+        renewed["state"]["risk_plan"]["coverage"]["receipts"]["tests-verification"]
+            .as_array()
+            .unwrap()
+            .len(),
+        if whole_scope { 0 } else { 1 }
+    );
+    assert_eq!(
+        renewed["state"]["risk_plan"]["coverage"]["receipts"]["correctness-behavior"],
+        json!([])
+    );
+    assert_eq!(
+        renewed["state"]["risk_plan"]["coverage"]["invalidations"][0]["lens"],
+        "correctness-behavior"
+    );
+    if !whole_scope {
+        let mut current = renewed;
+        for sample in 0..3 {
+            let assignments = json!({"assignments":current["next_assignments"]});
+            current = fixture.call("final_review.advance", &json!({"state_ref":current["state_ref"],"current_diff_hash":"repair-snapshot","lens_results":proportional_results(&fixture,&assignments)}));
+            assert_eq!(current["complete"], sample == 2);
+        }
+        let report = fixture.call(
+            "final_review.yield_report",
+            &json!({"state_ref":current["state_ref"]}),
+        );
+        assert_eq!(report["observed_batch_counts"]["scoped-repair"], 1);
+        assert_eq!(report["observed_batch_counts"]["additional-risk-sample"], 2);
+    }
+}
+
+#[test]
+fn proportional_review_source_repair_keeps_independent_peer_coverage() {
+    check_proportional_source_delta(false, "normal");
+}
+
+#[test]
+fn proportional_review_whole_scope_impact_invalidates_every_dependency() {
+    check_proportional_source_delta(true, "normal");
+}
+
+#[test]
+fn proportional_review_delta_rejects_lowering_unaffected_sample_floor() {
+    check_proportional_source_delta(false, "lower-peer");
+}
+#[test]
+fn proportional_review_delta_rejects_omitting_unaffected_sample_obligation() {
+    check_proportional_source_delta(false, "omitted-peer");
+}
+
+#[test]
+fn proportional_review_delta_reuses_permuted_unchanged_scope() {
+    check_proportional_source_delta(false, "reordered-peer");
+}
+
+#[test]
+fn proportional_review_delta_split_hold_is_confirmable() {
+    check_proportional_source_delta(false, "split-hold");
+}
+
+#[test]
+fn proportional_review_metadata_delta_returns_authoritative_completion() {
+    let fixture = Fixture::new();
+    let mut arguments = fixture.plan_args();
+    arguments["risk_assessment"]["coverage_policy"] = json!({"artifact_kind":"code","freshness_identity":"fixture-environment-v1","requirements":[{"lens":"correctness-behavior","scope_paths":["source.txt"],"required_samples":1,"escalation":null}]});
+    let planned = fixture.call("final_review.plan", &arguments);
+    let finished = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&planned)}));
+    assert_eq!(finished["complete"], true);
+    git(&fixture.root, &["add", "source.txt"]);
+    let evidence = json!({"id":"staged-evidence","diff_hash":"staged-identity","status":"passed","summary":"Staging preserves exact source bytes and behavior.","commands":["fixture:source-parity"]});
+    let request = json!({"state_ref":finished["state_ref"],"operation_id":"staging-only-reopen","reason":"Bind completed review to staged identity without changing source.","current_diff_hash":"staged-identity","current_changed_files":["source.txt"],"current_shared_test_evidence":evidence});
+    let pending = fixture.call("final_review.reopen", &request);
+    let assignment = &pending["delta_risk_assignments"][0];
+    let mut assessment = arguments["risk_assessment"].clone();
+    assessment["coverage_policy"] = finished["state"]["risk_plan"]["coverage"]["policy"].clone();
+    for field in ["assignment_id", "subagent_key"] {
+        assessment[field] = assignment[field].clone();
+    }
+    assessment["caller_attestation"]["model_role"] = assignment["model_role"].clone();
+    assessment["shared_test_evidence_id"] = json!("staged-evidence");
+    assessment["prior_diff_hash"] = json!("replay-fixture");
+    assessment["current_diff_hash"] = json!("staged-identity");
+    assessment["whole_scope_affected"] = json!(false);
+    assessment["invalidation_rationale"] = json!("Exact source bytes, scope, behavior and freshness are unchanged; only staging bookkeeping changed.");
+    for dimension in assessment["dimensions"].as_array_mut().unwrap() {
+        dimension["affected"] = json!(false);
+    }
+    let renewed = fixture.call("final_review.advance", &json!({"state_ref":pending["state_ref"],"current_diff_hash":"staged-identity","current_changed_files":["source.txt"],"current_shared_test_evidence":evidence,"lens_results":[],"delta_risk_assessment":assessment}));
+    assert_eq!(renewed["complete"], true, "{renewed}");
+    assert_eq!(renewed["next_assignments"], json!([]));
+    assert_eq!(
+        renewed["state"]["risk_plan"]["coverage"]["receipts"],
+        finished["state"]["risk_plan"]["coverage"]["receipts"],
+        "retained receipt identities must remain historical"
+    );
+    let resumed = fixture.call(
+        "final_review.resume_latest",
+        &json!({"project_root":fixture.root,"session_id":"replay-persistence"}),
+    );
+    assert_eq!(resumed["state_ref"], renewed["state_ref"]);
+    assert_eq!(resumed["complete"], true);
+}
+
+#[test]
+fn proportional_review_completed_session_reopens_for_bound_delta_assessment() {
+    let fixture = Fixture::new();
+    let planned = proportional_plan(&fixture);
+    let finished = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&planned)}));
+    assert_eq!(finished["complete"], true);
+    std::fs::write(
+        fixture.root.join("source.txt"),
+        "post-completion causal repair\n",
+    )
+    .unwrap();
+    let request = json!({"state_ref":finished["state_ref"],"operation_id":"source-repair-after-completion","reason":"A real source repair requires scoped independent reassessment.","current_diff_hash":"repaired-snapshot","current_changed_files":["source.txt"],"current_shared_test_evidence":{"id":"repaired-evidence","diff_hash":"repaired-snapshot","status":"passed","summary":"Fresh repair regression passed.","commands":["fixture:repaired"]}});
+    let reopened = fixture.call("final_review.reopen", &request);
+    assert_eq!(reopened["complete"], false);
+    assert_eq!(
+        reopened["delta_risk_assignments"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        reopened["state"]["risk_plan"]["coverage"]["pending_reassessment"],
+        true
+    );
+    let resumed = fixture.call(
+        "final_review.resume_latest",
+        &json!({"project_root":fixture.root,"session_id":"replay-persistence"}),
+    );
+    assert_eq!(resumed["pending_phase"], "delta-risk");
+    assert_eq!(
+        fixture.call("final_review.reopen", &request)["operation_replayed"],
+        true
+    );
+}
+
+#[test]
+fn proportional_review_migration_requires_independent_assessment_and_replays() {
+    let fixture = Fixture::new();
+    let legacy = fixture.call("final_review.plan", &fixture.plan_args());
+    let reviewed = fixture.call("final_review.advance", &json!({"state_ref":legacy["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&legacy)}));
+    assert_eq!(reviewed["complete"], false);
+    assert_eq!(reviewed["state"]["required_clean_iterations"], 3);
+    let mut request = json!({"state_ref":reviewed["state_ref"],"operation_id":"approved-policy-v3","reason":"Apply the reviewed proportional policy while preserving baseline and obligations.",
+        "current_diff_hash":"replay-fixture","current_changed_files":["source.txt"],
+        "current_shared_test_evidence":reviewed["state"]["shared_test_evidence"]});
+    let preview = fixture.call("final_review.migrate_policy", &request);
+    assert_eq!(preview["migration_applied"], false);
+    assert_eq!(
+        fixture.call(
+            "final_review.resume_latest",
+            &json!({"project_root":fixture.root,"session_id":"replay-persistence"})
+        )["state_ref"],
+        reviewed["state_ref"]
+    );
+    let assignment = &preview["assignments"][0];
+    let mut assessment = fixture.plan_args()["risk_assessment"].clone();
+    for field in ["assignment_id", "subagent_key"] {
+        assessment[field] = assignment[field].clone();
+    }
+    assessment["shared_test_evidence_id"] = assignment["shared_test_evidence"]["id"].clone();
+    assessment["caller_attestation"]["model_role"] = assignment["model_role"].clone();
+    assessment["coverage_policy"] = json!({"artifact_kind":"code","freshness_identity":"fixture-environment-v1","requirements":[{"lens":"correctness-behavior","scope_paths":["source.txt"],"required_samples":1,"escalation":null}]});
+    request["risk_assessment"] = assessment;
+    request["prior_assignment_closures"] = json!(reviewed["next_assignments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| json!({"subagent_key":a["subagent_key"],"disposition":"not-started"}))
+        .collect::<Vec<_>>());
+    let migrated = fixture.call("final_review.migrate_policy", &request);
+    assert_eq!(migrated["state"]["required_clean_iterations"], 1);
+    assert_eq!(
+        migrated["state"]["scope"]["baseline_commit"],
+        reviewed["state"]["scope"]["baseline_commit"]
+    );
+    assert_eq!(
+        migrated["state"]["finding_history"],
+        reviewed["state"]["finding_history"]
+    );
+    assert_eq!(migrated["next_assignments"].as_array().unwrap().len(), 1);
+    let replayed = fixture.call("final_review.migrate_policy", &request);
+    assert_eq!(replayed["operation_replayed"], true);
+    assert_eq!(replayed["state_ref"], migrated["state_ref"]);
+    let pending = json!({"assignments":migrated["next_assignments"]});
+    let finished = fixture.call("final_review.advance", &json!({"state_ref":migrated["state_ref"],"current_diff_hash":"replay-fixture","lens_results":proportional_results(&fixture,&pending)}));
+    assert_eq!(finished["complete"], true);
+}
+
+#[test]
+fn proportional_review_independent_rejection_completes_without_a_ritual_rerun() {
+    let fixture = Fixture::new();
+    let planned = proportional_plan(&fixture);
+    let mut results = proportional_results(&fixture, &planned);
+    results[0]["status"] = json!("findings");
+    results[0]["findings"] = json!([{"id":"disputed-source-claim","severity":"MINOR","causality":"caused","causality_evidence":"A reviewer alleges a source failure.","likelihood":"possible","security_impact":"none","safety_impact":"none","path":"source.txt","line":1,"message":"The alleged source failure needs independent adjudication.","relevance":{"category":"diff_changed_file","explanation":"The source is in the requested change."}}]);
+    let pending = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":results,
+        "verification_requests":[{"finding_id":"disputed-source-claim","lens":"correctness-behavior"}],"unrelated_follow_ups":[{"finding_id":"disputed-source-claim","lens":"correctness-behavior","ticket_reference":"fixture-active-task"}]}));
+    assert_eq!(pending["transition_status"], "verifier_required");
+    let assignment = &pending["verifier_assignment"];
+    let finished = fixture.call("final_review.advance", &json!({"state_ref":pending["state_ref"],"current_diff_hash":"replay-fixture","lens_results":[],
+        "verifier_result":{"subagent_key":assignment["subagent_key"],"assignment_id":assignment["assignment_id"],"model_role":assignment["model_role"],"status":"verified",
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":true,"closed_after_result":true},"verdicts":[{"finding_id":"disputed-source-claim","lens":"correctness-behavior","verdict":"rejected","severity":"MINOR","causality":"caused","causality_evidence":"Independent source and fixture inspection disproves the allegation.","security_impact":"none","safety_impact":"none","rationale":"The alleged failing branch does not exist.","dependency_blobs":{"source.txt":format!("100644:{}",git(&fixture.root,&["hash-object","source.txt"]))},"assumptions":["The inspected source is the only input boundary."]}]}}));
+    assert_eq!(
+        finished["complete"], true,
+        "independent rejection did not complete coverage"
+    );
+    assert_eq!(finished["next_assignments"], json!([]));
+    let resumed = fixture.call(
+        "final_review.resume_latest",
+        &json!({"session_id":"replay-persistence","project_root":fixture.root}),
+    );
+    assert_eq!(resumed["complete"], true);
+}
+
+#[test]
+fn proportional_review_malformed_verifier_replaces_only_adjudication() {
+    for samples in [1, 2] {
+        let fixture = Fixture::new();
+        let mut args = multi_lens_proportional_arguments(&fixture, samples);
+        args["risk_assessment"]["coverage_policy"]["requirements"][0]["required_samples"] =
+            json!(1);
+        args["risk_assessment"]["coverage_policy"]["requirements"][0]["escalation"] = Value::Null;
+        args["risk_assessment"]["coverage_policy"]["requirements"][1]["required_samples"] =
+            json!(samples);
+        if samples > 1 {
+            args["risk_assessment"]["coverage_policy"]["requirements"][1]["escalation"] = json!({"consequence":"Accepted data corruption", "residual_uncertainty":"Independent fixture interpretation may miss interacting cases", "sample_count_rationale":"Two independent interpretations reduce this consequential uncertainty"});
+        }
+        let planned = fixture.call("final_review.plan", &args);
+        let mut results = proportional_results(&fixture, &planned);
+        results[0]["status"] = json!("findings");
+        results[0]["findings"] = json!([{"id":"disputed-claim","severity":"MINOR","causality":"caused","causality_evidence":"The reviewer alleges a changed source failure.","likelihood":"possible","security_impact":"none","safety_impact":"none","path":"source.txt","line":1,"message":"An ordinary allegation needs independent adjudication.","relevance":{"category":"diff_changed_file","explanation":"source.txt is reviewed."}}]);
+        let pending = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":results,
+        "verification_requests":[{"finding_id":"disputed-claim","lens":"correctness-behavior"}],"unrelated_follow_ups":[{"finding_id":"disputed-claim","lens":"correctness-behavior","ticket_reference":"fixture-active-task"}]}));
+        let assignment = &pending["verifier_assignment"];
+        let rejected = fixture.call("final_review.advance", &json!({"state_ref":pending["state_ref"],"current_diff_hash":"replay-fixture","lens_results":[],
+        "verifier_result":{"subagent_key":assignment["subagent_key"],"assignment_id":assignment["assignment_id"],"model_role":assignment["model_role"],"status":"verified",
+            "caller_attestation":{"model_role":assignment["model_role"],"fresh_context":false,"closed_after_result":true},"verdicts":[]}}));
+        assert_eq!(rejected["complete"], false);
+        assert_eq!(rejected["transition_status"], "verifier_required");
+        assert_eq!(rejected["next_assignments"], json!([]));
+        assert_ne!(
+            rejected["verifier_assignment"]["subagent_key"],
+            assignment["subagent_key"]
+        );
+        assert_eq!(
+            rejected["state"]["risk_plan"]["coverage"]["receipts"]["tests-verification"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            fixture.call(
+                "final_review.resume_latest",
+                &json!({"session_id":"replay-persistence","project_root":fixture.root})
+            )["pending_phase"],
+            "verifier"
+        );
+        let replacement = &rejected["verifier_assignment"];
+        let finished = fixture.call("final_review.advance", &json!({"state_ref":rejected["state_ref"],"current_diff_hash":"replay-fixture","lens_results":[],
+        "verifier_result":{"subagent_key":replacement["subagent_key"],"assignment_id":replacement["assignment_id"],"model_role":replacement["model_role"],"status":"verified",
+            "caller_attestation":{"model_role":replacement["model_role"],"fresh_context":true,"closed_after_result":true},"verdicts":[{"finding_id":"disputed-claim","lens":"correctness-behavior","verdict":"rejected","severity":"MINOR","causality":"caused","causality_evidence":"The current source has no alleged failing branch.","security_impact":"none","safety_impact":"none","rationale":"Independent source inspection disproved the allegation.","dependency_blobs":{"source.txt":format!("100644:{}",git(&fixture.root,&["hash-object","source.txt"]))},"assumptions":[]}]}}));
+        assert_eq!(finished["complete"], samples == 1);
+        if samples == 2 {
+            assert_eq!(finished["next_assignments"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                finished["next_assignments"][0]["lens"],
+                "tests-verification"
+            );
+            assert_eq!(
+                finished["state"]["risk_plan"]["coverage"]["receipts"]["tests-verification"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+        let report = fixture.call(
+            "final_review.yield_report",
+            &json!({"state_ref":finished["state_ref"]}),
+        );
+        assert_eq!(
+            report["observed_review_counts"]["accepted"], 2,
+            "reused lens results were counted as fresh reviewers"
+        );
+        assert_eq!(
+            report["observed_batch_counts"]["verifier-replacement"], 1,
+            "{report}"
+        );
+    }
+}
+
+fn check_rendered_review_continuity(proof: Option<&str>, changed_output: bool, reordered: bool) {
+    let mut fixture = Fixture::new();
+    let render = |color: &str| {
+        format!("<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"10\" height=\"10\" fill=\"{color}\"/></svg>\n")
+    };
+    std::fs::write(fixture.root.join("diagram.svg"), render("blue")).unwrap();
+    git(&fixture.root, &["add", "diagram.svg"]);
+    if reordered {
+        std::fs::write(fixture.root.join("second.svg"), render("blue")).unwrap();
+        git(&fixture.root, &["add", "second.svg"]);
+    }
+    git(
+        &fixture.root,
+        &["commit", "--quiet", "-m", "render fixture"],
+    );
+    fixture.baseline = git(&fixture.root, &["rev-parse", "HEAD"]);
+    std::fs::write(fixture.root.join("diagram.svg"), render("green")).unwrap();
+    let mut arguments = multi_lens_proportional_arguments(&fixture, 3);
+    arguments["changed_files"] = json!(["source.txt", "diagram.svg"]);
+    arguments["risk_assessment"]["coverage_policy"]["requirements"][1]["scope_paths"] =
+        json!(["diagram.svg"]);
+    arguments["risk_assessment"]["coverage_policy"]["requirements"][1]["artifact_kind"] =
+        json!("rendered-artifact");
+    if reordered {
+        std::fs::write(fixture.root.join("second.svg"), render("green")).unwrap();
+        arguments["changed_files"] = json!(["source.txt", "diagram.svg", "second.svg"]);
+        arguments["risk_assessment"]["coverage_policy"]["requirements"][1]["scope_paths"] =
+            json!(["diagram.svg", "second.svg"]);
+    }
+    let scout = fixture.call("final_review.assess_risk", &arguments);
+    for field in ["assignment_id", "subagent_key"] {
+        arguments["risk_assessment"][field] = scout["assignments"][0][field].clone();
+    }
+    let planned = fixture.call("final_review.plan", &arguments);
+    let mut results = proportional_results(&fixture, &planned);
+    results[1]["coverage_evidence"]["dependency_blobs"] = json!({"diagram.svg":format!("100644:{}",git(&fixture.root,&["hash-object","diagram.svg"])),"source.txt":format!("100644:{}",git(&fixture.root,&["hash-object","source.txt"]))});
+    if reordered {
+        results[1]["coverage_evidence"]["dependency_blobs"]["second.svg"] = json!(format!(
+            "100644:{}",
+            git(&fixture.root, &["hash-object", "second.svg"])
+        ));
+    }
+    let reviewed = fixture.call("final_review.advance", &json!({"state_ref":planned["state_ref"],"current_diff_hash":"replay-fixture","lens_results":results}));
+    let prior_output = std::fs::read(fixture.root.join("diagram.svg")).unwrap();
+    std::fs::write(fixture.root.join("source.txt"), "validator-only repair\n").unwrap();
+    // A fresh fixture render explicitly checks the complete declared output.
+    let current_output = render(if changed_output { "red" } else { "green" });
+    std::fs::write(fixture.root.join("diagram.svg"), &current_output).unwrap();
+    assert_eq!(prior_output == current_output.as_bytes(), !changed_output);
+    let evidence = json!({"id":"render-parity","diff_hash":"validator-repair","status":"passed","summary":"Fresh current-source rendering compared for every declared fixture and rendering condition.","commands":["fixture:validate-and-render-parity"],"artifact_reference":"fixture-current-render-parity"});
+    let mut request = json!({"state_ref":reviewed["state_ref"],"current_diff_hash":"validator-repair","current_changed_files":["source.txt","diagram.svg"],"current_shared_test_evidence":evidence,"lens_results":[]});
+    request["current_changed_files"] = arguments["changed_files"].clone();
+    let pending = fixture.call("final_review.advance", &request);
+    let assigned = &pending["delta_risk_assignments"][0];
+    let mut assessment = arguments["risk_assessment"].clone();
+    for field in ["assignment_id", "subagent_key"] {
+        assessment[field] = assigned[field].clone();
+    }
+    assessment["shared_test_evidence_id"] = json!("render-parity");
+    assessment["caller_attestation"]["model_role"] = assigned["model_role"].clone();
+    assessment["prior_diff_hash"] = json!("replay-fixture");
+    assessment["current_diff_hash"] = json!("validator-repair");
+    assessment["whole_scope_affected"] = json!(false);
+    assessment["invalidation_rationale"] = json!("Current-source fixture rendering and unchanged coverage/conditions establish which visual output changed; source hash changes alone are not visual changes.");
+    for dimension in assessment["dimensions"].as_array_mut().unwrap() {
+        dimension["affected"] = json!(dimension["lens"] == "correctness-behavior");
+    }
+    if let Some(kind) = proof {
+        assessment["render_continuity"] = json!([{"lens":"tests-verification","kind":kind,"current_diff_hash":"validator-repair","artifact_paths":["diagram.svg"],"evidence_reference":"fixture-current-render-parity"}]);
+    }
+    if reordered {
+        assessment["coverage_policy"]["requirements"][1]["scope_paths"] =
+            json!(["second.svg", "diagram.svg"]);
+        assessment["render_continuity"][0]["artifact_paths"] = json!(["diagram.svg", "second.svg"]);
+    }
+    request["state_ref"] = pending["state_ref"].clone();
+    request["delta_risk_assessment"] = assessment;
+    let renewed = fixture.call("final_review.advance", &request);
+    if reordered {
+        assert_eq!(
+            renewed["state"]["risk_plan"]["coverage"]["receipts"]["tests-verification"],
+            reviewed["state"]["risk_plan"]["coverage"]["receipts"]["tests-verification"]
+        );
+    }
+    let keep_visual = proof == Some("current-output-equivalence") && !changed_output;
+    assert_eq!(
+        renewed["next_assignments"].as_array().unwrap().len(),
+        if keep_visual { 1 } else { 2 }
+    );
+    assert_eq!(
+        renewed["state"]["risk_plan"]["coverage"]["receipts"]["tests-verification"]
+            .as_array()
+            .unwrap()
+            .len(),
+        if keep_visual { 1 } else { 0 }
+    );
+}
+
+#[test]
+fn proportional_review_validator_only_repair_reuses_proven_unchanged_visuals() {
+    check_rendered_review_continuity(Some("current-output-equivalence"), false, false);
+    // Changed generator inputs require current-output-equivalence, not an unchanged-input claim.
+    check_rendered_review_continuity(Some("unchanged-render-inputs"), false, false);
+}
+
+#[test]
+fn proportional_review_changed_or_unproven_visuals_require_fresh_review() {
+    check_rendered_review_continuity(Some("current-output-equivalence"), true, false);
+    check_rendered_review_continuity(None, false, false);
+}
+
+#[test]
+fn proportional_review_delta_reuses_permuted_render_scope_and_proof() {
+    check_rendered_review_continuity(Some("current-output-equivalence"), false, true);
+}
+
 struct Fixture {
     directory: tempfile::TempDir,
     root: std::path::PathBuf,

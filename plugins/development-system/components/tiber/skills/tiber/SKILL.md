@@ -105,6 +105,9 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   emulate the unavailable native `workflow.*` scheduler.
 - When `.tiber.toml` configures `[final_review].minimum_clean_reviews`, record
   every clean result and substantive finding through `tiber.review.record`.
+  Explicit minima one and two are supported; preserve stronger configured minima.
+  Scope receipts to independently reviewed behavior and verification dependencies
+  so unrelated evidence is reusable only while both fingerprints remain current.
   Include the review identity, reviewer identity and type, exact Git pathspec
   scope, resolvable commit range, outcome, evidence, timestamp, current source
   fingerprint, verification-evidence scope, and its current fingerprint. Pass

@@ -59,8 +59,8 @@ review`) with reviewer identity/type, a requested pathspec scope that Tiber
   verification-evidence fingerprints. A
   finding or changed source, declared scope, commit range, or verification
   evidence resets or stales the sequence; completion and trailer delivery need
-  the configured number of fresh consecutive clean independent records, with a
-  minimum floor of three. There is no runtime bypass. Opting out requires an
+  the configured number of fresh consecutive clean independent records. Explicit
+  minima one and two are valid; stronger configured minima remain enforced. There is no runtime bypass. Opting out requires an
   explicit, reviewed repository configuration change, which is the audit
   record.
 

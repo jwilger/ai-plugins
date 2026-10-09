@@ -1,6 +1,6 @@
 {
   "name": "@jwilger/development-system",
-  "version": "6.12.5",
+  "version": "7.0.0",
   "private": true,
   "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
   "license": "AGPL-3.0-or-later",

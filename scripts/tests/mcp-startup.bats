@@ -468,6 +468,7 @@ list_server_tools() {
   run jq -e '
     [.result.tools[].name] as $names |
     ($names | index("final_review.reopen") != null) and
+    ($names | index("final_review.migrate_policy") != null) and
     ($names | index("final_review.continue_review") != null) and
     ($names | index("final_review.yield_report") != null) and
     ($names | index("final_review.evidence") != null) and
@@ -488,6 +489,7 @@ list_server_tools() {
       . == "final_review.out_of_scope_report" or
       . == "final_review.resume_latest" or
       . == "final_review.reopen" or
+      . == "final_review.migrate_policy" or
       . == "final_review.continue_review" or
       . == "final_review.yield_report" or
       . == "final_review.evidence" or

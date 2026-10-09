@@ -338,6 +338,52 @@ pub(crate) fn observe_dependencies(
     Ok(observed)
 }
 
+/// Coverage explicitly records absence; carried finding resolutions still require blobs.
+pub(crate) fn observe_coverage_dependencies(
+    project_root: &str,
+    paths: &[String],
+) -> Result<BTreeMap<String, String>, String> {
+    let mut paths = paths.to_vec();
+    paths.sort();
+    paths.dedup();
+    let mut observed = observe_dependencies(project_root, &paths)?;
+    let root = std::fs::canonicalize(project_root)
+        .map_err(|e| format!("coverage_root_unavailable source={e}"))?;
+    for relative in &paths {
+        if observed.contains_key(relative) {
+            continue;
+        }
+        let absolute = root.join(relative);
+        match std::fs::symlink_metadata(&absolute) {
+            Ok(_) => return Err("coverage_absence_raced=true".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("coverage_absence_unavailable source={error}")),
+        }
+        let mut ancestor = absolute.parent().ok_or("coverage_parent_missing=true")?;
+        loop {
+            match std::fs::symlink_metadata(ancestor) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                        return Err("coverage_absence_parent_unsafe=true".into());
+                    }
+                    let canonical = std::fs::canonicalize(ancestor)
+                        .map_err(|e| format!("coverage_parent_unavailable source={e}"))?;
+                    if !canonical.starts_with(&root) {
+                        return Err("coverage_absence_path_escape=true".into());
+                    }
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    ancestor = ancestor.parent().ok_or("coverage_parent_missing=true")?;
+                }
+                Err(error) => return Err(format!("coverage_parent_unavailable source={error}")),
+            }
+        }
+        observed.insert(relative.clone(), "absent".into());
+    }
+    Ok(observed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,6 +641,44 @@ mod tests {
             &docs_only,
             &mode_change,
             None
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn coverage_observer_bounds_distinct_paths_not_repeated_receipts() {
+        let repo = tempfile::tempdir().expect("fixture repository");
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q"])
+            .arg(repo.path())
+            .status()
+            .expect("git init")
+            .success());
+        std::fs::write(repo.path().join("source.rs"), "source\n").expect("source");
+        let root = repo.path().to_str().expect("root");
+        let distinct = vec!["source.rs".to_owned(), "deleted.rs".to_owned()];
+        let expected =
+            observe_coverage_dependencies(root, &distinct).expect("distinct dependencies");
+        let repeated = distinct
+            .iter()
+            .cycle()
+            .take(4200)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observe_coverage_dependencies(root, &repeated).expect("repeated receipt dependencies"),
+            expected
+        );
+        let oversized = (0..4097)
+            .map(|index| format!("dependency-{index}.rs"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observe_coverage_dependencies(root, &oversized).unwrap_err(),
+            "resolution_dependency_path_invalid=true"
+        );
+        assert!(observe_coverage_dependencies(
+            root,
+            &["../outside".to_owned(), "../outside".to_owned()]
         )
         .is_err());
     }

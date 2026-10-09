@@ -3,12 +3,36 @@
 Read this reference only when running, debugging, or changing the MCP-enforced
 final-review path.
 
+## Policy version and scoped coverage
+
+Read [proportional review policy](proportional-review-policy.md). V3 default
+completion requires one complete risk-selected round and only independently
+justified extra samples for consequential responsibilities. `risk_assessment`
+contains `coverage_policy` with artifact classification, freshness identity, and
+scoped requirements. Every v3 lens result contains source-observed
+`coverage_evidence`; assigned results use `final-review-lens-result-v2`.
+
+V3 delta assessments contain `coverage_policy`, `whole_scope_affected`, and
+`invalidation_rationale`; their schema is `final-review-delta-risk-assessment-v2`.
+Optional `render_continuity` proves unchanged render inputs or current output
+equivalence for separately scoped visual coverage against the current diff and
+shared-test artifact reference. The host invalidates changed dependencies and
+retains original peer receipts only with current applicability proof.
+
+V2 records and clients without `coverage_policy` retain their recorded three
+complete clean rounds. Changing that contract requires the independently
+assessed, idempotent `final_review.migrate_policy` operation. Its first call
+returns a fresh risk assignment without applying migration; after actual scout
+closure and truthful `prior_assignment_closures`, resubmit with the assessment.
+Keep baseline, history, blockers, and holds. Missing historical dependency or
+freshness bindings cannot become narrower reusable v3 credit.
+
 ## Required Scope
 
 Before `final_review.assess_risk`, call `workspace-reader.status` through the
 same connected MCP and validate its `final_review_protocol` attestation. The
-current contract requires `contract_version >= 2`,
-`minimum_clean_iterations >= 3`, and
+current contract requires `contract_version >= 3`,
+`minimum_clean_iterations: 1`, `scoped_coverage: true`, `explicit_policy_migration: true`, and
 `durable_pending_assignment_recovery: true`. Missing or weaker fields identify
 a stale skill/runtime pairing: create no review state, accept zero clean
 iterations, and reject delivery. Install the current-host binaries from the
@@ -89,8 +113,9 @@ Any changed reviewed path, content, mode, untracked content, pinned baseline,
 or requested scope is source-changing remediation. Complete its mode-specific
 immediate-test, lightweight-review, and commit-through-Lefthook checkpoint first, including exact
 commit, message, and signature verification for remote commits, then perform a
-delta assessment and the complete selected lens set in fresh contexts under the
-clean-streak reset. In remote modes, comprehensive suites remain in CI; review
+independent delta assessment and fresh review of affected behavior and dependencies.
+Preserve proven peers under v3; full renewal requires material whole-scope impact
+or unisolatable provenance. V2 retains its recorded full-reset contract. In remote modes, comprehensive suites remain in CI; review
 may proceed while exact-SHA CI is pending, but a completed failure preempts
 through recovery and readiness requires terminal success for the exact
 final-reviewed pushed SHA. Local-only instead requires fresh readiness evidence
@@ -162,17 +187,16 @@ lacks the durable assignment fails explicitly with `recovery=restart_final_revie
 instead of returning an empty or reconstructed assignment.
 
 Missing or invalid lifecycle/model attestation is malformed assigned evidence,
-not a retryable field error. `final_review.advance` records a non-clean reset
-transition, clears the streak and durable verified-clean receipts, advances the
-iteration, and returns fresh assignments for the complete selected lens set.
-Discard every old result; never repair the old assignment or preserve peer
-results from the invalidated iteration.
-
-The same authoritative reset applies to a malformed verifier response and to
-invalid verifier assignment provenance or verdict coverage. The transition
-closes the pending verifier, records the bounded rejection reason, and reissues
-the complete selected lens set; a corrected verifier response cannot resume the
-invalidated iteration.
+not passing credit. In v3, reject that assignment and execute the exact returned
+fresh pending scope; preserve independently valid peers. A malformed v3 verifier
+closes its assigned context and requests a fresh verifier over frozen targets,
+without repeating source discovery or counting retained results as new reviewers.
+Shared provenance compromise invalidates every dependent receipt. For retained
+v2, `final_review.advance` bounds and classifies invalid lens or verifier evidence,
+records a non-clean iteration, clears the streak and durable verified-clean
+credit, closes the pending verifier, advances the iteration, and assigns the
+complete selected lens set afresh. Three new consecutive complete finding-free
+iterations remain required; correcting the old result cannot preserve credit.
 
 The equivalent standalone-Tiber transition emits durable
 `AssignmentResultRejected` when a current result fails scheduler provenance or
@@ -188,8 +212,7 @@ completed session also fails. Each process retains at most 32 active sessions,
 and durable storage is bounded independently.
 
 `final_review.plan` rejects a risk assessment that selects no deep-review lens.
-A review can reach completion only after at least three consecutive complete
-finding-free iterations of every selected lens and assigned verifier. The
+A v3 review reaches completion only with sufficient valid receipts for every selected responsibility, every justified extra sample, all required verifiers, and no unresolved blocker. A retained v2 review requires its recorded complete clean rounds. The
 plugin's advisory surface returns no native workflow handoff; stop without
 calling one. Standalone Tiber may name `next_tool:
 workflow.record_clean_review`; only when that native workflow service is
@@ -384,7 +407,7 @@ requires 2-16 distinct nonblank `ticket_references`; `escalate` requires a
 nonblank `escalation_reference`. The coordinator rejects premature, duplicate,
 malformed, or diff-changing decision calls. `ship` is rejected while any
 planned increment or acceptance criterion remains undelivered, any known
-blocking finding remains, or fewer than three consecutive complete finding-free
+blocking finding remains, or required independent coverage and justified samples remain incomplete; legacy v2 also requires its recorded complete finding-free
 iterations exist. In direct-to-trunk or PR/MR mode it is also rejected until CI
 succeeds terminally for the exact final-reviewed pushed SHA with no current
 completed failed job. A successful build for an older revision never satisfies
@@ -525,9 +548,10 @@ with `verifier_result`. Verified results require exactly one `confirmed`,
 `rejected`, or `uncertain` verdict per candidate, a final review severity, and
 a non-empty rationale. The server records reviewer and verifier severities and
 routes with the verifier's final severity and causality/impact classification.
-Rejected candidates do not become unresolved blockers, but their finding-bearing
-iteration remains non-clean and resets the streak. Three later complete
-finding-free rounds are required even when every candidate is rejected.
+Rejected candidates do not become unresolved blockers. Under v3, genuine independent
+rejection can credit its valid source review without rediscovery; frozen verifier
+retries never count as new source samples. V2 finding-bearing rounds remain
+non-clean and retain their three later complete finding-free round requirement.
 Uncertain blocking candidates and materially uncertain security or human-safety
 candidates stay open for human decision, while a verified nonblocking downgrade
 requires the applicable backlog/report disposition.
@@ -595,7 +619,7 @@ completed session. The baseline is immutable; a new plan must not silently
 replace it. The operation records a reset, invalidates clean receipts and lens
 sample credit, preserves durable history and unresolved obligations, and emits
 an independent delta-risk assignment. Submit that real scout's attested result,
-then obtain fresh full lens coverage and three consecutive complete clean rounds.
+then obtain fresh affected-behavior/dependency review and preserve proven unaffected receipts; a whole reset needs concrete whole-scope impact. V2 retains its recorded full-round requirements.
 Do not construct a reset state by hand.
 
 An identical interrupted request replays its durable receipt. Reusing an ID
@@ -652,7 +676,7 @@ Use the unchanged reviewed scope; source changes require delta assessment first.
 Full verifier resubmissions retain the same targets. Durable compact recovery
 uses the frozen targets after process loss. Confirmations retain their normal
 disposition and ticket requirements; independent rejections retain evidence for
-subsequent packets. Finding-bearing rounds remain non-clean and require three
+subsequent packets. V3 adjudicated coverage does not require ritual source rediscovery. Legacy v2 finding-bearing rounds remain non-clean and require three
 later complete finding-free rounds.
 
 Version-two round evidence derives `source_changed` from immutable captured Git
