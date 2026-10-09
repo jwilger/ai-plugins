@@ -584,7 +584,9 @@ runtime facts after closing each subagent:
 
 Append this object to every lens result before `final_review.advance`, and to a
 verifier result after closing the verifier. Missing or mismatched attestations
-produce the authoritative non-clean reset transition described above.
+produce the protocol-specific invalid-evidence transition described above: v3
+replaces the invalid assignment while preserving independently valid peers;
+retained v2 resets the complete iteration and its clean credit.
 
 ## Protocol Versions
 
@@ -616,10 +618,14 @@ Call `final_review.reopen` with `state_ref`, a stable `operation_id`, `reason`,
 `current_diff_hash`, `current_changed_files` and
 `current_shared_test_evidence`. The reference must identify the authoritative
 completed session. The baseline is immutable; a new plan must not silently
-replace it. The operation records a reset, invalidates clean receipts and lens
-sample credit, preserves durable history and unresolved obligations, and emits
-an independent delta-risk assignment. Submit that real scout's attested result,
-then obtain fresh affected-behavior/dependency review and preserve proven unaffected receipts; a whole reset needs concrete whole-scope impact. V2 retains its recorded full-round requirements.
+replace it. The operation preserves durable history and unresolved obligations
+and emits an independent delta-risk assignment. V3 suspends completion and marks
+coverage for reassessment while retaining its receipts and sample obligations.
+Submit the real scout's attested result, then renew affected behavior and
+dependency coverage while preserving proven unaffected receipts; whole renewal
+requires concrete whole-scope impact or unisolatable provenance. Retained v2
+clears the clean streak and verified-clean credit and requires its recorded
+complete fresh rounds. Historical reviewer and finding identities remain intact.
 Do not construct a reset state by hand.
 
 An identical interrupted request replays its durable receipt. Reusing an ID

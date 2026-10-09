@@ -766,7 +766,7 @@
   },
   {
     "case_id": "development-discipline-final-review-clean-iterations",
-    "behavior": "Runs a repository-agnostic final review with fresh lens subagents until three clean iterations.",
+    "behavior": "Runs a repository-agnostic final review with fresh independent risk-selected coverage, defaulting to one complete coverage set.",
     "prompt": "Before opening a pull request for my branch, perform a final review of the changes since origin/main. How should you run the review and decide when it is safe to proceed?",
     "tags": ["final-review", "subagents", "pr-readiness"],
     "plugins": ["development-system"],
