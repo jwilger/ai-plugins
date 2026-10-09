@@ -204,8 +204,13 @@ impl ReviewCoordinator {
             );
         }
         let migration = if migrating {
+            let recorded_files = ReviewSessionState::parse_legacy_wire(&state)?
+                .scope
+                .changed_files;
+            let supplied_files: HashSet<_> = input.current_changed_files.iter().collect();
             if input.current_diff_hash != state["scope"]["diff_hash"].as_str().unwrap_or_default()
-                || json!(input.current_changed_files) != state["scope"]["changed_files"]
+                || supplied_files.len() != input.current_changed_files.len()
+                || supplied_files != recorded_files.iter().collect()
             {
                 return Err("review_migration_scope_changed=true recovery=perform_bound_source_delta_review".into());
             }

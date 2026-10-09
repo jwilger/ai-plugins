@@ -112,7 +112,7 @@ commit, empty commit, push, or replacement local checkpoint.
 Any changed reviewed path, content, mode, untracked content, pinned baseline,
 or requested scope is source-changing remediation. Complete its mode-specific
 immediate-test, lightweight-review, and commit-through-Lefthook checkpoint first, including exact
-commit, message, and signature verification for remote commits, then perform a
+commit, message, and signature verification for remote commits, then perform an
 independent delta assessment and fresh review of affected behavior and dependencies.
 Preserve proven peers under v3; full renewal requires material whole-scope impact
 or unisolatable provenance. V2 retains its recorded full-reset contract. In remote modes, comprehensive suites remain in CI; review

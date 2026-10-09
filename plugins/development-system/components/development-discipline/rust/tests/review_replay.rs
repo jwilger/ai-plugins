@@ -700,6 +700,99 @@ fn proportional_review_completed_session_reopens_for_bound_delta_assessment() {
 }
 
 #[test]
+fn proportional_review_migration_inventory_order_preserves_scope_and_rejects_mutations() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    std::fs::write(fixture.root.join("peer.txt"), "unchanged peer\n").unwrap();
+    let mut args = fixture.plan_args();
+    args["changed_files"] = json!(["source.txt", "peer.txt"]);
+    let scout = fixture.call("final_review.assess_risk", &args);
+    for field in ["assignment_id", "subagent_key"] {
+        args["risk_assessment"][field] = scout["assignments"][0][field].clone();
+    }
+    let legacy = fixture.call("final_review.plan", &args);
+    let request = json!({"state_ref":legacy["state_ref"],"operation_id":"permuted-policy-preview","reason":"Migrate the same source inventory regardless of serialization order.","current_diff_hash":"replay-fixture","current_changed_files":["peer.txt","source.txt"],"current_shared_test_evidence":legacy["state"]["shared_test_evidence"]});
+    let preview = fixture.call("final_review.migrate_policy", &request);
+    assert_eq!(preview["migration_applied"], false);
+    assert_eq!(preview["assignments"].as_array().unwrap().len(), 1);
+    let authority = fixture.authority();
+    for changed in [
+        json!(["peer.txt", "source.txt", "source.txt"]),
+        json!(["source.txt"]),
+        json!(["peer.txt", "source.txt", "other.txt"]),
+    ] {
+        let mut invalid = request.clone();
+        invalid["current_changed_files"] = changed;
+        assert!(!fixture
+            .run("final_review.migrate_policy", &invalid)
+            .status
+            .success());
+        assert_eq!(fixture.authority(), authority);
+    }
+    let mut wrong_hash = request.clone();
+    wrong_hash["current_diff_hash"] = json!("different-source");
+    assert!(!fixture
+        .run("final_review.migrate_policy", &wrong_hash)
+        .status
+        .success());
+    std::fs::write(fixture.root.join("source.txt"), "unreviewed replacement\n").unwrap();
+    assert!(!fixture
+        .run("final_review.migrate_policy", &request)
+        .status
+        .success());
+    std::fs::write(fixture.root.join("source.txt"), "changed\n").unwrap();
+    std::fs::set_permissions(
+        fixture.root.join("source.txt"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    assert!(!fixture
+        .run("final_review.migrate_policy", &request)
+        .status
+        .success());
+    std::fs::set_permissions(
+        fixture.root.join("source.txt"),
+        std::fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    assert_eq!(
+        fixture.call("final_review.migrate_policy", &request)["migration_applied"],
+        false
+    );
+    assert_eq!(fixture.authority(), authority);
+    let assignment = &preview["assignments"][0];
+    let mut assessment = args["risk_assessment"].clone();
+    for field in ["assignment_id", "subagent_key"] {
+        assessment[field] = assignment[field].clone();
+    }
+    assessment["shared_test_evidence_id"] = assignment["shared_test_evidence"]["id"].clone();
+    assessment["caller_attestation"]["model_role"] = assignment["model_role"].clone();
+    assessment["coverage_policy"] = json!({"artifact_kind":"code","freshness_identity":"fixture-environment-v1","requirements":[{"lens":"correctness-behavior","scope_paths":["peer.txt","source.txt"],"required_samples":1,"escalation":null}]});
+    let mut apply = request.clone();
+    apply["risk_assessment"] = assessment;
+    apply["prior_assignment_closures"] = json!(legacy["assignments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| json!({"subagent_key":a["subagent_key"],"disposition":"not-started"}))
+        .collect::<Vec<_>>());
+    let migrated = fixture.call("final_review.migrate_policy", &apply);
+    assert!(migrated["state"]["risk_plan"]["coverage"].is_object());
+    assert_eq!(
+        migrated["state"]["scope"]["baseline_commit"],
+        legacy["state"]["scope"]["baseline_commit"]
+    );
+    assert_eq!(migrated["state"]["required_clean_iterations"], 1);
+    let pending = json!({"assignments":migrated["next_assignments"]});
+    let mut results = proportional_results(&fixture, &pending);
+    results[0]["coverage_evidence"]["dependency_blobs"]["peer.txt"] = json!(format!(
+        "100644:{}",
+        git(&fixture.root, &["hash-object", "peer.txt"])
+    ));
+    assert_eq!(fixture.call("final_review.advance", &json!({"state_ref":migrated["state_ref"],"current_diff_hash":"replay-fixture","lens_results":results}))["complete"], true);
+}
+
+#[test]
 fn proportional_review_migration_requires_independent_assessment_and_replays() {
     let fixture = Fixture::new();
     let legacy = fixture.call("final_review.plan", &fixture.plan_args());
