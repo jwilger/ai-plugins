@@ -146,9 +146,11 @@ At `passing-awaiting-gates-or-review`, stop all implementation and test editing:
    `rationale-commit-messages` and create the signed commit. That Git operation
    must trigger Lefthook's repository fast pre-commit gate; never run the same
    gate separately first. Record the hook receipt, exact OID, and transition to
-   `committed` together. Local-only verification therefore requires an
-   authorized local commit; withheld commit authority blocks completion rather
-   than replacing the mechanical hook with a manual gate.
+   `committed` together. Local-only uses this route when a commit is requested
+   or required and authorized; otherwise use the exact no-commit snapshot route
+   with fresh proportionate checks, never a fabricated commit-hook receipt.
+   An explicit committed-evidence policy still requires a commit tree and blocks
+   completion when commit authority is withheld.
    If pre-commit fails and no commit was created, first publish `failing` with
    the actual failed Git command and hook evidence, `failure_kind:
 pre-commit-hook`, cleared gate receipts, null delivery, unchanged HEAD, and
@@ -162,7 +164,7 @@ pre-commit-hook`, cleared gate receipts, null delivery, unchanged HEAD, and
    mode pushes only the already-authorized branch and does not infer permission
    to open or merge. The Git push must trigger Lefthook's pre-push verification;
    do not invoke that gate separately. Local-only records the verified commit
-   and performs no remote mutation.
+   or exact authorized no-commit snapshot and performs no remote mutation.
 
 Every interruption preserves the immutable ticket-start baseline, exact
 snapshot, immediate-test receipt, durable state, completed gates, and sole next
@@ -202,9 +204,12 @@ RED applies and use it when required, then repeat the immediate focused test,
 lightweight review, signed commit through the pre-commit hook, and exact
 verification. In direct-to-trunk mode, keep the repair commit local and renew
 affected full review through its diff-bound delta/reset protocol before the
-already-authorized push. In PR/MR mode, disable auto-merge and return a ready
-request to draft before pushing a source repair; renew affected full review
-before marking it ready again. Local-only uses a signed local commit only when
+already-authorized push. In PR/MR mode, first return any ready request to draft
+and confirm the transition succeeded, even when auto-merge is already off.
+Only then disable auto-merge and confirm it is off; do not push if either
+safeguard fails. After pushing the source repair, renew affected full review
+before restoring ready status, auto-merge, or merge-queue eligibility.
+Local-only uses a signed local commit only when
 required and authorized, otherwise the exact no-commit snapshot, and performs
 no remote mutation. Remote readiness still waits for terminal CI success on
 the exact final-reviewed SHA.

@@ -80,17 +80,22 @@ review, approval and merge state to the exact current head revision.
 
 ### Local-only
 
-Keep all work local and do not push, open a PR/MR, or merge. Because repository
-verification is mechanically owned by Lefthook's commit hook, local completion
-requires an authorized local commit. If the user withholds commit authority,
-block without replacing the hook with a manual gate. Record the exact verified
-commit, completed gates, and next permitted action as the delivery-mode
-equivalent checkpoint, and report remaining remote work plainly. Final review
-still applies at ticket completion in local-only mode: run it with
-fresh local evidence, and do not dismiss it as a publication-only or PR-only
-gate. A clean unchanged terminal review creates no commit. Source-changing
-remediation creates a signed local commit only when authorized. When commit
-authority is explicitly withheld, block without committing or pushing.
+Keep all work local and do not push, open a PR/MR, or merge. Commit only when
+requested or required by the applicable repository policy, and only with commit
+authority. That route uses the normal commit hook and exact signed commit.
+Otherwise use the authorized exact no-commit snapshot route with fresh,
+proportionate local checks and review; never fabricate a commit-hook receipt or
+manually duplicate hook-owned checks around an authorized commit. An explicit
+committed-evidence policy, including Tiber's opt-in minimum-clean-reviews policy,
+still requires evidence in a commit tree: without commit authority, completion
+blocks rather than substituting a snapshot or performing remote work.
+
+Record the exact verified local identity, completed gates and next permitted
+action as the delivery-mode equivalent checkpoint. Report local checks and
+working-tree state without remote CI claims. Final review still applies at
+ticket completion with fresh local evidence. A clean unchanged review creates
+no commit. Source-changing remediation renews local verification and affected
+review through the same authorized commit or no-commit route.
 
 ## Authorization and evidence
 
