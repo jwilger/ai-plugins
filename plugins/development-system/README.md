@@ -73,13 +73,17 @@ build.
 It is inert outside a Git repository or without a valid schema-3
 `.development-system.toml`. Read-only repository inspection remains available
 in every state. Start configuration through the structured `setup.preview`
-tool. It detects the project's manifests, lockfiles, conventional
-source/test/docs and build paths, Nix devshell, and stack-native test commands,
-then produces a schema-validated project-specific configuration instead of a
-generic template. Review its exact scopes and named command catalog, then
-review the generated project `lefthook.yml` and its separate pre-commit and
-pre-push command selections, then explicitly confirm `setup.apply`. Setup
-installs both Git hooks with Lefthook but never stages or commits configuration.
+operation. Discovery returns repository evidence, the current config, command
+suggestions and the [schema-v3 structural schema](schemas/project-config.schema.json).
+The agent authors the entire project configuration, asks about ambiguous or
+missing commands and planned layout, and tailors language-specific scope globs.
+Detection never limits custom commands or supplies an installable template.
+Preview the complete `proposed_configuration` TOML with independent
+`pre_commit_command_ids` and `pre_push_command_ids`, approve the exact config
+and hooks, then apply that same proposal with its `preview_identity` and
+`confirmed: true`. Changed repository inputs or options require a new preview.
+Existing policy is reconciled deliberately; replacing Lefthook requires explicit
+approval. The former detected-command-selection apply API is unsupported in v8.
 
 Normal Development System work relies on those Git operations for repository
 verification: `git commit` triggers the fast pre-commit checks and `git push`
@@ -177,7 +181,7 @@ replace `.latest`, fabricate evidence, or use the helper to skip testing,
 review, commit hooks, or delivery gates.
 
 The plugin-wide Development Discipline MCP surface provides bounded repository
-inspection, deterministic setup, and multi-agent final review. Those services
+inspection, schema-validated project setup, and multi-agent final review. Those services
 and the Codex hooks are advisory: they
 do not establish agent identity, isolate project tools, execute project
 mutations, or deny ordinary host capabilities. `setup.apply` writes only the

@@ -364,415 +364,346 @@ fn semantic_reader_is_inert_without_configuration_and_invalid_config_fails_close
     assert_current_final_review_protocol(&invalid);
 }
 
+fn setup_arguments(root: &std::path::Path) -> Value {
+    json!({ "project_root": root, "proposed_configuration": "schema_version = 3\n[scopes.application]\ncategory = 'source'\ninclude = ['apps/*/lib/**/*.ex']\nexclude = ['apps/*/lib/**/*_test.exs']\n[scopes.checks]\ncategory = 'tests'\ninclude = ['apps/*/test/**/*_test.exs']\n[commands.fast]\nargv = ['mix', 'test', '--stale']\ncapability = 'tests'\n[commands.full]\nargv = ['mix', 'test']\ncapability = 'verification'\n[delivery]\nmode = 'direct-to-trunk'\ntrunk_branch = 'main'\n[features]\ntiber = true\n", "pre_commit_command_ids": ["fast"], "pre_push_command_ids": ["full"] })
+}
+
+fn approved_setup(root: &std::path::Path, mut arguments: Value) -> Value {
+    let preview = mcp_call(root, "setup.preview", arguments.clone());
+    let identity = preview
+        .pointer("/result/structuredContent/preview_identity")
+        .expect("valid full proposal preview")
+        .clone();
+    arguments["preview_identity"] = identity;
+    arguments["confirmed"] = json!(true);
+    arguments
+}
+
 #[test]
-fn setup_preview_reports_legacy_configuration_as_migration_required() {
+fn setup_discovery_returns_schema_and_evidence_without_a_template() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
+    fs::create_dir_all(root.path().join("apps/web/lib")).expect("layout");
     fs::write(
-        root.path().join("Cargo.toml"),
-        "[package]\nname='fixture'\nversion='0.1.0'\n",
+        root.path().join("apps/web/lib/web.ex"),
+        "defmodule Web do end",
     )
-    .expect("Cargo manifest");
-    fs::write(
-        root.path().join(".development-system.toml"),
-        "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\n\n[features]\ntiber = true\n\n[worktrees]\nroot = \".worktrees\"\n\n[final_review.models.codex]\npre_filter = \"gpt-6-astra\"\n",
-    )
-    .expect("legacy configuration");
-
+    .expect("source");
     let response = mcp_call(
         root.path(),
         "setup.preview",
-        json!({ "project_root": root.path() }),
+        json!({"project_root":root.path()}),
     );
+    let result = &response["result"]["structuredContent"];
+    assert_eq!(result["proposal_required"], true);
+    assert_eq!(
+        result["configuration_schema"]["properties"]["schema_version"]["const"],
+        3
+    );
+    assert!(result.get("configuration").is_none());
+    assert!(result["repository_files"]
+        .as_array()
+        .expect("files")
+        .contains(&json!("apps/web/lib/web.ex")));
+    assert!(!root.path().join(".development-system.toml").exists());
+}
 
-    assert_eq!(
-        response.pointer("/result/structuredContent/configuration_state"),
-        Some(&json!("migration_required"))
-    );
-    assert_eq!(
-        response.pointer("/result/structuredContent/existing_schema_version"),
-        Some(&json!(2))
-    );
-    assert_eq!(
-        response.pointer("/result/structuredContent/mutations_available"),
-        Some(&json!(false))
-    );
-    let preview = response
-        .pointer("/result/structuredContent/configuration")
-        .and_then(Value::as_str)
-        .expect("migration configuration");
-    for retained in [
-        "[delivery]",
-        "mode = \"direct-to-trunk\"",
-        "[features]",
-        "tiber = true",
-        "[worktrees]",
-        "root = \".worktrees\"",
-        "[final_review.models.codex]",
-        "pre_filter = \"gpt-6-astra\"",
-        "[scopes.source]",
+#[test]
+fn setup_accepts_custom_commands_and_planned_language_specific_scopes() {
+    let root = TempDir::new().expect("repository");
+    git(root.path(), &["init", "--quiet"]);
+    let arguments = setup_arguments(root.path());
+    let preview = mcp_call(root.path(), "setup.preview", arguments.clone());
+    let result = &preview["result"]["structuredContent"];
+    assert_eq!(result["configuration"], arguments["proposed_configuration"]);
+    assert!(result["lefthook_configuration"]
+        .as_str()
+        .expect("hooks")
+        .contains("--stale"));
+    assert_eq!(result["pre_commit_command_ids"], json!(["fast"]));
+    assert_eq!(result["pre_push_command_ids"], json!(["full"]));
+    assert!(!root.path().join("apps").exists());
+}
+
+#[test]
+fn setup_discovery_keeps_native_command_suggestions_and_nix_wrapping() {
+    for (manifest, text, native) in [
+        (
+            "pyproject.toml",
+            "[project]\nname='fixture'\nversion='0.1'\n",
+            "pytest",
+        ),
+        ("go.mod", "module example.invalid/fixture\ngo 1.22\n", "go"),
+        (
+            "Cargo.toml",
+            "[package]\nname='fixture'\nversion='0.1.0'\n",
+            "cargo",
+        ),
     ] {
-        assert!(
-            preview.contains(retained),
-            "missing retained policy: {retained}"
+        let root = TempDir::new().expect("repository");
+        git(root.path(), &["init", "--quiet"]);
+        fs::write(root.path().join(manifest), text).expect("manifest");
+        fs::write(root.path().join("flake.nix"), "{}\n").expect("Nix manifest");
+        let response = mcp_call(
+            root.path(),
+            "setup.preview",
+            json!({"project_root":root.path()}),
         );
+        let suggestions = response["result"]["structuredContent"]["detected_commands"].to_string();
+        assert!(suggestions.contains(native), "{response}");
+        assert!(suggestions.contains("nix"), "{response}");
+        assert!(response["result"]["structuredContent"]
+            .get("configuration")
+            .is_none());
     }
 }
 
 #[test]
-fn setup_requires_confirmation_and_writes_codex_repository_configuration() {
+fn setup_apply_requires_confirmation_and_a_full_exact_preview() {
     let root = TempDir::new().expect("repository");
-    let isolated_home = TempDir::new().expect("isolated home");
-    let isolated_codex_home = TempDir::new().expect("isolated Codex home");
     git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-
-    let rejected = mcp_call(
+    let old = mcp_call(
         root.path(),
         "setup.apply",
-        json!({ "project_root": root.path() }),
+        json!({"confirmed":true,"selected_command_ids":["just-ci"]}),
     );
+    assert!(old.get("error").is_some());
+    let mut arguments = approved_setup(root.path(), setup_arguments(root.path()));
+    arguments["confirmed"] = json!(false);
+    let rejected = mcp_call(root.path(), "setup.apply", arguments);
     assert_eq!(
-        rejected.pointer("/error/message"),
-        Some(&json!("development_system.setup_confirmation_required"))
+        rejected["error"]["message"],
+        "development_system.setup_confirmation_required"
     );
-
-    let home_sentinel = isolated_home.path().join("sentinel");
-    let codex_sentinel = isolated_codex_home.path().join("sentinel");
-    fs::write(&home_sentinel, "unchanged").expect("home sentinel");
-    fs::write(&codex_sentinel, "unchanged").expect("Codex sentinel");
-    let applied = mcp_call_with_environment(
-        root.path(),
-        "setup.apply",
-        json!({
-            "project_root": root.path(),
-            "confirmed": true,
-            "selected_command_ids": ["just-ci"]
-        }),
-        &[
-            ("HOME", isolated_home.path()),
-            ("CODEX_HOME", isolated_codex_home.path()),
-        ],
-    );
-
-    assert_eq!(
-        applied.pointer("/result/structuredContent/applied"),
-        Some(&json!(true))
-    );
-    assert_eq!(
-        applied.pointer("/result/structuredContent/authority"),
-        Some(&json!("advisory"))
-    );
-    assert_eq!(
-        applied.pointer("/result/structuredContent/ordinary_harness_tools_restricted"),
-        Some(&json!(false))
-    );
-    assert_eq!(
-        applied.pointer("/result/structuredContent/restart_required"),
-        Some(&json!(true))
-    );
-    assert!(root.path().join(".development-system.toml").is_file());
-    assert!(!root.path().join(".codex/config.toml").exists());
-    let lefthook = fs::read_to_string(root.path().join("lefthook.yml")).expect("Lefthook config");
-    assert!(lefthook.contains("pre-commit:"));
-    assert!(lefthook.contains("pre-push:"));
-    assert!(lefthook.contains("development-system-just-ci"));
-    assert!(lefthook.contains("'just' 'ci'"));
-    assert!(root.path().join(".git/hooks/pre-commit").is_file());
-    assert!(root.path().join(".git/hooks/pre-push").is_file());
-    for unexpected in [
-        ".development-system/agents",
-        ".development-system/boundary-proof.codex.json",
-        ".development-system/activation.codex.json",
-        ".development-system/codex",
-    ] {
-        assert!(
-            !root.path().join(unexpected).exists(),
-            "setup created unsupported boundary artifact: {unexpected}"
-        );
-    }
-    assert_eq!(
-        fs::read_to_string(home_sentinel).expect("home sentinel"),
-        "unchanged"
-    );
-    assert_eq!(
-        fs::read_to_string(codex_sentinel).expect("Codex sentinel"),
-        "unchanged"
-    );
+    assert!(!root.path().join(".development-system.toml").exists());
 }
 
 #[test]
-fn setup_apply_writes_only_codex_project_mcp_configuration() {
+fn setup_apply_writes_exact_proposal_and_preserves_unrelated_configuration() {
     let root = TempDir::new().expect("repository");
-    let binaries = TempDir::new().expect("binaries");
     git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
     fs::create_dir_all(root.path().join(".codex")).expect("Codex directory");
     fs::write(
         root.path().join(".codex/config.toml"),
-        "model = \"gpt-6-sol\"\n",
+        "model = 'gpt-6-sol'\n",
     )
-    .expect("Codex config");
-    fs::write(
-        root.path().join(".mcp.json"),
-        r#"{"mcpServers":{"custom":{"command":"custom-mcp"}}}"#,
-    )
-    .expect("unrelated MCP config");
-
-    let codex = mcp_call_with_environment(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"] }),
-        &[("DEVELOPMENT_SYSTEM_MCP_BINARY_DIRECTORY", binaries.path())],
+    .expect("config");
+    fs::write(root.path().join(".mcp.json"), "unrelated sentinel").expect("sentinel");
+    let arguments = approved_setup(root.path(), setup_arguments(root.path()));
+    let response = mcp_call(root.path(), "setup.apply", arguments.clone());
+    assert_eq!(
+        response["result"]["structuredContent"]["applied"], true,
+        "{response}"
     );
     assert_eq!(
-        codex.pointer("/result/structuredContent/restart_required"),
-        Some(&json!(true))
+        fs::read_to_string(root.path().join(".development-system.toml")).expect("config"),
+        arguments["proposed_configuration"]
+            .as_str()
+            .expect("proposal")
     );
-    let codex_config =
-        fs::read_to_string(root.path().join(".codex/config.toml")).expect("Codex config");
-    assert!(codex_config.contains("model = \"gpt-6-sol\""));
-    assert!(!codex_config.contains("[mcp_servers.development-discipline]"));
-    assert!(!codex_config.contains(binaries.path().to_string_lossy().as_ref()));
     assert_eq!(
-        fs::read_to_string(root.path().join(".mcp.json")).expect("unrelated MCP config"),
-        r#"{"mcpServers":{"custom":{"command":"custom-mcp"}}}"#
+        fs::read_to_string(root.path().join(".mcp.json")).expect("sentinel"),
+        "unrelated sentinel"
     );
+    assert_eq!(
+        fs::read_to_string(root.path().join(".codex/config.toml")).expect("config"),
+        "model = 'gpt-6-sol'\n"
+    );
+    assert!(root.path().join(".git/hooks/pre-commit").is_file());
+    assert!(root.path().join(".git/hooks/pre-push").is_file());
 }
 
 #[test]
-fn setup_apply_migrates_legacy_configuration_without_dropping_project_policy() {
+fn setup_reconciles_existing_policy_and_migrates_only_managed_mcp_entries() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
-    fs::create_dir_all(root.path().join(".agents")).expect("agents directory");
-    fs::create_dir_all(root.path().join(".codex")).expect("codex directory");
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-    fs::write(
-        root.path().join("Cargo.toml"),
-        "[package]\nname='fixture'\nversion='0.1.0'\n",
-    )
-    .expect("Cargo manifest");
     fs::write(
         root.path().join(".development-system.toml"),
-        "schema_version = 2\n\n[delivery]\nmode = \"direct-to-trunk\"\ntrunk_branch = \"main\"\n\n[features]\ntiber = true\n\n[final_review.models.codex]\npre_filter = \"gpt-6-astra\"\n",
+        "schema_version = 2\n[features]\ntiber = true\n",
     )
-    .expect("legacy configuration");
-    fs::write(
-        root.path().join(".codex/config.toml"),
-        "approval_policy = \"on-request\"\n# >>> development-system MCP servers >>>\n[mcp_servers.tiber]\ncommand = \"/old/tiber\"\n# <<< development-system MCP servers <<<\n",
-    )
-    .expect("legacy MCP configuration");
-    let preview = mcp_call(
-        root.path(),
-        "setup.preview",
-        json!({ "project_root": root.path() }),
-    );
+    .expect("legacy config");
+    fs::create_dir_all(root.path().join(".codex")).expect("Codex directory");
+    fs::write(root.path().join(".codex/config.toml"), "model = 'gpt-6-sol'\n# >>> development-system MCP servers >>>\n[mcp_servers.development-discipline]\ncommand = 'old'\n# <<< development-system MCP servers <<<\n").expect("legacy MCP");
+    let arguments = approved_setup(root.path(), setup_arguments(root.path()));
+    let response = mcp_call(root.path(), "setup.apply", arguments);
     assert_eq!(
-        preview.pointer("/result/structuredContent/legacy_mcp_block_removal"),
-        Some(&json!(true))
+        response["result"]["structuredContent"]["applied"], true,
+        "{response}"
     );
-    let applied = mcp_call(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"] }),
-    );
-    assert_eq!(
-        applied.pointer("/result/structuredContent/applied"),
-        Some(&json!(true)),
-        "unexpected setup response: {applied}"
-    );
-    let migrated = fs::read_to_string(root.path().join(".development-system.toml"))
-        .expect("migrated configuration");
-    for retained in [
-        "schema_version = 3",
-        "[delivery]",
-        "trunk_branch = \"main\"",
-        "[features]",
-        "tiber = true",
-        "[final_review.models.codex]",
-        "pre_filter = \"gpt-6-astra\"",
-        "[scopes.source]",
+    let config = fs::read_to_string(root.path().join(".development-system.toml")).expect("config");
+    assert!(config.contains("tiber = true"));
+    assert!(config.contains("apps/*/lib/**/*.ex"));
+    let codex = fs::read_to_string(root.path().join(".codex/config.toml")).expect("Codex config");
+    assert!(codex.contains("model = 'gpt-6-sol'"));
+    assert!(!codex.contains("mcp_servers"));
+}
+
+#[test]
+fn setup_rejects_changed_proposal_hook_selection_or_repository_before_writes() {
+    for change in [
+        "proposal",
+        "selection",
+        "files",
+        "config",
+        "hooks",
+        "replacement",
+        "manifest",
     ] {
-        assert!(
-            migrated.contains(retained),
-            "missing retained policy: {retained}"
+        let root = TempDir::new().expect("repository");
+        git(root.path(), &["init", "--quiet"]);
+        fs::write(root.path().join("package.json"), "{}").expect("manifest");
+        let mut arguments = approved_setup(root.path(), setup_arguments(root.path()));
+        match change {
+            "proposal" => {
+                arguments["proposed_configuration"] = json!(format!(
+                    "{}\n# changed",
+                    arguments["proposed_configuration"]
+                        .as_str()
+                        .expect("proposal")
+                ))
+            }
+            "selection" => arguments["pre_commit_command_ids"] = json!(["full"]),
+            "files" => fs::write(root.path().join("new-file"), "new").expect("new file"),
+            "config" => fs::write(root.path().join(".development-system.toml"), "# changed")
+                .expect("config"),
+            "hooks" => {
+                fs::write(root.path().join("lefthook.yml"), "pre-commit: {}\n").expect("hooks")
+            }
+            "replacement" => arguments["replace_lefthook"] = json!(true),
+            "manifest" => fs::write(root.path().join("package.json"), "{\"name\":\"changed\"}")
+                .expect("manifest"),
+            _ => unreachable!(),
+        }
+        let before = fs::read(root.path().join(".development-system.toml")).ok();
+        let response = mcp_call(root.path(), "setup.apply", arguments);
+        assert_eq!(
+            response["error"]["message"], "development_system.setup_preview_stale",
+            "{change}: {response}"
         );
+        assert_eq!(
+            fs::read(root.path().join(".development-system.toml")).ok(),
+            before
+        );
+        assert!(!root.path().join(".git/hooks/pre-push").exists());
     }
-    assert_eq!(
-        fs::read_to_string(root.path().join(".codex/config.toml"))
-            .expect("migrated Codex configuration"),
-        "approval_policy = \"on-request\"\n\n"
-    );
-    let status = mcp_call(
-        root.path(),
-        "workspace-reader.status",
-        json!({ "project_root": root.path() }),
-    );
-    assert_eq!(
-        status.pointer("/result/structuredContent/configuration"),
-        Some(&json!("configured"))
-    );
-    assert_current_final_review_protocol(&status);
 }
 
 #[test]
-fn setup_preview_reports_unenabled_named_command_candidates() {
+fn setup_requires_both_explicit_hook_selections_and_safe_complete_configuration() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-    fs::write(root.path().join("package.json"), "{}\n").expect("package");
-    let preview = mcp_call(
-        root.path(),
-        "setup.preview",
-        json!({ "project_root": root.path() }),
-    );
-    let candidates = preview
-        .pointer("/result/structuredContent/detected_commands")
-        .and_then(Value::as_array)
-        .expect("candidates");
-    assert!(candidates.iter().any(|candidate| candidate
-        == &json!({
-            "id": "just-ci",
-            "argv": ["just", "ci"],
-            "capability": "verification",
-            "requires_confirmation": true
-        })));
-    assert!(candidates.iter().any(|candidate| candidate
-        == &json!({
-                "id": "npm-test",
-                "argv": ["npm", "test"],
-                "capability": "tests",
-                "requires_confirmation": true
-        })));
-    assert_eq!(
-        preview.pointer("/result/structuredContent/recommended_command_ids"),
-        Some(&json!(["just-ci"]))
-    );
-}
-
-#[test]
-fn setup_preview_wraps_detected_commands_in_the_repository_nix_devshell() {
-    let root = TempDir::new().expect("repository");
-    git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("flake.nix"), "{}\n").expect("flake");
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-    fs::write(
-        root.path().join("Cargo.toml"),
-        "[package]\nname='fixture'\nversion='0.1.0'\n",
-    )
-    .expect("cargo manifest");
-    fs::write(root.path().join("package.json"), "{}\n").expect("package");
-
-    let preview = mcp_call(
-        root.path(),
-        "setup.preview",
-        json!({ "project_root": root.path() }),
-    );
-    let candidates = preview
-        .pointer("/result/structuredContent/detected_commands")
-        .and_then(Value::as_array)
-        .expect("candidates");
-
-    for (id, command) in [
-        ("just-ci", vec!["nix", "develop", "-c", "just", "ci"]),
-        ("cargo-test", vec!["nix", "develop", "-c", "cargo", "test"]),
-        ("npm-test", vec!["nix", "develop", "-c", "npm", "test"]),
+    for key in ["pre_commit_command_ids", "pre_push_command_ids"] {
+        let mut arguments = setup_arguments(root.path());
+        arguments.as_object_mut().expect("arguments").remove(key);
+        let response = mcp_call(root.path(), "setup.preview", arguments);
+        assert!(response.get("error").is_some(), "{response}");
+    }
+    for bad in [
+        "schema_version = 3\n[scopes.source]\ncategory='source'\ninclude=['../escape/**']\n",
+        "schema_version=3\n[scopes.source]\ncategory='source'\ninclude=['future/**/*.rs']\n",
     ] {
-        assert!(candidates.iter().any(|candidate| {
-            candidate.get("id") == Some(&json!(id))
-                && candidate.get("argv") == Some(&json!(command))
-        }));
+        let mut arguments = setup_arguments(root.path());
+        arguments["proposed_configuration"] = json!(bad);
+        assert!(mcp_call(root.path(), "setup.preview", arguments)
+            .get("error")
+            .is_some());
     }
 }
 
+#[cfg(unix)]
 #[test]
-fn setup_preview_tailors_commands_and_scopes_to_a_python_uv_project() {
-    let root = TempDir::new().expect("repository");
-    git(root.path(), &["init", "--quiet"]);
-    fs::create_dir_all(root.path().join("src/example")).expect("source directory");
-    fs::create_dir_all(root.path().join("tests")).expect("tests directory");
-    fs::create_dir_all(root.path().join("docs")).expect("docs directory");
-    fs::write(
-        root.path().join("pyproject.toml"),
-        "[project]\nname = 'example'\nversion = '0.1.0'\n",
-    )
-    .expect("Python manifest");
-    fs::write(root.path().join("uv.lock"), "version = 1\n").expect("uv lockfile");
-
-    let preview = mcp_call(
-        root.path(),
-        "setup.preview",
-        json!({ "project_root": root.path() }),
-    );
-
-    let configuration = preview
-        .pointer("/result/structuredContent/configuration")
-        .and_then(Value::as_str)
-        .expect("configuration");
-    for expected in [
-        "include = [\"src/**\"]",
-        "include = [\"tests/**\"]",
-        "include = [\"docs/**\"]",
-        "\"pyproject.toml\"",
-        "\"uv.lock\"",
+fn setup_rejects_symlinked_write_paths_without_changing_external_files() {
+    use std::os::unix::fs::symlink;
+    for relative in [
+        ".development-system.toml",
+        "lefthook.yml",
+        ".codex/config.toml",
+        ".codex",
     ] {
-        assert!(
-            configuration.contains(expected),
-            "missing detected configuration {expected}: {configuration}"
-        );
+        let root = TempDir::new().expect("repository");
+        let external = TempDir::new().expect("external files");
+        git(root.path(), &["init", "--quiet"]);
+        let arguments = approved_setup(root.path(), setup_arguments(root.path()));
+        let target = external.path().join("config.toml");
+        fs::write(&target, "external sentinel\n").expect("external file");
+        let link = root.path().join(relative);
+        if relative == ".codex/config.toml" {
+            fs::create_dir(root.path().join(".codex")).expect("config directory");
+        }
+        symlink(
+            if relative == ".codex" {
+                external.path()
+            } else {
+                &target
+            },
+            &link,
+        )
+        .expect("symlink");
+        for (tool, input) in [
+            ("setup.preview", setup_arguments(root.path())),
+            ("setup.apply", arguments),
+        ] {
+            let result = mcp_call(root.path(), tool, input);
+            assert!(
+                result["error"]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("setup_symlink_not_supported")),
+                "{relative}: {result}"
+            );
+            assert_eq!(
+                fs::read_to_string(&target).expect("external file"),
+                "external sentinel\n"
+            );
+            assert!(!root.path().join(".git/hooks/pre-push").exists());
+        }
     }
-    for irrelevant in ["app/**", "lib/**", "target/**", "package.json"] {
-        assert!(
-            !configuration.contains(irrelevant),
-            "configuration retained unrelated static scope {irrelevant}: {configuration}"
-        );
-    }
-
-    let candidates = preview
-        .pointer("/result/structuredContent/detected_commands")
-        .and_then(Value::as_array)
-        .expect("candidates");
-    assert!(candidates.iter().any(|candidate| {
-        candidate.get("id") == Some(&json!("python-test"))
-            && candidate.get("argv") == Some(&json!(["uv", "run", "pytest"]))
-            && candidate.get("capability") == Some(&json!("tests"))
-    }));
-    assert_eq!(
-        preview.pointer("/result/structuredContent/recommended_command_ids"),
-        Some(&json!(["python-test"]))
-    );
-    let lefthook = preview
-        .pointer("/result/structuredContent/lefthook_configuration")
-        .and_then(Value::as_str)
-        .expect("Lefthook preview");
-    assert!(lefthook.contains("pre-commit:"));
-    assert!(lefthook.contains("pre-push:"));
-    assert!(lefthook.contains("'uv' 'run' 'pytest'"));
 }
 
 #[test]
-fn setup_preview_uses_go_root_sources_without_inventing_a_src_directory() {
+fn setup_validates_proposed_final_review_policy_before_preview_or_write() {
     let root = TempDir::new().expect("repository");
     git(root.path(), &["init", "--quiet"]);
-    fs::write(
-        root.path().join("go.mod"),
-        "module example.invalid/project\n",
-    )
-    .expect("Go module");
-    fs::write(root.path().join("main.go"), "package main\n").expect("Go source");
+    for policy in [
+        "[final_review]\nunexpected=true\n",
+        "[final_review.models]\npre_filter=42\n",
+        "[final_review.models]\nunknown='model'\n",
+        "[final_review.models]\ncodex='model'\n",
+        "[final_review.dispositions.MAJOR]\ncorrectness-behavior='invalid'\n",
+    ] {
+        let mut arguments = setup_arguments(root.path());
+        let proposal = format!(
+            "{}\n{policy}",
+            arguments["proposed_configuration"]
+                .as_str()
+                .expect("proposal")
+        );
+        arguments["proposed_configuration"] = json!(proposal);
+        let result = mcp_call(root.path(), "setup.preview", arguments);
+        assert!(result.get("error").is_some(), "{policy}: {result}");
+        assert!(!root.path().join(".development-system.toml").exists());
+    }
+}
 
-    let preview = mcp_call(
-        root.path(),
-        "setup.preview",
-        json!({ "project_root": root.path() }),
+#[test]
+fn setup_requires_explicit_approval_to_replace_lefthook() {
+    let root = TempDir::new().expect("repository");
+    git(root.path(), &["init", "--quiet"]);
+    fs::write(root.path().join("lefthook.yml"), "pre-commit: {}\n").expect("hooks");
+    let arguments = approved_setup(root.path(), setup_arguments(root.path()));
+    let rejected = mcp_call(root.path(), "setup.apply", arguments);
+    assert_eq!(
+        rejected["error"]["message"],
+        "development_system.setup_lefthook_conflict replace_lefthook_required=true"
     );
-    let configuration = preview
-        .pointer("/result/structuredContent/configuration")
-        .and_then(Value::as_str)
-        .expect("configuration");
-
-    assert!(configuration.contains("include = [\"*.go\"]"));
-    assert!(!configuration.contains("src/**"));
+    assert!(!root.path().join(".development-system.toml").exists());
+    let mut arguments = setup_arguments(root.path());
+    arguments["replace_lefthook"] = json!(true);
+    let arguments = approved_setup(root.path(), arguments);
+    let applied = mcp_call(root.path(), "setup.apply", arguments);
+    assert_eq!(
+        applied["result"]["structuredContent"]["applied"], true,
+        "{applied}"
+    );
 }
 
 #[test]
@@ -807,141 +738,6 @@ fn setup_preview_rejects_a_linked_worktree_and_reports_the_primary_checkout() {
         .expect("setup error");
     assert!(error.starts_with("development_system.setup_primary_checkout_required"));
     assert!(error.contains(root.path().to_string_lossy().as_ref()));
-}
-
-#[test]
-fn setup_apply_enables_only_explicitly_selected_detected_commands() {
-    let root = TempDir::new().expect("repository");
-    git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-    fs::write(root.path().join("package.json"), "{}\n").expect("package");
-    let rejected = mcp_call(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["git-push"] }),
-    );
-    assert_eq!(
-        rejected.pointer("/error/message"),
-        Some(&json!("development_system.setup_command_not_detected"))
-    );
-    let applied = mcp_call(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["npm-test"] }),
-    );
-    assert_eq!(
-        applied.pointer("/result/structuredContent/applied"),
-        Some(&json!(true))
-    );
-    let configuration =
-        fs::read_to_string(root.path().join(".development-system.toml")).expect("configuration");
-    assert!(configuration.contains("[commands.npm-test]"));
-    assert!(configuration.contains("argv = [\"npm\", \"test\"]"));
-    assert!(!configuration.contains("[commands.just-ci]"));
-}
-
-#[test]
-fn setup_apply_refuses_a_repository_with_no_detectable_scopes() {
-    let root = TempDir::new().expect("repository");
-    git(root.path(), &["init", "--quiet"]);
-
-    let rejected = mcp_call(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true }),
-    );
-
-    assert_eq!(
-        rejected.pointer("/error/message"),
-        Some(&json!("development_system.config_scope_required"))
-    );
-    assert!(!root.path().join(".development-system.toml").exists());
-}
-
-#[test]
-fn setup_apply_requires_selecting_a_detected_command() {
-    let root = TempDir::new().expect("repository");
-    git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-
-    let rejected = mcp_call(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true }),
-    );
-
-    assert_eq!(
-        rejected.pointer("/error/message"),
-        Some(&json!(
-            "development_system.setup_command_selection_required"
-        ))
-    );
-    assert!(!root.path().join(".development-system.toml").exists());
-}
-
-#[test]
-fn setup_apply_can_add_a_detected_command_to_existing_configuration() {
-    let root = TempDir::new().expect("repository");
-    git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-    fs::write(
-        root.path().join(".development-system.toml"),
-        "schema_version = 3\n\n[scopes.source]\ncategory = \"source\"\ninclude = [\"src/**\"]\n",
-    )
-    .expect("configuration");
-
-    let applied = mcp_call(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"] }),
-    );
-
-    assert_eq!(
-        applied.pointer("/result/structuredContent/applied"),
-        Some(&json!(true))
-    );
-    assert_eq!(
-        applied.pointer("/result/structuredContent/configuration_changed"),
-        Some(&json!(true))
-    );
-    let configuration =
-        fs::read_to_string(root.path().join(".development-system.toml")).expect("configuration");
-    assert!(configuration.contains("[commands.just-ci]"));
-}
-
-#[test]
-fn setup_apply_requires_explicit_approval_before_replacing_lefthook() {
-    let root = TempDir::new().expect("repository");
-    git(root.path(), &["init", "--quiet"]);
-    fs::write(root.path().join("justfile"), "ci:\n    true\n").expect("justfile");
-    fs::write(root.path().join("lefthook.yml"), "pre-commit: {}\n").expect("existing hook");
-
-    let preview = mcp_call(
-        root.path(),
-        "setup.preview",
-        json!({ "project_root": root.path() }),
-    );
-    assert_eq!(
-        preview.pointer("/result/structuredContent/lefthook_configuration_state"),
-        Some(&json!("conflict"))
-    );
-
-    let rejected = mcp_call(
-        root.path(),
-        "setup.apply",
-        json!({ "project_root": root.path(), "confirmed": true, "selected_command_ids": ["just-ci"] }),
-    );
-    assert_eq!(
-        rejected.pointer("/error/message"),
-        Some(&json!(
-            "development_system.setup_lefthook_conflict replace_lefthook_required=true"
-        ))
-    );
-    assert!(!root.path().join(".development-system.toml").exists());
-    assert_eq!(
-        fs::read_to_string(root.path().join("lefthook.yml")).expect("existing hook"),
-        "pre-commit: {}\n"
-    );
 }
 
 #[test]

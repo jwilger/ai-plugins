@@ -14913,13 +14913,13 @@ fn semantic_tools() -> Vec<Value> {
         }),
         json!({
             "name": "setup.preview",
-            "description": "Detect the repository's stack and preview a schema-validated Development System configuration with project-specific scopes and named direct-argv commands. This operation never writes.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root }, "additionalProperties": false }
+            "description": "Discover repository evidence and the configuration schema; validate a complete agent-authored TOML proposal with explicit hooks and return its approval identity. Never writes or generates a generic installable template.",
+            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "proposed_configuration": { "type": "string" }, "preview_identity": { "type": "string" }, "pre_commit_command_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true }, "pre_push_command_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true }, "replace_lefthook": { "type": "boolean" } }, "additionalProperties": false }
         }),
         json!({
             "name": "setup.apply",
             "description": "Apply the exact setup.preview configuration after explicit confirmation, install the approved project Lefthook pre-commit and pre-push jobs, and remove only legacy managed MCP entries. Portable plugin-root mcp.json owns both servers. It never stages, commits, or changes global Codex settings.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "confirmed": { "type": "boolean", "const": true }, "selected_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "maxItems": 16 }, "pre_commit_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "pre_push_command_ids": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9-]+$" }, "uniqueItems": true, "minItems": 1, "maxItems": 16 }, "replace_lefthook": { "type": "boolean" } }, "required": ["confirmed"], "additionalProperties": false }
+            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "proposed_configuration": { "type": "string" }, "preview_identity": { "type": "string" }, "pre_commit_command_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true }, "pre_push_command_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true }, "replace_lefthook": { "type": "boolean" }, "confirmed": { "type": "boolean", "const": true } }, "required": ["confirmed", "proposed_configuration", "preview_identity", "pre_commit_command_ids", "pre_push_command_ids"], "additionalProperties": false }
         }),
         json!({
             "name": "development_system.codex_sandbox_setup",
@@ -15394,69 +15394,38 @@ fn apply_setup(project_root: &Path, arguments: &Value) -> Result<Value, String> 
         return Err("development_system.setup_confirmation_required".to_string());
     }
     let preview = semantic_setup_preview(project_root, arguments)?;
-    let migrating = preview.get("configuration_state")
-        == Some(&Value::String("migration_required".to_string()));
-    let configuration_path = project_root.join(semantic::CONFIG_FILE);
-    let configuration_already_valid = configuration_path.exists() && !migrating;
-    let selected_commands = arguments
-        .get("selected_command_ids")
-        .and_then(Value::as_array)
-        .is_some_and(|selected| !selected.is_empty());
-    let base_configuration = preview
+    let expected = arguments
+        .get("preview_identity")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "development_system.setup_preview_identity_required".to_string())?;
+    if preview.get("preview_identity").and_then(Value::as_str) != Some(expected) {
+        return Err("development_system.setup_preview_stale".to_string());
+    }
+    let configuration = preview
         .get("configuration")
         .and_then(Value::as_str)
-        .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?;
-    let lefthook_preview = preview
-        .get("lefthook_configuration")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?;
-    if fs::read_to_string(project_root.join("lefthook.yml"))
-        .ok()
-        .as_deref()
-        .is_some_and(|existing| existing != lefthook_preview)
+        .ok_or_else(|| "development_system.setup_proposal_required".to_string())?;
+    if preview["lefthook_configuration_state"] == "conflict"
         && arguments.get("replace_lefthook") != Some(&Value::Bool(true))
     {
         return Err(
             "development_system.setup_lefthook_conflict replace_lefthook_required=true".to_string(),
         );
     }
-    let has_commands = setup_configuration_has_commands(base_configuration)?;
-    if !has_commands && !selected_commands {
-        return Err("development_system.setup_command_selection_required".to_string());
+    let config = semantic::ProjectConfig::parse(configuration)?;
+    let path = project_root.join(semantic::CONFIG_FILE);
+    let configuration_changed = fs::read_to_string(&path).ok().as_deref() != Some(configuration);
+    if configuration_changed {
+        fs::write(&path, configuration)
+            .map_err(|error| format!("development_system.setup_write_failed source={error}"))?;
     }
-    let configuration_before = fs::read_to_string(&configuration_path).ok();
-    let mut configuration_changed = false;
-    if !configuration_already_valid || selected_commands {
-        let config = setup_configuration_with_selected_commands(
-            base_configuration,
-            arguments.get("selected_command_ids"),
-            preview.get("detected_commands"),
-        )?;
-        semantic::ProjectConfig::parse(&config)?;
-        configuration_changed = configuration_before.as_deref() != Some(config.as_str());
-        if configuration_changed {
-            fs::write(&configuration_path, config)
-                .map_err(|error| format!("development_system.setup_write_failed source={error}"))?;
-        }
-    }
-    let config = match semantic::config_at(project_root) {
-        semantic::ConfigState::Valid(config) => config,
-        semantic::ConfigState::Absent => {
-            return Err("development_system.configuration_required".to_string());
-        }
-        semantic::ConfigState::Invalid(error) => return Err(error),
-    };
     let lefthook = write_project_lefthook_configuration(project_root, &config, arguments)?;
     let harness_configuration = migrate_legacy_project_mcp_configuration(project_root)?;
     Ok(json!({
-        "applied": true,
-        "configuration_changed": configuration_changed,
-        "configuration_path": semantic::CONFIG_FILE,
-        "configuration_digest": config.digest(),
-        "authority": "advisory",
-        "ordinary_harness_tools_restricted": false,
-        "restart_required": true,
-        "lefthook": lefthook,
+        "applied": true, "configuration_changed": configuration_changed,
+        "configuration_path": semantic::CONFIG_FILE, "configuration_digest": config.digest(),
+        "authority": "advisory", "ordinary_harness_tools_restricted": false,
+        "restart_required": true, "lefthook": lefthook,
         "harness_configuration": harness_configuration
     }))
 }
@@ -15472,14 +15441,19 @@ fn selected_hook_command_ids(
         }
         return Ok(fallback.to_vec());
     };
-    selected
+    let ids = selected
         .iter()
         .map(|value| {
             value.as_str().map(str::to_string).ok_or_else(|| {
                 "development_system.setup_hook_command_selection_invalid".to_string()
             })
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    let unique = ids.iter().collect::<std::collections::BTreeSet<_>>();
+    if ids.is_empty() || unique.len() != ids.len() {
+        return Err("development_system.setup_hook_command_selection_invalid".to_string());
+    }
+    Ok(ids)
 }
 
 fn shell_argument(argument: &str) -> String {
@@ -15522,18 +15496,8 @@ fn write_project_lefthook_configuration(
     config: &semantic::ProjectConfig,
     arguments: &Value,
 ) -> Result<Value, String> {
-    let fallback = arguments
-        .get("selected_command_ids")
-        .and_then(Value::as_array)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
     let (configuration, pre_commit_ids, pre_push_ids) =
-        project_lefthook_configuration(config, arguments, &fallback)?;
+        project_lefthook_configuration(config, arguments, &[])?;
     let path = project_root.join("lefthook.yml");
     let existing = fs::read_to_string(&path).ok();
     if existing
@@ -15826,110 +15790,193 @@ fn semantic_result(structured: Value) -> Value {
     })
 }
 
+fn validate_setup_write_paths(project_root: &Path) -> Result<(), String> {
+    for relative in [
+        semantic::CONFIG_FILE,
+        "lefthook.yml",
+        ".codex",
+        ".codex/config.toml",
+    ] {
+        match fs::symlink_metadata(project_root.join(relative)) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "development_system.setup_symlink_not_supported path={relative}"
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                "development_system.setup_path_inspection_failed path={relative} source={error}"
+            ))
+            }
+        }
+    }
+    Ok(())
+}
+
 fn semantic_setup_preview(project_root: &Path, arguments: &Value) -> Result<Value, String> {
     if !project_root.join(".git").exists() {
         return Err("development_system.setup_git_repository_required".to_string());
     }
     require_primary_setup_checkout(project_root)?;
-    let configuration = match fs::read_to_string(project_root.join(semantic::CONFIG_FILE)) {
-        Ok(existing) => setup_configuration_with_scopes(&existing, project_root)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            setup_configuration_with_scopes(
-                &format!("schema_version = {}\n", semantic::SCHEMA_VERSION),
-                project_root,
-            )?
-        }
+    validate_setup_write_paths(project_root)?;
+    let existing = match fs::read_to_string(project_root.join(semantic::CONFIG_FILE)) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
         Err(error) => {
             return Err(format!(
                 "development_system.setup_read_failed source={error}"
-            ));
+            ))
         }
     };
-    semantic::ProjectConfig::parse(&configuration)?;
-    let detected_commands = setup_command_candidates(project_root);
-    let recommended_command_ids = setup_recommended_command_ids(project_root);
-    let detected_command_ids = detected_commands
-        .iter()
-        .filter_map(|command| command.get("id").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    let hook_configuration = setup_configuration_with_selected_commands(
-        &configuration,
-        Some(&json!(detected_command_ids)),
-        Some(&Value::Array(detected_commands.clone())),
-    )?;
-    let hook_config = semantic::ProjectConfig::parse(&hook_configuration)?;
-    let fallback = recommended_command_ids
-        .iter()
-        .map(|id| (*id).to_string())
-        .collect::<Vec<_>>();
-    let (lefthook_configuration, pre_commit_command_ids, pre_push_command_ids) =
-        project_lefthook_configuration(&hook_config, arguments, &fallback)?;
-    let lefthook_configuration_state = match fs::read_to_string(project_root.join("lefthook.yml")) {
-        Ok(existing) if existing == lefthook_configuration => "current",
-        Ok(_) => "conflict",
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => "absent",
-        Err(error) => {
-            return Err(format!(
-                "development_system.setup_lefthook_read_failed source={error}"
-            ));
-        }
+    let state = match semantic::config_at(project_root) {
+        semantic::ConfigState::Absent => "absent",
+        semantic::ConfigState::Valid(_) => "current",
+        semantic::ConfigState::Invalid(_) => "invalid",
     };
+    let output = ProcessCommand::new("git")
+        .args([
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| format!("development_system.setup_discovery_failed source={error}"))?;
+    if !output.status.success() {
+        return Err("development_system.setup_discovery_failed".to_string());
+    }
+    let files = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect::<Vec<_>>();
+    let schema: Value = serde_json::from_str(include_str!(
+        "../../../../schemas/project-config.schema.json"
+    ))
+    .map_err(|error| format!("development_system.setup_schema_invalid source={error}"))?;
     let legacy_mcp_block_removal = legacy_project_mcp_configuration(project_root)?.is_some();
-    let existing = match semantic::config_at(project_root) {
-        semantic::ConfigState::Absent => json!({
-            "configuration_state": "absent",
-            "mutations_available": false
-        }),
-        semantic::ConfigState::Valid(config) => json!({
-            "configuration_state": "current",
-            "existing_schema_version": config.schema_version,
-            "configuration_digest": config.digest(),
-            "mutations_available": false
-        }),
-        semantic::ConfigState::Invalid(remediation) => {
-            let schema_version = fs::read_to_string(project_root.join(semantic::CONFIG_FILE))
-                .ok()
-                .and_then(|text| text.parse::<toml::Value>().ok())
-                .and_then(|value| {
-                    value
-                        .get("schema_version")
-                        .and_then(toml::Value::as_integer)
-                })
-                .and_then(|value| u32::try_from(value).ok());
-            if schema_version.is_some_and(|version| version < semantic::SCHEMA_VERSION) {
-                json!({
-                    "configuration_state": "migration_required",
-                    "existing_schema_version": schema_version,
-                    "remediation": "development_system.setup_migration_required",
-                    "mutations_available": false
-                })
-            } else {
-                json!({
-                    "configuration_state": "invalid",
-                    "remediation": remediation,
-                    "mutations_available": false
-                })
-            }
-        }
-    };
-    Ok(json!({
-        "project_root": project_root,
-        "configuration": configuration,
-        "detected_scopes": setup_detected_scope_names(&configuration)?,
-        "detected_commands": detected_commands,
-        "recommended_command_ids": recommended_command_ids,
-        "lefthook_configuration": lefthook_configuration,
-        "lefthook_configuration_state": lefthook_configuration_state,
-        "recommended_pre_commit_command_ids": pre_commit_command_ids,
-        "recommended_pre_push_command_ids": pre_push_command_ids,
-        "requires_confirmation": true,
+    let mut preview = json!({
+        "project_root": project_root, "configuration_state": state,
+        "existing_configuration": existing, "configuration_schema": schema,
+        "repository_files": files.iter().take(512).collect::<Vec<_>>(),
+        "repository_files_truncated": files.len() > 512,
+        "detected_scope_suggestions": setup_detected_scopes(project_root),
+        "detected_commands": setup_command_candidates(project_root),
+        "recommended_command_ids": setup_recommended_command_ids(project_root),
+        "requires_confirmation": true, "mutations_available": false,
         "legacy_mcp_block_removal": legacy_mcp_block_removal,
-        "mutation_policy": "Setup writes the approved repository-local Development System and Lefthook configurations, installs pre-commit and pre-push hooks, and removes only legacy managed project MCP settings; portable plugin-root mcp.json owns both servers and harness capabilities remain advisory.",
-        "configuration_state": existing["configuration_state"],
-        "existing_schema_version": existing["existing_schema_version"],
-        "remediation": existing["remediation"],
-        "mutations_available": false
-    }))
+        "proposal_required": true
+    });
+    let Some(configuration) = arguments
+        .get("proposed_configuration")
+        .and_then(Value::as_str)
+    else {
+        return Ok(preview);
+    };
+    let config = semantic::ProjectConfig::parse(configuration)?;
+    if config.final_review.is_some() {
+        parse_project_final_review(
+            config.final_review.as_ref(),
+            "codex",
+            &project_root.join(semantic::CONFIG_FILE),
+        )?;
+    }
+    if config.commands.is_empty() {
+        return Err("development_system.setup_command_selection_required".to_string());
+    }
+    let (hooks, pre_commit, pre_push) = project_lefthook_configuration(&config, arguments, &[])?;
+    if pre_commit.is_empty() || pre_push.is_empty() {
+        return Err("development_system.setup_hook_command_selection_required".to_string());
+    }
+    let hooks_before = fs::read_to_string(project_root.join("lefthook.yml")).ok();
+    let hooks_state = match hooks_before.as_deref() {
+        None => "absent",
+        Some(text) if text == hooks => "current",
+        Some(_) => "conflict",
+    };
+    // Bind approval to the full proposal, selected hooks, repository identity,
+    // current configuration, discovery inventory and current working-tree diff.
+    let repository_state = ProcessCommand::new("git")
+        .args(["diff", "HEAD", "--no-ext-diff", "--no-textconv"])
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| format!("development_system.setup_discovery_failed source={error}"))?;
+    let head = ProcessCommand::new("git")
+        .args(["rev-parse", "--verify", "HEAD"])
+        .current_dir(project_root)
+        .output()
+        .map_err(|error| format!("development_system.setup_discovery_failed source={error}"))?;
+    let file_fingerprints = files
+        .iter()
+        .map(|relative| {
+            setup_file_fingerprint(&project_root.join(relative))
+                .map(|digest| format!("{relative}:{digest}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .join("\n");
+    let identity = stable_storage_digest(&[
+        &project_root.to_string_lossy(),
+        configuration,
+        &hooks,
+        existing.as_deref().unwrap_or(""),
+        hooks_before.as_deref().unwrap_or(""),
+        &String::from_utf8_lossy(&head.stdout),
+        &String::from_utf8_lossy(&repository_state.stdout),
+        &file_fingerprints,
+        &fs::read_to_string(project_root.join(".codex/config.toml")).unwrap_or_default(),
+        if arguments.get("replace_lefthook") == Some(&Value::Bool(true)) {
+            "replace"
+        } else {
+            "preserve"
+        },
+    ]);
+    preview["configuration"] = json!(configuration);
+    preview["lefthook_configuration"] = json!(hooks);
+    preview["lefthook_configuration_state"] = json!(hooks_state);
+    preview["pre_commit_command_ids"] = json!(pre_commit);
+    preview["pre_push_command_ids"] = json!(pre_push);
+    preview["preview_identity"] = json!(identity);
+    preview["proposal_required"] = json!(false);
+    Ok(preview)
+}
+
+fn setup_file_fingerprint(path: &Path) -> Result<String, String> {
+    let failure = |error| format!("development_system.setup_discovery_failed source={error}");
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok("absent".to_string()),
+        Err(error) => return Err(failure(error)),
+    };
+    if metadata.file_type().is_symlink() {
+        return fs::read_link(path)
+            .map(|target| format!("symlink:{}", target.display()))
+            .map_err(failure);
+    }
+    if metadata.is_dir() {
+        return Ok("directory".to_string());
+    }
+    if !metadata.is_file() {
+        return Err("development_system.setup_discovery_file_type_invalid".to_string());
+    }
+    let mut file = fs::File::open(path).map_err(failure)?;
+    let mut hash = 0xcbf29ce484222325_u64;
+    let mut buffer = [0_u8; 65536];
+    loop {
+        let size = file.read(&mut buffer).map_err(failure)?;
+        if size == 0 {
+            break;
+        }
+        for byte in &buffer[..size] {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    Ok(format!("file:{hash:016x}"))
 }
 
 fn require_primary_setup_checkout(project_root: &Path) -> Result<(), String> {
@@ -16039,116 +16086,6 @@ fn setup_recommended_command_ids(project_root: &Path) -> Vec<&'static str> {
     .unwrap_or_default()
 }
 
-fn setup_configuration_has_commands(configuration: &str) -> Result<bool, String> {
-    let value: toml::Value = configuration.parse().map_err(|error| {
-        format!("development_system.setup_configuration_invalid source={error}")
-    })?;
-    Ok(value
-        .get("commands")
-        .and_then(toml::Value::as_table)
-        .is_some_and(|commands| !commands.is_empty()))
-}
-
-fn setup_configuration_with_selected_commands(
-    configuration: &str,
-    selected: Option<&Value>,
-    candidates: Option<&Value>,
-) -> Result<String, String> {
-    let selected = match selected {
-        None => Vec::new(),
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(|value| {
-                value
-                    .as_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| "development_system.setup_command_selection_invalid".to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        Some(_) => return Err("development_system.setup_command_selection_invalid".to_string()),
-    };
-    let candidates = candidates
-        .and_then(Value::as_array)
-        .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?;
-    if selected.iter().any(|id| {
-        !candidates
-            .iter()
-            .any(|candidate| candidate.get("id").and_then(Value::as_str) == Some(id))
-    }) {
-        return Err("development_system.setup_command_not_detected".to_string());
-    }
-    let mut value: toml::Value = configuration.parse().map_err(|error| {
-        format!("development_system.setup_configuration_invalid source={error}")
-    })?;
-    let root = value
-        .as_table_mut()
-        .ok_or_else(|| "development_system.setup_configuration_invalid".to_string())?;
-    let mut commands = root
-        .remove("commands")
-        .and_then(|value| value.as_table().cloned())
-        .unwrap_or_default();
-    for id in selected {
-        let candidate = candidates
-            .iter()
-            .find(|candidate| candidate.get("id").and_then(Value::as_str) == Some(id.as_str()))
-            .ok_or_else(|| "development_system.setup_command_not_detected".to_string())?;
-        let argv = candidate
-            .get("argv")
-            .and_then(Value::as_array)
-            .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?
-            .iter()
-            .map(|argument| {
-                argument
-                    .as_str()
-                    .map(|argument| toml::Value::String(argument.to_string()))
-                    .ok_or_else(|| "development_system.setup_preview_invalid".to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let capability = candidate
-            .get("capability")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "development_system.setup_preview_invalid".to_string())?;
-        let mut command = toml::map::Map::new();
-        command.insert("argv".to_string(), toml::Value::Array(argv));
-        command.insert(
-            "capability".to_string(),
-            toml::Value::String(capability.to_string()),
-        );
-        command.insert(
-            "network".to_string(),
-            toml::Value::String("denied".to_string()),
-        );
-        let command = toml::Value::Table(command);
-        commands.insert(id, command);
-    }
-    if !commands.is_empty() {
-        root.insert("commands".to_string(), toml::Value::Table(commands));
-    }
-    toml::to_string(&value)
-        .map_err(|error| format!("development_system.setup_serialize_failed source={error}"))
-}
-
-fn setup_configuration_with_scopes(existing: &str, project_root: &Path) -> Result<String, String> {
-    let mut value: toml::Value = existing.parse().map_err(|error| {
-        format!("development_system.setup_existing_config_invalid source={error}")
-    })?;
-    let table = value
-        .as_table_mut()
-        .ok_or_else(|| "development_system.setup_existing_config_invalid".to_string())?;
-    table.insert(
-        "schema_version".to_string(),
-        toml::Value::Integer(i64::from(semantic::SCHEMA_VERSION)),
-    );
-    if !table.contains_key("scopes") {
-        table.insert(
-            "scopes".to_string(),
-            toml::Value::Table(setup_detected_scopes(project_root)),
-        );
-    }
-    toml::to_string(&value)
-        .map_err(|error| format!("development_system.setup_serialize_failed source={error}"))
-}
-
 fn setup_detected_scopes(project_root: &Path) -> toml::map::Map<String, toml::Value> {
     let has = |path: &str| project_root.join(path).exists();
     let has_root_extension = |extension: &str| {
@@ -16236,17 +16173,6 @@ fn setup_detected_scopes(project_root: &Path) -> toml::map::Map<String, toml::Va
         detected(&["target", "dist", "build", ".evals"]),
     );
     scopes
-}
-
-fn setup_detected_scope_names(configuration: &str) -> Result<Vec<String>, String> {
-    let value: toml::Value = configuration.parse().map_err(|error| {
-        format!("development_system.setup_configuration_invalid source={error}")
-    })?;
-    Ok(value
-        .get("scopes")
-        .and_then(toml::Value::as_table)
-        .map(|scopes| scopes.keys().cloned().collect())
-        .unwrap_or_default())
 }
 
 fn workflow_project_root(arguments: &Value) -> Result<PathBuf, String> {
@@ -25976,14 +25902,21 @@ fn load_model_config(arguments: &Value, harness: &str) -> Result<ProjectModelCon
             canonical_path.display()
         )
     })?;
-    let final_review = parsed
-        .get("final_review")
+    parse_project_final_review(parsed.get("final_review"), harness, &canonical_path)
+}
+
+fn parse_project_final_review(
+    final_review: Option<&toml::Value>,
+    harness: &str,
+    path: &Path,
+) -> Result<ProjectModelConfig, String> {
+    let final_review = final_review
         .and_then(toml::Value::as_table)
         .cloned()
         .ok_or_else(|| {
             format!(
                 "model_config_missing_final_review_table path={}",
-                canonical_path.display()
+                path.display()
             )
         })?;
     if final_review
@@ -25992,22 +25925,20 @@ fn load_model_config(arguments: &Value, harness: &str) -> Result<ProjectModelCon
     {
         return Err(format!(
             "model_config_unknown_final_review_key path={}",
-            canonical_path.display()
+            path.display()
         ));
     }
     let models = final_review
         .get("models")
         .map(|value| {
-            value.as_table().cloned().ok_or_else(|| {
-                format!(
-                    "model_config_models_must_be_table path={}",
-                    canonical_path.display()
-                )
-            })
+            value
+                .as_table()
+                .cloned()
+                .ok_or_else(|| format!("model_config_models_must_be_table path={}", path.display()))
         })
         .transpose()?
         .unwrap_or_default();
-    let mut config = project_model_config(models, harness, &canonical_path)?;
+    let mut config = project_model_config(models, harness, path)?;
     config.finding_disposition_config = final_review
         .get("dispositions")
         .map(parse_disposition_config_shape)

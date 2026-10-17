@@ -1,0 +1,260 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "scopes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "tests",
+              "source",
+              "documentation",
+              "developer_environment",
+              "build_output"
+            ]
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["category", "include"],
+        "additionalProperties": false
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "tests",
+              "implementation",
+              "documentation",
+              "developer_environment",
+              "verification"
+            ]
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["string", "integer", "boolean"]
+            }
+          },
+          "output_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "network": {
+            "type": "string",
+            "enum": ["allowed", "denied"]
+          },
+          "environment": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "service": {
+            "type": "object",
+            "properties": {
+              "readiness_command": {
+                "type": "string"
+              },
+              "shutdown_command": {
+                "type": "string"
+              }
+            },
+            "required": ["readiness_command", "shutdown_command"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["argv", "capability"],
+        "additionalProperties": false
+      }
+    },
+    "signing": {
+      "type": "object",
+      "properties": {
+        "commit": {
+          "type": "boolean"
+        },
+        "tag": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "diagnostic_mode": {
+      "type": "boolean"
+    },
+    "model_routing": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "trunk_branch": {
+          "type": "string"
+        },
+        "merge_method": {
+          "type": "string",
+          "enum": ["merge", "squash", "rebase"]
+        }
+      },
+      "required": ["mode"],
+      "additionalProperties": false
+    },
+    "forge": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["git_hub", "git_lab"]
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": ["provider", "repository"],
+      "additionalProperties": false
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "tiber": {
+          "type": "boolean"
+        },
+        "agentic_systems": {
+          "type": "boolean"
+        },
+        "eval_case_reporting": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "worktrees": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string"
+        }
+      },
+      "required": ["root"],
+      "additionalProperties": false
+    },
+    "tiber": {
+      "type": "object",
+      "properties": {
+        "max_queued": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "required": ["max_queued"],
+      "additionalProperties": false
+    },
+    "final_review": {
+      "type": "object",
+      "properties": {
+        "models": {
+          "type": "object",
+          "properties": {
+            "pre_filter": {
+              "type": "string",
+              "minLength": 1
+            },
+            "lens_review": {
+              "type": "string",
+              "minLength": 1
+            },
+            "post_filter": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verifier": {
+              "type": "string",
+              "minLength": 1
+            },
+            "codex": {
+              "type": "object",
+              "properties": {
+                "pre_filter": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "lens_review": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "post_filter": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "verifier": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "dispositions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["block", "ticket", "document", "ignore"]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["schema_version", "scopes"],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jwilger/ai-plugins/development-system/project-config-v3.schema.json",
+  "title": "Development System project configuration v3",
+  "description": "Structural schema for TOML converted to JSON. ProjectConfig::parse remains authoritative for semantic constraints (safe globs, command capabilities, references and protected paths). This schema is not a default configuration."
+}

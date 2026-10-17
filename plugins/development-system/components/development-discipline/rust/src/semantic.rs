@@ -7917,6 +7917,110 @@ mod tests {
     }
 
     #[test]
+    fn published_configuration_schema_matches_rust_fields_and_enum_shapes() {
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../schemas/project-config.schema.json"
+        ))
+        .expect("published schema");
+        let configuration = ProjectConfig::parse(
+            r#"
+            schema_version = 3
+            diagnostic_mode = true
+            [scopes.application]
+            category = "source"
+            include = ["apps/*/lib/**/*.ex"]
+            exclude = ["apps/*/lib/**/*_test.exs"]
+            [commands.verify]
+            argv = ["mix", "test"]
+            capability = "verification"
+            output_scopes = []
+            network = "denied"
+            environment = []
+            [commands.verify.parameters]
+            name = "string"
+            count = "integer"
+            enabled = "boolean"
+            [commands.verify.service]
+            readiness_command = "verify"
+            shutdown_command = "verify"
+            [signing]
+            commit = true
+            tag = false
+            [model_routing]
+            review = "model"
+            [delivery]
+            mode = "direct-to-trunk"
+            trunk_branch = "main"
+            merge_method = "merge"
+            [forge]
+            provider = "git_hub"
+            repository = "owner/repository"
+            [features]
+            tiber = true
+            agentic_systems = true
+            eval_case_reporting = true
+            [worktrees]
+            root = ".worktrees"
+            [tiber]
+            max_queued = 20
+            [final_review.models]
+            pre_filter = "strong-reviewer"
+            lens_review = "substantive-worker"
+            post_filter = "bounded-helper"
+            verifier = "strong-reviewer"
+            [final_review.models.codex]
+            pre_filter = "model"
+            lens_review = "model"
+            post_filter = "model"
+            verifier = "model"
+            [final_review.dispositions.MAJOR]
+            correctness-behavior = "block"
+        "#,
+        )
+        .expect("complete configuration");
+        let serialized = serde_json::to_value(configuration).expect("serialized configuration");
+        fn assert_shape(schema: &serde_json::Value, value: &serde_json::Value) {
+            if let Some(choices) = schema.get("enum").and_then(serde_json::Value::as_array) {
+                assert!(choices.contains(value), "enum mismatch: {value}");
+            }
+            if let Some(properties) = schema
+                .get("properties")
+                .and_then(serde_json::Value::as_object)
+            {
+                let fields = value.as_object().expect("object");
+                assert_eq!(
+                    properties.keys().collect::<Vec<_>>(),
+                    fields.keys().collect::<Vec<_>>()
+                );
+                assert_eq!(schema["additionalProperties"], false);
+                for (key, child) in fields {
+                    assert_shape(&properties[key], child);
+                }
+            } else if let Some(item_schema) = schema
+                .get("additionalProperties")
+                .filter(|item| item.is_object())
+            {
+                for child in value.as_object().expect("map").values() {
+                    assert_shape(item_schema, child);
+                }
+            } else if let Some(item_schema) = schema.get("items") {
+                for child in value.as_array().expect("array") {
+                    assert_shape(item_schema, child);
+                }
+            }
+        }
+        assert_shape(&schema, &serialized);
+        assert_eq!(
+            schema["properties"]["schema_version"]["const"],
+            SCHEMA_VERSION
+        );
+        assert_eq!(
+            schema["required"],
+            serde_json::json!(["schema_version", "scopes"])
+        );
+    }
+
+    #[test]
     fn complete_domain_model_has_no_unconsumed_provenance() {
         let report = eventcore::model::check().expect("complete EventCore assignment model");
         assert_eq!(report.status, eventcore::model::CheckStatus::Verified);

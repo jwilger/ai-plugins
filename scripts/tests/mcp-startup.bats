@@ -431,11 +431,25 @@ list_server_tools() {
   source "$ROOT/plugins/development-system/lib/installed-binary.sh"
   tiber_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" tiber)"
   discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
-  request="$(jq -cn --arg project_root "$project" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"setup.apply",arguments:{project_root:$project_root,confirmed:true,selected_command_ids:["just-ci"]}}}')"
-
+  local proposal='schema_version = 3
+[scopes.source]
+category = "source"
+include = ["application/**/*.rs"]
+[commands.verify]
+argv = ["just", "ci"]
+capability = "verification"'
+  local arguments
+  arguments="$(jq -cn --arg project_root "$project" --arg proposal "$proposal" '{project_root:$project_root,proposed_configuration:$proposal,pre_commit_command_ids:["verify"],pre_push_command_ids:["verify"]}')"
+  request="$(jq -cn --argjson arguments "$arguments" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"setup.preview",arguments:$arguments}}')"
   run bash -c 'printf "%s\\n" "$2" | "$1" --service plugin-advisory' _ "$discipline_path" "$request"
   [ "$status" -eq 0 ]
-
+  local identity
+  identity="$(printf '%s' "$output" | jq -er '.result.structuredContent.preview_identity')"
+  request="$(jq -cn --argjson arguments "$arguments" --arg identity "$identity" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"setup.apply",arguments:($arguments + {confirmed:true,preview_identity:$identity})}}')"
+  run bash -c 'printf "%s\\n" "$2" | "$1" --service plugin-advisory' _ "$discipline_path" "$request"
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s' "$output" | jq -r '.result.structuredContent.applied')" = true ]
+  [ "$(cat "$project/.development-system.toml")" = "$proposal" ]
   [ ! -e "$project/.codex/config.toml" ]
 
   run just --justfile "$ROOT/justfile" install-development-system-binaries --from-source

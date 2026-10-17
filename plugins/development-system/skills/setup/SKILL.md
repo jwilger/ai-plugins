@@ -1,12 +1,25 @@
 ---
 name: setup
-description: Use when initializing or reconfiguring a repository with the development-system plugin, including semantic path scopes and named direct-argv commands.
+description: Use when initializing or reconfiguring development-system. Author the whole schema-validated project configuration, ask about ambiguous tooling and commands, and tailor semantic globs to current and planned layouts and languages.
 ---
 
 # Development system setup
 
+The schema defines acceptable structure; the agent authors the entire project
+configuration. Discovery suggestions are evidence, never a template or command
+whitelist. Inspect the actual and planned layout, ask about missing or ambiguous
+tooling and commands, and preserve intentional existing policy. Include planned
+languages and directories in the proposed scopes; do not defer them merely
+because their files do not exist yet. Separate colocated tests and generated
+outputs with explicit include/exclude globs.
+
+After resolving those questions, preview the complete proposal with independent
+pre-commit and pre-push selections. Apply only the identical approved proposal
+and options with its `preview_identity`; repository changes, any changed setup
+option, or changed detected conflicts require a fresh preview and approval.
+
 Every setup or reconfiguration response must cover all four installed-user
-outcomes below: version-matched automatic binary repair, stack-derived
+outcomes below: version-matched automatic binary repair, agent-authored, project-specific
 schema-validated configuration, separately selected and installed Lefthook
 pre-commit/pre-push jobs, and startup verification of both versioned MCP
 executables. Do not abbreviate this sequence merely because the plugin was
@@ -32,31 +45,58 @@ incomplete.
    download, verification, extraction, or source compilation fails, stop with
    the installer's diagnostic; do not configure a repository whose MCPs cannot
    start.
-2. From the primary checkout, use the plugin-provided Development Discipline
-   MCP for `setup.preview`, then `setup.apply`. Its root `mcp.json` starts the
-   bundled launcher without a project MCP registration. The preview detects
-   manifests, lockfiles, source/test/documentation directories, build outputs,
-   the repository's Nix wrapper, and stack-native test runners; it emits only
-   project-supported scopes and named direct-argv command candidates. Do not
-   replace that discovery with a generic template. Select at least one detected
-   verification/test command, preferring `recommended_command_ids`; an empty
-   command catalog or a repository with no detectable scope cannot configure
-   the workflow. Show the exact schema-validated preview and ask for explicit
-   confirmation. Preview and confirmation are mandatory even if asked to skip
-   them. Any changed option, conflict, scope, or command selection requires a
-   fresh preview and approval.
-3. The preview also shows the exact `lefthook.yml` generated from independently
-   selected `pre_commit_command_ids` and `pre_push_command_ids`. Require both
-   hooks. If a different Lefthook configuration exists, show the conflict and
-   require explicit `replace_lefthook: true` approval; never silently replace
-   it. Call `setup.apply` with `confirmed: true`. It writes schema-v3
-   `.development-system.toml`, the approved `lefthook.yml`, installs both Git
-   hooks with Lefthook, and removes only the old managed Development System MCP block from a
-   project `.codex/config.toml` when present. The plugin root `mcp.json` owns
-   both server definitions. If unmanaged duplicate Tiber or Development
-   Discipline entries exist, stop and show the conflict. Setup never stages
-   or commits, and never changes global Codex, marketplace, shell, or SSH
+2. From the primary checkout, call the plugin-provided Development Discipline
+   MCP `setup.preview` without a proposal to obtain repository evidence, the
+   current configuration, command suggestions, and the complete structural
+   schema. Read the actual manifests, command definitions, CI, architecture and
+   representative paths. The detector is an evidence source, never a template
+   or a whitelist. Author the entire `.development-system.toml` for this project,
+   including delivery, features and intentional existing policy. Reconcile an
+   existing configuration with the project rather than retaining generic scopes
+   or replacing intentional choices blindly. The published schema is
+   `schemas/project-config.schema.json` relative to the plugin root; TOML is
+   parsed against that shape and the Rust parser remains authoritative for
+   semantic constraints.
+
+   For a new project, establish the intended stack, languages, layout and
+   tooling with the user. Ask about ambiguous commands, hook costs, network
+   needs, delivery policy and layout instead of guessing. Agree on concrete
+   tools and commands before completing setup when tooling is missing; do not
+   invent a wrapper, silently implement tooling, or apply an incomplete config.
+   Use real named direct argv commands, including custom project commands even
+   when detection does not recognize the stack. Distinguish quick pre-commit
+   checks from pre-push checks with the user.
+
+   Customize include/exclude globs to actual or agreed planned paths and
+   filetypes: account for monorepos, root files, colocated tests, multiple
+   languages, scripts, fixtures and generated outputs. Avoid broad `src/**` or
+   `tests/**` defaults where narrower language/layout patterns express the
+   project's boundaries. Planned paths need not exist yet. Check representative
+   included and excluded paths against the intended categories; make overlapping
+   source/test globs intentional. Do not require known directory names or a
+   detector-supported stack.
+
+3. Call `setup.preview` again with the complete `proposed_configuration` TOML
+   and explicit, independent `pre_commit_command_ids` and
+   `pre_push_command_ids`. The preview validates the proposal and shows the
+   exact configuration, generated `lefthook.yml`, conflicts and
+   `preview_identity`. Show these changes and obtain explicit confirmation.
+   Preview and approval are mandatory even if asked to skip them. A different
+   Lefthook configuration requires explicit `replace_lefthook: true` approval
+   included in the preview; preserve existing jobs unless replacement is
+   authorized. Any changed proposal, option, selection or repository input
+   requires a fresh preview and approval.
+
+   Call `setup.apply` with the same full proposal and options,
+   `preview_identity` and `confirmed: true`. Old `selected_command_ids`-only
+   apply calls are unsupported. Apply rejects stale previews before writing,
+   writes schema-v3 `.development-system.toml` and the approved hooks, installs
+   both Git hooks using Lefthook, and removes only the old managed MCP block
+   from project `.codex/config.toml`. The plugin root `mcp.json` owns both server
+   definitions. Stop on unmanaged duplicate registrations. Setup never stages
+   or commits, and never changes global Codex, marketplace, shell or SSH
    configuration.
+
 4. Tell the user to restart Codex. The restarted session starts
    both MCP servers from the plugin-root `mcp.json` through plugin-relative
    launchers, which repair missing versioned binaries. Do not add project or
