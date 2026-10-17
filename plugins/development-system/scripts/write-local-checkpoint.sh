@@ -94,6 +94,21 @@ if ! tail -c +15 "$candidate" | jq -e --argjson generation "$expected_generation
 fi
 proposed_baseline=$(tail -c +15 "$candidate" | jq -er '.baseline_oid')
 
+# Only the typed operation retains review evidence and derives its source binding.
+# Compatibility records may preserve or invalidate that credit, never mint it.
+if ! $operation_mode; then
+  proposed_review=$(tail -c +15 "$candidate" | jq -c '.gates.terminal_review_receipt // null')
+  current_review=null
+  if [[ -e $target ]]; then
+    current_review=$(tail -c +15 "$target" | jq -c '.gates.terminal_review_receipt // null')
+  fi
+  jq -en --argjson proposed "$proposed_review" --argjson current "$current_review" \
+    '$proposed == null or $proposed == $current' >/dev/null || {
+      echo "terminal review credit requires the typed terminal-review-pass operation" >&2
+      exit 3
+    }
+fi
+
 if [[ -e $target ]]; then
   current_generation=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -er '.generation')
   current_baseline=$(sed -n 's/^checkpoint-v1 //p' "$target" | jq -er '.baseline_oid')

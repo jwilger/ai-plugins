@@ -1486,3 +1486,27 @@ compatibility_stale_ci_success() {
   accepted
   [ "$(jq -r '.gates.terminal_review_receipt' <<<"$record")" = null ]
 }
+
+compatibility_forged_review() {
+  if [ "$1" = direct-to-trunk ]; then
+    remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+    next_action=push
+  else
+    local_delivery
+    next_action=complete
+  fi
+  generation=$(jq '.generation+1' <<< "$record")
+  predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  { printf 'checkpoint-v1 '; jq -c --argjson gen "$generation" --arg pred "$predecessor" --arg action "$next_action" --arg receipt "$evidence" '.generation=$gen | .predecessor_sha256=$pred | .next_action=$action | .gates.terminal_review_receipt={receipt_ref:$receipt,head_oid:.snapshot.head_oid,baseline_oid:.baseline_oid,source_sha256:("0" * 64)}' <<< "$record"; } > "$records/forged-review.json"
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" "$5"' _ "$repo" "$ROOT/plugins/development-system/scripts/write-local-checkpoint.sh" "$generation" "$predecessor" "$records/forged-review.json"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target" | cut -d ' ' -f 1)" = "$predecessor" ]
+}
+
+@test "compatibility cannot mint trunk publication review credit" {
+  compatibility_forged_review direct-to-trunk
+}
+
+@test "compatibility cannot mint local completion review credit" {
+  compatibility_forged_review local-only
+}

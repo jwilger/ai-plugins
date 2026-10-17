@@ -193,18 +193,20 @@ expensive checks belong in CI unless a local run is directly required to
 diagnose a failure. Do not make every local increment wait for them.
 
 Full review is the ticket-completion gate after all planned increments and the
-actual acceptance criteria are delivered; it is not a prerequisite for
+actual acceptance criteria are locally complete; it is not a prerequisite for
 preserving each green increment, and lightweight review never substitutes for
 its configured clean iterations.
 When full review requires a code or guidance edit, first confirm that the most
 recently completed in-scope CI has no unresolved failed job, classify whether
 RED applies and use it when required, then repeat the immediate focused test,
-lightweight review, signed commit through the pre-commit hook, and selected delivery-mode checkpoint.
-Direct-to-trunk and PR/MR use a signed additive commit, exact verification, and
-already-authorized push. Local-only uses a signed local commit only when
+lightweight review, signed commit through the pre-commit hook, and exact
+verification. In direct-to-trunk mode, keep the repair commit local and renew
+affected full review through its diff-bound delta/reset protocol before the
+already-authorized push. In PR/MR mode, disable auto-merge and return a ready
+request to draft before pushing a source repair; renew affected full review
+before marking it ready again. Local-only uses a signed local commit only when
 required and authorized, otherwise the exact no-commit snapshot, and performs
-no remote mutation. Only then resume full review through its diff-bound
-delta/reset protocol; pushed readiness still waits for terminal CI success on
+no remote mutation. Remote readiness still waits for terminal CI success on
 the exact final-reviewed SHA.
 
 ## Lightweight Review
