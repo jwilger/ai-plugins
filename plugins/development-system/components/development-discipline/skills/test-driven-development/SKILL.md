@@ -157,8 +157,8 @@ pre-commit-hook`, cleared gate receipts, null delivery, unchanged HEAD, and
    another normal hook-backed commit attempt. Use the public
    `development-workflow` recovery helper for a stranded pending-gate record;
    preserve staged work and never replace checkpoint files manually.
-3. Complete the authorized delivery-mode checkpoint immediately and record
-   `pushed-or-delivery-mode-equivalent`. Direct-to-trunk pushes normally; PR
+3. Complete the authorized local checkpoint immediately. Direct-to-trunk remains
+   `committed` and retains verified local commits until full batch review; PR
    mode pushes only the already-authorized branch and does not infer permission
    to open or merge. The Git push must trigger Lefthook's pre-push verification;
    do not invoke that gate separately. Local-only records the verified commit
@@ -172,7 +172,7 @@ formatter/parser/validation gates and the same checkpoint discipline. Generated
 or required companions may travel only with their causal source snapshot;
 unrelated passing work is never batched for convenience.
 
-After an authorized push, begin the next iteration immediately while monitoring
+After a verified local checkpoint, the next increment may begin. After an authorized PR branch push, monitor
 the exact pushed OID's CI concurrently. A queued or running build is not green,
 but does not serialize feature work when the most recently completed in-scope
 build is successful and no current required run has a completed failed job. Any
@@ -261,3 +261,7 @@ accepted by a follow-up review, and the signed commit plus authorized push or
 the exact authorized local-only no-commit equivalent. Track exact-SHA CI
 concurrently; a completed failure
 preempts the next cycle.
+
+## Publication boundary
+
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.

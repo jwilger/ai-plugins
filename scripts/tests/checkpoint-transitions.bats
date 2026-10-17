@@ -251,7 +251,7 @@ remote_reviewed() {
   git init --bare -q "$remote"
   git -C "$repo" remote add origin "$remote"
   git -C "$repo" push -q origin HEAD:refs/heads/main
-  invoke initialize "$(jq -cn --arg mode "${remote_initialize_mode:-direct-to-trunk}" '{mode:$mode,causal_edit:"implement remote fixture",remote:"origin",ref:"refs/heads/main"}')"
+  invoke initialize "$(jq -cn --arg mode "${remote_initialize_mode:-pull-request}" '{mode:$mode,causal_edit:"implement remote fixture",remote:"origin",ref:"refs/heads/main"}')"
   accepted
   printf 'remote implementation\n' >"$repo/source"
   invoke edit-pass "$(evidence_fields)"
@@ -266,7 +266,7 @@ remote_committed() {
   chmod +x "$repo/.git/hooks/pre-commit"
   git -C "$repo" add source
   git -C "$repo" commit -m 'remote fixture' >"$evidence" 2>&1
-  invoke commit-success "$(evidence_fields "$(jq -cn --arg mode "${remote_commit_mode:-direct-to-trunk}" '{mode:$mode}')")"
+  invoke commit-success "$(evidence_fields "$(jq -cn --arg mode "${remote_commit_mode:-pull-request}" '{mode:$mode}')")"
   accepted
   invoke exact-verify-pass "$(evidence_fields)"
   accepted
@@ -333,7 +333,7 @@ ci_fields() {
   accepted
   git -C "$repo" add source
   git -C "$repo" commit -m 'causal repair' > "$evidence" 2>&1
-  invoke commit-success "$(evidence_fields '{"mode":"direct-to-trunk"}')"
+  invoke commit-success "$(evidence_fields '{"mode":"pull-request"}')"
   accepted
   invoke exact-verify-pass "$(evidence_fields)"
   accepted
@@ -601,7 +601,7 @@ SHIM
   remote_commit_mode=direct-to-trunk
   remote_committed
   [ "$(jq -r '.delivery.mode' <<<"$record")" = direct-to-trunk ]
-  [ "$(jq -r '.next_action' <<<"$record")" = push ]
+  [ "$(jq -r '.next_action' <<<"$record")" = terminal-review ]
 }
 
 @test "delivery mode rebind cannot cross local and remote gate families" {
@@ -656,12 +656,8 @@ SHIM
   [ "$(jq '.ci.runs | length' <<<"$record")" = 2 ]
 }
 
-@test "begin edit rejects source drift unverified delivery and failed CI recovery holds" {
+@test "begin edit rejects source drift and failed CI recovery holds" {
   remote_committed
-  before=$(sha256sum "$target")
-  invoke begin-edit "$(evidence_fields '{"causal_edit":"next increment"}')"
-  [ "$status" -ne 0 ]
-  [ "$(sha256sum "$target")" = "$before" ]
   git -C "$repo" push -q origin HEAD:refs/heads/main
   invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
   accepted
@@ -1381,7 +1377,7 @@ SH
   accepted
   git -C "$repo" add source
   git -C "$repo" commit -m successor > "$evidence" 2>&1
-  invoke commit-success "$(evidence_fields '{"mode":"direct-to-trunk"}')"
+  invoke commit-success "$(evidence_fields '{"mode":"pull-request"}')"
   accepted
   invoke exact-verify-pass "$(evidence_fields)"
   accepted
@@ -1451,4 +1447,42 @@ compatibility_stale_ci_success() {
 
 @test "compatibility newer failed CI preempts older success credit" {
   compatibility_stale_ci_success failure
+}
+
+@test "trunk local checkpoints can accumulate but push requires current full review" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  [ "$(jq -r '.next_action' <<<"$record")" = terminal-review ]
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  [ "$status" -ne 0 ]
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"next local increment"}')"
+  accepted
+  [ "$(jq -r '.state' <<<"$record")" = awaiting-causal-edit ]
+  [ "$(jq -r '.gates.terminal_review_receipt' <<<"$record")" = null ]
+}
+
+@test "trunk full review persists before push and unchanged exact SHA CI completes it" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  invoke terminal-review-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = push ]
+  [ "$(jq -r '.gates.terminal_review_receipt.head_oid' <<<"$record")" = "$(git -C "$repo" rev-parse HEAD)" ]
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  accepted
+  invoke ci-register "$(ci_fields reviewed-trunk success)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = complete ]
+}
+
+@test "source drift after trunk review blocks push readback and a new edit clears review" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  invoke terminal-review-pass "$(evidence_fields)"
+  accepted
+  printf 'drift\n' >>"$repo/source"
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  [ "$status" -ne 0 ]
+  git -C "$repo" restore source
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"renew review for next change"}')"
+  accepted
+  [ "$(jq -r '.gates.terminal_review_receipt' <<<"$record")" = null ]
 }

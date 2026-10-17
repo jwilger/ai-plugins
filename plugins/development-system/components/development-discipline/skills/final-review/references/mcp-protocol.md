@@ -101,13 +101,7 @@ unchanged content between the worktree, index, and `HEAD` can therefore change
 the hash, and callers must continue sending the fresh helper output on every
 `final_review.advance` call. Do not weaken or replace that contract.
 
-Terminal review starts only after every planned implementation increment and
-every actual acceptance criterion have been completed and checkpoint-delivered.
-It consumes that ticket-complete identity: the exact pushed SHA for remote modes
-or the exact local snapshot for local-only. Retain its pinned ticket-start
-baseline, requested scope, exact path inventory, and reviewed path
-content/modes. A clean unchanged review adds review evidence only; it creates no
-commit, empty commit, push, or replacement local checkpoint.
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.
 
 Any changed reviewed path, content, mode, untracked content, pinned baseline,
 or requested scope is source-changing remediation. Complete its mode-specific

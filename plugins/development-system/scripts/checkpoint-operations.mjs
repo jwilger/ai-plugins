@@ -716,17 +716,19 @@ function prepare(operationId, operation, inputFile) {
         "register-exact-sha-ci-monitor",
         "monitor-exact-sha-ci",
         "terminal-review",
+        "push",
         "complete",
       );
       requireSnapshot();
       requireThat(
-        record.state === "pushed-or-delivery-mode-equivalent" &&
+        ["committed", "pushed-or-delivery-mode-equivalent"].includes(record.state) &&
           record.gates.exact_identity_verification_receipt?.outcome ===
             "pass" &&
           current.context?.source_sha256 === source &&
-          (mode === "local-only"
-            ? record.delivery?.local_snapshot === source
-            : record.delivery?.pushed_oid === identity.head_oid),
+          (record.delivery?.commit_oid === identity.head_oid ||
+            (mode === "local-only"
+              ? record.delivery?.local_snapshot === source
+              : record.delivery?.pushed_oid === identity.head_oid)),
         "begin-edit requires unchanged verified and delivered source",
       );
       record.state = "awaiting-causal-edit";
@@ -850,7 +852,9 @@ function prepare(operationId, operation, inputFile) {
           ? "repair-exact-identity-verification"
           : mode === "local-only"
             ? "record-local-delivery"
-            : "push";
+            : mode === "direct-to-trunk"
+              ? "terminal-review"
+              : "push";
       break;
     case "exact-verify-retry":
       requireAction("repair-exact-identity-verification");
@@ -882,6 +886,7 @@ function prepare(operationId, operation, inputFile) {
         );
       }
       record.delivery.commit_oid = identity.head_oid;
+      delete record.gates.terminal_review_receipt;
       record.gates.exact_identity_verification_receipt = null;
       record.next_action = "verify-exact-commit";
       break;
@@ -915,6 +920,13 @@ function prepare(operationId, operation, inputFile) {
     case "push-readback": {
       requireAction("push");
       requireSnapshot();
+      requireThat(
+        mode !== "direct-to-trunk" ||
+          (record.gates.terminal_review_receipt?.head_oid === identity.head_oid &&
+           record.gates.terminal_review_receipt?.source_sha256 === source &&
+           record.gates.terminal_review_receipt?.baseline_oid === record.baseline_oid),
+        "trunk push requires current pre-push multi-lens review evidence",
+      );
       verifyRemote(input.remote, input.ref, identity.head_oid);
       record.state = "pushed-or-delivery-mode-equivalent";
       record.delivery.pushed_oid = identity.head_oid;
@@ -988,7 +1000,7 @@ function prepare(operationId, operation, inputFile) {
         record.next_action = failed
           ? "enter-ci-recovery"
           : input.status === "success"
-            ? "terminal-review"
+            ? (record.gates.terminal_review_receipt ? "complete" : "terminal-review")
             : "monitor-exact-sha-ci";
       }
       break;
@@ -1087,10 +1099,18 @@ function prepare(operationId, operation, inputFile) {
     case "terminal-review-pass":
       requireAction("terminal-review");
       requireSnapshot();
-      record.next_action = "complete";
+      record.gates.terminal_review_receipt = {
+        receipt_ref: evidence,
+        head_oid: identity.head_oid,
+        baseline_oid: record.baseline_oid,
+        source_sha256: source,
+      };
+      record.next_action = record.state === "committed" && mode === "direct-to-trunk"
+        ? "push" : "complete";
       break;
     case "terminal-review-remediation":
       requireAction(
+        "push",
         "register-exact-sha-ci-monitor",
         "monitor-exact-sha-ci",
         "terminal-review",

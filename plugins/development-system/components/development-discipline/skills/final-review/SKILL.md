@@ -49,15 +49,9 @@ or claiming a change is ready.
 ## Delivered-checkpoint terminal boundary
 
 Final review starts only after every planned implementation increment and every
-actual acceptance criterion have been completed and checkpoint-delivered. It
-consumes that ticket-complete identity: the exact pushed commit for
-direct-to-trunk or PR/MR mode, or the exact local snapshot for local-only. A
-clean unchanged review adds review evidence only; it creates no commit, empty
-commit, push, or replacement local checkpoint. In remote modes, required pushed
-CI may run concurrently with review, but readiness requires terminal success
-for the exact final-reviewed pushed SHA. In local-only mode, readiness instead
-requires fresh evidence bound to the exact final-reviewed local identity and
-never requires or invents remote CI.
+local acceptance criterion has a verified local checkpoint.
+
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.
 
 When explaining this boundary, explicitly state that every remote remediation
 checkpoint repeats focused verification and lightweight review, commits through
@@ -100,19 +94,7 @@ pushed SHA supports readiness; pending CI yields
 evidence must be bound to the exact final-reviewed local identity; remote CI is
 not a gate and must not be requested.
 
-This is the ticket-completion gate, not the gate for preserving each green
-implementation increment. Start it only after every planned implementation
-increment and every actual acceptance criterion are completed and
-checkpoint-delivered and no prior failed-run hold remains. Direct-to-trunk and
-PR/MR review consumes the exact already-pushed final checkpoint SHA; PR creation
-and merge remain separately authorized operations. Required exact-SHA CI may be
-pending while remote-mode review proceeds, but any completed failure activates
-`ci-failure-follow-up` immediately. A clean remote-mode review with pending CI
-reports `review-complete-awaiting-exact-sha-ci`; readiness waits for terminal
-success on the exact final-reviewed pushed SHA. Local-only review consumes the
-exact local identity, requires fresh readiness evidence bound to that identity,
-and never creates a remote action or waits for remote CI solely to unlock
-review.
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.
 
 A failed pushed build invokes `ci-failure-follow-up` and blocks final review and
 follow-up work until that skill's terminal-success hold is released; a newer

@@ -59,7 +59,7 @@ and `receipt_file`; the file must be readable, nonempty, and outside the worktre
 | `ci-observe`                  | Same as `ci-register`                                                       | Appends an observation of a registered nonterminal run. Terminal results cannot be overwritten; retries register new run IDs.                                                                                                                                                                                                                                                                                 |
 | `ci-retry-diagnosis`          | Evidence, `provider`, `run_id`, `commit_oid`, `classification`, `rationale` | Records a concrete `transient` or `unrelated` diagnosis for an existing failed run before retry registration. It preserves all prior observations and diagnoses and supplies no success credit.                                                                                                                                                                                                               |
 | `ci-recovery`                 | Evidence, `causal_repair`                                                   | Failed required CI enters causal remediation and clears current gate credits while retaining all CI observations.                                                                                                                                                                                                                                                                                             |
-| `terminal-review-pass`        | Evidence                                                                    | Records actual terminal review of the unchanged delivered identity and sets `next_action: "complete"`.                                                                                                                                                                                                                                                                                                        |
+| `terminal-review-pass`        | Evidence                                                                    | Records actual terminal review of the unchanged identity; persists a snapshot/baseline-bound review receipt and permits trunk `push`, otherwise `complete`.                                                                                                                                                                                                                                                   |
 | `terminal-review-remediation` | Evidence, `causal_repair`                                                   | Records terminal findings before any repair; clears gates and delivery and permits only the causal edit.                                                                                                                                                                                                                                                                                                      |
 | `read`                        | Input is exactly `{}`; no CAS fields                                        | Returns the retained receipt for `OPERATION_ID`, without advancing or claiming the current source still matches it.                                                                                                                                                                                                                                                                                           |
 
@@ -74,7 +74,7 @@ commit or push.
 
 Before changing source for the next planned or causal increment, call `begin-edit`
 with the actual retained planning/finding evidence and its specific `causal_edit`.
-The predecessor must still match the exact verified delivered snapshot. The
+The predecessor must still match the exact verified local committed or delivered snapshot. The
 result is `awaiting-causal-edit`; it makes no new test-success or failure claim.
 Then perform the edit and record `edit-pass` or `edit-fail`, followed by every
 fresh required gate. A pending CI run remains in history and earns no credit for
@@ -95,8 +95,8 @@ the caller, not independently attested by a log path. Retain actual evidence
 and reconcile it before calling. A CI `success` observation must represent the
 authoritative terminal required-build result for that exact SHA, not one green
 job or a queued retry. Earlier failed attempts remain in the append-only
-history. A clean terminal review requires that successful result in remote
-modes. Source-changing remediation requires fresh focused testing, review,
+history. A clean terminal review precedes trunk push; remote completion requires
+exact-SHA terminal CI success after push. Source-changing remediation requires fresh focused testing, review,
 hook/fast gate, exact verification, delivery, CI, and terminal review.
 
 The public operations preserve the `checkpoint-v1` record fields and add the

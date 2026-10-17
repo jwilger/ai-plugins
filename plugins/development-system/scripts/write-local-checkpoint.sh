@@ -136,8 +136,8 @@ if [[ -e $target ]]; then
          (($proposed.ci.recoveries // []) | length) > (($current.ci.recoveries // []) | length))) and
        (($proposed.ci.recoveries // [])[0:(($current.ci.recoveries // []) | length)] == ($current.ci.recoveries // [])) then true
     elif $proposed.state == "awaiting-causal-edit" then
-      $current.state == "pushed-or-delivery-mode-equivalent" and
-      ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "terminal-review", "complete")) and
+      ($current.state | IN("committed", "pushed-or-delivery-mode-equivalent")) and
+      ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "terminal-review", "push", "complete")) and
       $current.gates.exact_identity_verification_receipt.outcome == "pass" and
       $proposed.snapshot == $current.snapshot and
       $proposed.ci.runs == $current.ci.runs
@@ -171,18 +171,24 @@ if [[ -e $target ]]; then
         $proposed.delivery.mode == "local-only" and $proposed.next_action == "terminal-review"))
     elif $current.next_action == "verify-exact-commit" then
       $proposed.state == "committed" and
-      ($proposed.next_action | IN("repair-exact-identity-verification", "push", "record-local-delivery"))
+      ($proposed.next_action | IN("repair-exact-identity-verification", "push", "terminal-review", "record-local-delivery"))
     elif $current.next_action == "repair-exact-identity-verification" then
       $proposed.state == "committed" and $proposed.next_action == "verify-exact-commit"
     elif $current.next_action == "push" then
-      $proposed.state == "pushed-or-delivery-mode-equivalent" and
-      $proposed.next_action == "register-exact-sha-ci-monitor"
+      gate_failure("terminal-review") or
+      ($proposed.state == "pushed-or-delivery-mode-equivalent" and
+      $proposed.next_action == "register-exact-sha-ci-monitor")
     elif $current.next_action == "record-local-delivery" then
       $proposed.state == "pushed-or-delivery-mode-equivalent" and
       $proposed.delivery.mode == "local-only" and $proposed.next_action == "terminal-review"
     elif ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery")) then
       (($proposed.state == "pushed-or-delivery-mode-equivalent" and
-        ($proposed.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review"))) or
+        ($proposed.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review", "complete")) and
+        ($proposed.next_action != "complete" or
+         ($current.gates.terminal_review_receipt != null and
+          $proposed.gates.terminal_review_receipt == $current.gates.terminal_review_receipt and
+          ($proposed | del(.generation, .predecessor_sha256, .next_action, .ci)) ==
+          ($current | del(.generation, .predecessor_sha256, .next_action, .ci))))) or
        remediation_result)
     elif $current.next_action == "terminal-review" then
       gate_failure("terminal-review") or
@@ -190,9 +196,10 @@ if [[ -e $target ]]; then
        ($proposed.ci.runs | length) > ($current.ci.runs | length) and
        ($proposed | del(.generation, .predecessor_sha256, .next_action, .ci)) ==
        ($current | del(.generation, .predecessor_sha256, .next_action, .ci))) or
-      ($proposed.next_action == "complete" and
-       ($proposed | del(.generation, .predecessor_sha256, .next_action)) ==
-       ($current | del(.generation, .predecessor_sha256, .next_action)))
+      (($proposed.next_action | IN("push", "complete")) and
+       $proposed.gates.terminal_review_receipt != null and
+       ($proposed | del(.generation, .predecessor_sha256, .next_action, .gates.terminal_review_receipt)) ==
+       ($current | del(.generation, .predecessor_sha256, .next_action, .gates.terminal_review_receipt)))
     elif $current.next_action == "complete" then false
     else
       ($proposed | del(.generation, .predecessor_sha256, .next_action)) ==

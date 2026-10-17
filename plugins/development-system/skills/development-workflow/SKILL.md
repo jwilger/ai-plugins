@@ -24,8 +24,8 @@ these points explicitly; do not replace them with a generic reference to gates:
   exact commit/message/signature verification, and authorized delivery.
 - Record the delivered identity together with its required exact-SHA CI runs.
   A completed required failure activates the existing **Tiber recovery hold**.
-- Every planned increment and acceptance criterion must be checkpoint-delivered
-  before terminal review. Explain the complete remediation checkpoint.
+- Every planned increment and local acceptance check must have a verified local
+  checkpoint before terminal review; trunk push follows that review. Explain the complete remediation checkpoint.
 - Independent delta assessment renews affected behavior/dependencies while
   preserving proven peer receipts and all recorded responsibilities/sample floors.
   Full renewal requires material whole-scope impact or unisolatable provenance.
@@ -147,8 +147,14 @@ command and bounded failure evidence. A failed pre-commit hook uses
 `failure_kind:"pre-commit-hook"`; a lightweight review requiring remediation
 uses `failure_kind:"lightweight-review"`. These are truthful failed gate
 receipts, not claims that the preceding focused test failed.
-`gates` is exactly
+`gates` has these required fields (legacy records may omit terminal review):
 `{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_identity_verification_receipt":{"receipt_ref":string,"outcome":"pass"|"fail"}|null}`.
+`gates.terminal_review_receipt`, when present, is
+`{"receipt_ref":string,"head_oid":string,"baseline_oid":string,"source_sha256":string}`.
+It binds actual full review to the exact local source and baseline; missing
+legacy evidence earns no pre-push review credit. `begin-edit` clears it.
+`terminal-review-pass` on a trunk local commit permits `push`; successful
+post-push CI completes that unchanged reviewed candidate.
 `delivery` is either `null` or exactly
 `{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
 `ci` is exactly
@@ -277,8 +283,9 @@ the helper cannot attest that a caller's supplied failure report is truthful.
   sets `next_action` to `repair-exact-identity-verification`, prohibits delivery,
   and permits only the causal repair action followed by
   another exact verification. Push or local completion requires a successful
-  exact-identity verification receipt; then use `push` for a remote mode or
-  `record-local-delivery` for local-only as the exact `next_action`. CI for this
+  exact-identity verification receipt; then use `terminal-review` for direct-to-trunk, `push` for a draft PR
+  branch, or `record-local-delivery` for local-only. A verified local
+  committed checkpoint may use `begin-edit` to continue the batch as the exact `next_action`. CI for this
   new commit may still have no runs before remote delivery.
 - `pushed-or-delivery-mode-equivalent`: record the exact pushed OID and CI runs,
   or the exact local-only terminal snapshot and the fact that remote mutation
@@ -295,7 +302,8 @@ the helper cannot attest that a caller's supplied failure report is truthful.
   at least one CI run for the exact pushed OID. Use `monitor-exact-sha-ci` while
   all runs are queued/running without terminal success, `enter-ci-recovery` as
   the sole action when an exact-SHA run fails and no replacement has reached
-  terminal success, and `terminal-review` after the named terminal success,
+  terminal success, and `complete` after the named terminal success when current pre-push review
+  is retained, otherwise `terminal-review`,
   which must be the final append-ordered CI observation. Retained CI history
   may contain earlier failures. Local-only
   requires no remote run and uses `terminal-review`. A remote push must trigger
@@ -325,17 +333,12 @@ lightweight review and delivery checkpoint. Generated output and mechanically
 required metadata may accompany only the causal source snapshot that produces
 or requires them. Never batch already-passing unrelated work for convenience.
 
-The terminal full multi-lens review begins only after every planned increment
-and acceptance criterion has reached its delivered checkpoint. It is not an
-intermediate-commit gate, and lightweight review never replaces it. Review the
-already-delivered identity: the pushed commit for direct-to-trunk or PR mode,
-or the exact local snapshot for local-only. A clean unchanged terminal review
-creates no commit, empty commit, push, or replacement local checkpoint.
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.
 
 Any terminal-review finding remediation must leave review and complete the
 normal immediate-test and lightweight-review checkpoint. Then use a
-signed additive commit plus exact verification and authorized push for remote
-modes, or a signed local commit only when required/authorized and otherwise a
+signed additive commit plus exact verification, renewed affected review before
+trunk push (or PR readiness), and authorized push for remote modes, or a signed local commit only when required/authorized and otherwise a
 new exact no-commit snapshot for local-only. Submit the diff-bound independent
 delta assessment and obtain fresh affected-behavior/dependency review under v3,
 preserving proven peer receipts and every recorded responsibility and sample
@@ -549,8 +552,8 @@ files, and projections are bookkeeping outside that hash. After terminal source
 review, a content-identical commit does not reopen review merely because HEAD,
 staging partition, signature, or commit metadata changed. Real path, content,
 mode, untracked-content, pinned-baseline, or requested-scope changes do reopen
-it. The terminal sequence is delivered checkpoint, full review of that exact
-pushed commit or local snapshot, then readiness evidence. A clean unchanged
+it. The terminal sequence is verified local checkpoint, full review before trunk
+push or PR readiness, then exact-SHA post-push readiness evidence. A clean unchanged
 review adds review evidence only. Pushed readiness requires terminal-success CI
 for the exact final-reviewed SHA; pending CI is
 `review-complete-awaiting-exact-sha-ci`. Source-changing remediation creates a
@@ -559,8 +562,8 @@ new mode-specific checkpoint and resets review as described above.
 Load `delivery-workflow` before the first implementation or test increment so
 the configured delivery mode and green-increment preservation cadence are known
 before even a standalone test edit, commit, or push. After final review, recheck it only to confirm that
-the reviewed delivered identity has the required exact-SHA CI or local
-readiness evidence; a clean unchanged review creates no final delivery action.
+the reviewed identity is published only as authorized and has the required exact-SHA CI or local
+readiness evidence; a clean unchanged review creates no additional commit.
 
 ## Structured lifecycle
 

@@ -55,30 +55,9 @@ it must not merely restate the subject or summarize the diff. Reject a
 subject-only message. Never add `Co-Authored-By` or another AI-attribution
 trailer.
 
-Load the retained delivery-workflow contract before the first implementation
-or test increment so the configured mode and preservation cadence govern even
-a standalone test edit. Preserve every passing per-edit increment through its
-mode-authorized checkpoint before terminal review. Remote modes use a signed commit, exact verification of the
-repository-required fast non-duplicated checks plus message and signature, and
-an authorized push. Comprehensive suites remain in CI. Local-only uses the
-authorized local identity and commits only when the user authorizes it or
-repository policy requires it. If policy requires a commit but the user
-explicitly withholds commit authority, block without committing or pushing.
-Terminal review consumes that already-delivered pushed SHA or
-local identity. A clean unchanged review adds evidence only and creates no
-commit, empty commit, push, or replacement checkpoint. Coordinator event,
-snapshot, and state bookkeeping never enters the reviewed source inventory or
-hash. Bind readiness to terminal-success CI for the exact final-reviewed SHA or
-fresh evidence for the exact local identity.
-If delivery changes a reviewed path, content, mode, formerly untracked content,
-adds a newly in-scope untracked path, changes the pinned baseline, or changes
-the requested scope, complete a new mode-specific checkpoint first. Run the
-terminal delta/reset review against that delivered identity only when terminal
-review was already active or the mutation remediates a terminal-review finding;
-an ordinary pre-terminal checkpoint continues to the next planned increment.
-While review is
-active, keep the stage-aware helper unchanged and submit its fresh
-`current_diff_hash` on every advance.
+Load the retained `delivery-workflow` contract before the first increment.
+
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.
 
 Keep checkpoint CI bounded per pushed ref. Use forge/repository coalescing for
 superseded non-terminal runs, or cancel an obsolete run only when cancellation
@@ -91,8 +70,8 @@ If the same-MCP final-review protocol preflight reports a stale skill/runtime
 or coordinator mismatch, reject terminal delivery, PR/MR creation or update,
 merge, and readiness claims until the required recovery succeeds. That
 mismatch does not retroactively forbid a separately authorized intermediate or
-terminal-finding-remediation checkpoint: it may still use its normal commit and
-push cadence, but it cannot be called terminal delivery or readiness evidence.
+terminal-finding-remediation checkpoint: it may still preserve a local commit or push a draft branch; trunk push and
+PR readiness remain blocked, but it cannot be called terminal delivery or readiness evidence.
 
 Always state each protected action explicitly: never infer permission to
 force-push, merge, or delete remote state.

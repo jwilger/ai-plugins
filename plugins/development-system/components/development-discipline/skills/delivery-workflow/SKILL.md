@@ -45,35 +45,12 @@ consequential. Do not invent a pull request.
 
 ### Direct-to-trunk
 
-Use the repository's declared trunk branch. For every passing per-edit
-checkpoint, including a standalone test-file edit, complete its immediate
-focused test and bounded lightweight review, then create the signed commit.
-That Git operation triggers Lefthook's pre-commit gate; never run the same gate
-separately. Then make the authorized
-non-history-rewriting push immediately to the policy-selected trunk ref without creating a
-PR/MR. The push triggers Lefthook's pre-push gate; never run that verification
-separately. Preserve repository-required branch or worktree topology; direct-to-trunk
-describes the delivery destination, not where development must occur. After pushing, bind the delivery evidence to the exact
-pushed revision and monitor its required CI concurrently with the next
-increment. A completed failure preempts that work through CI recovery. Reserve
-the full final review for ticket completion, when it consumes the last delivered
-pushed identity. A clean unchanged terminal review creates no additional commit
-or push. Each checkpoint commit requires fresh exact-commit verification of
-source identity, commit message, and signature before push; it does not rerun
-the hook-owned repository checks. Comprehensive suites remain in CI. If a rejected push,
-rebase, merge, conflict resolution, hook, formatter,
-or other delivery step changes any reviewed path, content, mode, formerly
-untracked content, adds a newly in-scope untracked path, changes the pinned
-baseline, or changes the requested scope, the prior review is
-stale: treat the mutation as a new causal checkpoint, rerun its immediate test,
-lightweight review, signed commit through the pre-commit hook, exact identity
-verification, and normal push through the pre-push hook. Run terminal delta/reset review against that new delivered identity only
-when terminal review was already active or the mutation remediates a
-terminal-review finding. During an ordinary checkpoint before ticket
-completion, deliver the new causal checkpoint and continue with the next
-planned increment; do not start terminal review early.
-A metadata-only revision change stays in delivery verification and does not
-reopen source review.
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.
+
+Signed local checkpoint commits run the repository pre-commit hook once; pushes
+run its pre-push hook once. Exact verification checks source, message and
+signature without duplicating hook-owned checks. Repairs use additive local
+commits, affected review, then the selected publication boundary.
 
 If a pre-commit hook fails without creating a commit, first record its actual
 failed command and evidence as canonical `failing`, with unchanged HEAD,
@@ -96,20 +73,10 @@ for an older SHA as readiness evidence for a newer checkpoint.
 
 ### PR/MR
 
-Use a branch and the repository's pull-request or merge-request process. Push
-each passing per-edit checkpoint only after its immediate focused test,
-lightweight review, and signed branch commit through Lefthook's pre-commit gate, and only
-when that branch mutation is already authorized;
-do not infer permission to open, update, or merge a PR/MR. Honor
-its required checks, review, approval, merge queue, and cleanup rules. Opening,
-updating, or merging the PR/MR must be authorized by the user or repository
-policy. Start terminal review only after every planned increment and acceptance
-criterion is checkpoint-delivered. It consumes the exact already-pushed branch
-identity; a clean
-unchanged review creates no push. Source-changing remediation uses a signed
-additive commit and authorized branch push without inferring PR operations.
-Bind every check, approval, review, and readiness claim to the PR/MR's exact
-current head revision.
+Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to an existing ready PR/MR, disable auto-merge and return it to draft, then renew affected review before making it ready again. Keep the PR draft if either operation fails. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.
+
+Opening, updating and merging PR/MRs remain separately authorized. Bind checks,
+review, approval and merge state to the exact current head revision.
 
 ### Local-only
 

@@ -60,7 +60,7 @@ still routes to `final-review`, even when that review itself is read-only.
 | Prepare a substantive change                   | `change-preflight`, then `delivery-workflow` to select delivery mode and increment cadence | Every required surface has an evidence-backed decision and the delivery policy is known before preservation actions |
 | Implement a feature, fix, removal, or refactor | `test-driven-development`, then the selected `delivery-workflow` checkpoint                | RED is used when applicable; the increment is tested, lightly reviewed, gated, and delivered                        |
 | Verify a completion claim                      | `verification-before-completion`                                                           | Fresh evidence covers the exact increment or terminal claim                                                         |
-| Review the delivered completed change          | `final-review`                                                                             | All increments are delivered and the coordinator reports completion for that exact identity                         |
+| Review the completed local change              | `final-review`                                                                             | All increments are locally verified and the coordinator reports completion for that exact identity                  |
 | Choose commit and publication mode             | `delivery-workflow`, plus `rationale-commit-messages` when a commit is authorized          | The increment checkpoint or post-review exact-identity readiness evidence is current                                |
 | Create or update a PR or MR                    | `delivery-workflow` for authorization and mode, then the available forge capability        | The PR/MR exists at the intended exact head and its URL and state are recorded                                      |
 | Respond to a pushed CI failure                 | `ci-failure-follow-up`                                                                     | A causal repair or unchanged-revision rerun reaches terminal success                                                |
@@ -98,10 +98,10 @@ Keep these boundaries explicit in both action and advisory responses:
 
 - Start with current user direction, repository instructions, and mutable state
   before describing any commit or push. For a substantive change, select
-  `delivery-workflow` before the first preservation action. Deliver every green
-  increment through that selected mode before terminal `final-review`. After a
-  clean terminal review, recheck `delivery-workflow` only for readiness of the
-  unchanged reviewed identity.
+  `delivery-workflow` before the first preservation action. Preserve every green
+  increment as a verified local checkpoint. Run terminal `final-review` before
+  trunk push or PR readiness; branch pushes and draft PRs may precede it.
+  Recheck `delivery-workflow` for exact-SHA readiness after authorized push.
 - For answer or domain-review work that is not a completed-diff final review,
   skip `change-preflight`,
   `test-driven-development`, `verification-before-completion`, `final-review`,
@@ -110,7 +110,7 @@ Keep these boundaries explicit in both action and advisory responses:
 - After diagnosis identifies the cause, inspect state again, then route through
   `change-preflight`, early `delivery-workflow`, `test-driven-development`,
   `verification-before-completion`, checkpoint delivery, and—only when all
-  planned work is delivered—`final-review` for an authorized fix.
+  planned work is locally checkpointed—`final-review` for an authorized fix.
 - Before creating or updating a PR/MR, inspect current repository state again,
   confirm PR/MR mode and authorization, select an available forge capability,
   and bind creation plus the recorded URL and state to the exact reviewed head.
