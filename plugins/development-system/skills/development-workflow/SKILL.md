@@ -17,7 +17,7 @@ does not deny ordinary host mutation capabilities.
 When explaining implementation increments or terminal-review remediation, cover
 these points explicitly; do not replace them with a generic reference to gates:
 
-- The recorded RED causal claim when applicable, immediate focused tests and
+- Causal repair, with the recorded RED causal claim when applicable, immediate focused tests and
   lightweight review; comprehensive suites belong in CI, without a duplicate
   local comprehensive exact-commit gate.
 - Installed Lefthook commit/push gates without manual duplication, signed commits,
@@ -26,6 +26,12 @@ these points explicitly; do not replace them with a generic reference to gates:
   A completed required failure activates the existing **Tiber recovery hold**.
 - Every planned increment and local acceptance check must have a verified local
   checkpoint before terminal review; trunk push follows that review. Explain the complete remediation checkpoint.
+- PR branch pushes and draft creation may precede review, but ready/non-draft
+  publication, auto-merge enablement and merge-queue entry require passing current
+  local multi-lens review. Before updating **any** ready PR, return it to draft
+  regardless of whether auto-merge is enabled, and disable auto-merge before
+  pushing. A scenario mentioning auto-merge does not narrow the draft safeguard.
+  Renew affected review before restoring ready status, auto-merge or queue entry.
 - Independent delta assessment renews affected behavior/dependencies while
   preserving proven peer receipts and all recorded responsibilities/sample floors.
   Full renewal requires material whole-scope impact or unisolatable provenance.
