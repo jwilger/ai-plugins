@@ -610,6 +610,39 @@ fn setup_requires_both_explicit_hook_selections_and_safe_complete_configuration(
     }
 }
 
+#[test]
+fn setup_rejects_parameterized_hook_selections_before_writes() {
+    let root = TempDir::new().expect("repository");
+    git(root.path(), &["init", "--quiet"]);
+    let mut base = setup_arguments(root.path());
+    base["proposed_configuration"] = json!(format!(
+        "{}\n[commands.targeted]\nargv = ['mix', 'test', '{{target}}']\ncapability = 'tests'\n[commands.targeted.parameters]\ntarget = 'string'\n",
+        base["proposed_configuration"].as_str().expect("proposal")
+    ));
+    let approved = approved_setup(root.path(), base.clone());
+    for key in ["pre_commit_command_ids", "pre_push_command_ids"] {
+        for tool in ["setup.preview", "setup.apply"] {
+            let mut arguments = if tool == "setup.apply" {
+                approved.clone()
+            } else {
+                base.clone()
+            };
+            arguments[key] = json!(["targeted"]);
+            let response = mcp_call(root.path(), tool, arguments);
+            assert!(
+                response["error"]["message"]
+                    .as_str()
+                    .is_some_and(|message| {
+                        message.contains("setup_hook_command_parameters_unsupported id=targeted")
+                    }),
+                "{tool} {key}: {response}"
+            );
+            assert!(!root.path().join(".development-system.toml").exists());
+            assert!(!root.path().join("lefthook.yml").exists());
+        }
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn setup_rejects_symlinked_write_paths_without_changing_external_files() {

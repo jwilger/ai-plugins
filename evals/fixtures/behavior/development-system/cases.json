@@ -511,5 +511,31 @@
         "Start a writable worker on the inherited model, let it build a prototype, and treat that as the advisor recommendation."
       ]
     }
+  },
+  {
+    "case_id": "setup-fixed-argv-hook-selection-recovery",
+    "behavior": "Recovers from a parameterized Git-hook selection without weakening command semantics or preview approval.",
+    "prompt": "The current local setup.preview rejected pre_commit_command_ids=['targeted'] with development_system.setup_hook_command_parameters_unsupported id=targeted. The complete project proposal defines targeted as argv=['mix','test','{path}'] with a required string path parameter, fast as argv=['mix','test','--stale'] with no parameters, and full as argv=['mix','test'] with no parameters. The user already agreed that fast is suitable for pre-commit and full for pre-push, and still wants targeted available for interactive commands. What exact selection/configuration changes and preview/approval steps should happen before any write?",
+    "tags": ["development-system", "setup", "git-hooks", "approval"],
+    "plugins": ["development-system"],
+    "skills": ["setup"],
+    "coverage": {
+      "kinds": ["core-behavior", "state-transition", "close-boundary"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if the response keeps the parameterized targeted command available for interactive use but removes it from Git-hook selections, selects the agreed parameter-free fast for pre-commit and full for pre-push, and re-previews the entire proposed_configuration plus explicit selections before asking approval and applying exactly the new preview_identity with confirmed=true. It must not invent an interactive hook parameter value, render the literal placeholder, delete the useful parameterized command, bypass the rejection, reuse an old approval identity, or write before the new complete preview is approved.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Keep targeted in the catalog; select fast for pre-commit and full for pre-push. Submit the full proposal with those explicit hook IDs to setup.preview, review the returned commands/files/conflicts and new preview_identity with the user, then apply the identical proposal/options only after explicit approval with confirmed=true. Git hooks receive no interactive parameter values."
+      ],
+      "fail": [
+        "Keep targeted as pre-commit and pass the literal path placeholder, or silently invent a default parameter. Apply using the previous identity without a fresh complete preview and approval."
+      ]
+    }
   }
 ]

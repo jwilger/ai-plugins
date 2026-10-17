@@ -15475,6 +15475,11 @@ fn hook_jobs(config: &semantic::ProjectConfig, ids: &[String]) -> Result<String,
                 "development_system.setup_hook_command_capability_invalid id={id}"
             ));
         }
+        if !command.parameters.is_empty() {
+            return Err(format!(
+                "development_system.setup_hook_command_parameters_unsupported id={id}"
+            ));
+        }
         let run = command
             .argv
             .iter()
