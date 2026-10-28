@@ -25,7 +25,7 @@
           # cargo-zigbuild needs an SDK when linking Darwin targets from Linux.
           # Expose the pinned, platform-independent payload without attempting
           # to build Nixpkgs' Darwin-only apple-sdk wrapper derivation.
-          apple-sdk-source = pkgs.apple-sdk_15.src;
+          apple-sdk-source = pkgs.apple-sdk_27.src;
         } // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           hyprland-computer-control = pkgs.callPackage ./plugins/hyprland-computer-control/package.nix { };
         })
@@ -51,8 +51,8 @@
               jq
               ripgrep
               fd
-              nodejs_22
-              python312
+              nodejs_26
+              python315
               nix
               cargo
               cargo-mutants
