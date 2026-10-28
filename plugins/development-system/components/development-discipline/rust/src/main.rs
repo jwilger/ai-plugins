@@ -15581,7 +15581,7 @@ fn legacy_project_mcp_configuration(project_root: &Path) -> Result<Option<String
         _ => return Err("development_system.setup_legacy_mcp_block_invalid".to_string()),
     };
     if !retained.trim().is_empty() {
-        let parsed: toml::Value = retained.parse().map_err(|error| {
+        let parsed: toml::Value = toml::from_str(&retained).map_err(|error| {
             format!("development_system.setup_harness_configuration_invalid source={error}")
         })?;
         if parsed
@@ -25900,7 +25900,7 @@ fn load_model_config(arguments: &Value, harness: &str) -> Result<ProjectModelCon
     let Some(contents) = read_model_config_file(&canonical_path, explicit)? else {
         return Ok(ProjectModelConfig::default());
     };
-    let parsed = contents.parse::<toml::Value>().map_err(|error| {
+    let parsed = toml::from_str::<toml::Value>(&contents).map_err(|error| {
         let location = parse_error_location(&contents, error.span());
         format!(
             "model_config_parse_failed path={} {location}",

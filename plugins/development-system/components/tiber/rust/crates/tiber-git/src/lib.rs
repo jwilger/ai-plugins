@@ -5747,7 +5747,14 @@ fn source_scope_fingerprint_with_limits(
         }
         hasher.update([0]);
     }
-    Ok(format!("sha256:v5:{:x}", hasher.finalize()))
+    Ok(format!(
+        "sha256:v5:{}",
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ))
 }
 
 struct FinalReviewScopeSnapshot {
@@ -6281,7 +6288,17 @@ fn tree_scope_fingerprint(
         }
         hasher.update([0]);
     }
-    Ok((missing, format!("sha256:v5:{:x}", hasher.finalize())))
+    Ok((
+        missing,
+        format!(
+            "sha256:v5:{}",
+            hasher
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        ),
+    ))
 }
 
 struct TreeFinalReviewFingerprintCache {
