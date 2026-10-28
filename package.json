@@ -2,30 +2,30 @@
   "name": "ai-plugins",
   "private": true,
   "engines": {
-    "node": "^20.20.0 || >=22.22.0"
+    "node": ">=22.22.0"
   },
   "devDependencies": {
-    "@openai/codex-sdk": "0.163.0",
-    "@types/node": "26.1.0",
+    "@openai/codex-sdk": "0.165.0",
+    "@types/node": "26.6.5",
     "ajv": "8.20.0",
-    "promptfoo": "0.121.19",
+    "promptfoo": "0.125.1",
     "typescript": "7.0.2",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "overrides": {
-    "@openai/codex-sdk": "0.163.0",
-    "adm-zip": "0.6.0",
+    "@openai/codex-sdk": "0.165.0",
+    "adm-zip": "0.6.1",
     "@modelcontextprotocol/sdk": {
-      "@hono/node-server": "2.0.11"
+      "@hono/node-server": "2.1.5"
     },
     "ajv": {
-      "fast-uri": "4.1.1"
+      "fast-uri": "4.2.3"
     },
     "@huggingface/transformers": {
-      "sharp": "0.35.3"
+      "sharp": "0.35.5"
     },
     "promptfoo": {
-      "sharp": "0.35.3"
+      "sharp": "0.35.5"
     }
   }
 }
