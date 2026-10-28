@@ -53,6 +53,12 @@ nix develop -c scripts/evals/run-code-quality-benchmark.sh
 Set `CODE_QUALITY_CODEX_AUTH_HOME` only when the source Codex login is stored in
 a different private directory.
 
+Current Codex models require the packaged code-mode host. The boundary enables
+it, verifies its hash, and mounts an immutable copy beside the CLI. Its embedded
+V8 sandbox needs a large virtual address reservation, so the address-space limit
+is 2 TiB while the cgroup still limits physical memory to 8 GiB with no swap.
+The existing filesystem, network, process, CPU, and timeout limits remain active.
+
 The provider run can take many hours. Every turn has finite resource and wall
 limits, and the outer run also has a finite timeout. Raw Promptfoo results,
 transcripts, logs, and assertion artifacts remain in a private temporary run

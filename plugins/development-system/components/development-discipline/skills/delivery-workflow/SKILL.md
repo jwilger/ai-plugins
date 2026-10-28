@@ -12,8 +12,7 @@ defined by that canonical matrix; model choice never supplies authorization.
 Choose the delivery path from the repository's actual policy instead of assuming
 that every change needs a pull request.
 
-Development Discipline `workflow.authorize_delivery` is a mechanical phase
-transition proving that its predecessor gates completed. It does not authorize
+Passing a development or review gate records evidence; it does not authorize
 a commit, push, PR/MR, merge, release, or destructive operation. Obtain action
 authorization independently from current user direction or repository policy.
 

@@ -246,6 +246,7 @@ function prepareWorkspace({
     errorOnExist: true,
     force: false,
   });
+  fs.mkdirSync(path.join(workspace, ".tmp"), { mode: 0o700 });
   git(workspace, ["init", "--quiet", "--initial-branch=main"]);
   git(workspace, ["add", "--all"]);
   git(workspace, ["commit", "--quiet", "-m", "Initial project state"]);

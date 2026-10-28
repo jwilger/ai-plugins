@@ -128,9 +128,7 @@ Prefer `state_ref` between calls; it contains only session identity, storage
 scope, and the authoritative-state fingerprint. Never summarize or reconstruct
 the legacy state. The coordinator stores full project-scoped state as EventCore
 facts. The advisory plugin uses a separate local-only Git authority under the
-repository's Git metadata and never publishes those review facts to a remote;
-standalone Tiber's native workflow service uses its configured Development
-Workflow authority. SQLite in user state is a rebuildable report/projection,
+repository's Git metadata and never publishes those review facts to a remote. SQLite in user state is a rebuildable report/projection,
 not the decision authority. A new stdio MCP process resolves a
 valid reference, including pending verifier and delta-risk assignments. If a
 caller loses the latest handoff, `final_review.resume_latest` returns the latest
@@ -192,11 +190,6 @@ credit, closes the pending verifier, advances the iteration, and assigns the
 complete selected lens set afresh. Three new consecutive complete finding-free
 iterations remain required; correcting the old result cannot preserve credit.
 
-The equivalent standalone-Tiber transition emits durable
-`AssignmentResultRejected` when a current result fails scheduler provenance or
-finding-identity checks. That fact invalidates the full iteration, clears the
-consecutive-clean streak, and permits only fresh next-iteration assignments.
-
 Creation is insert-only and every
 transition uses a durable revision compare-and-swap, so concurrent processes
 cannot admit duplicate sessions or overwrite each other's progress. Unknown,
@@ -208,10 +201,7 @@ and durable storage is bounded independently.
 `final_review.plan` rejects a risk assessment that selects no deep-review lens.
 A v3 review reaches completion only with sufficient valid receipts for every selected responsibility, every justified extra sample, all required verifiers, and no unresolved blocker. A retained v2 review requires its recorded complete clean rounds. The
 plugin's advisory surface returns no native workflow handoff; stop without
-calling one. Standalone Tiber may name `next_tool:
-workflow.record_clean_review`; only when that native workflow service is
-actually available, pass the terminal plan's `state_ref` as
-`review_state_ref`.
+calling one.
 When an advance returns `verifier_required`, the server retains the pending
 assignment ID and exact core pre-verifier arguments. Until the caller resubmits
 the same lens, scope, and caller-decision arguments plus the matching

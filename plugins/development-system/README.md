@@ -194,12 +194,6 @@ Within that advisory boundary, final-review state fails closed. Protocol v3 requ
 
 Tiber can additionally enforce receipts at the task boundary through `[final_review].minimum_clean_reviews`. Values one and two are valid explicit policies; larger requirements remain enforced. Task completion and trailer-driven delivery still require current independent evidence. See [the proportional policy](components/development-discipline/skills/final-review/references/proportional-review-policy.md).
 
-The editor, runner, repository, and diagnostic services are retained as
-unexposed reusable components for the standalone Tiber harness. Ordinary Codex
-remains able to inspect, edit, verify, commit, and push while Tiber is being
-bootstrapped. Tiber, rather than this plugin, will own authoritative identity,
-isolation, workflow, memory, verification, and delivery.
-
 Codex loads the plugin-root `mcp.json` and plugin-relative launchers. Project
 MCP entries and global compatibility overrides are unnecessary. If a signed
 append cannot reach the agent, update the plugin-owned signing socket path.
@@ -223,8 +217,7 @@ The top-level plugin manifest starts the advisory Development Discipline
 inspection, setup, and multi-agent final-review surface plus the independent
 Tiber MCP server. The advisory surface stores final-review transitions on a
 separate local-only Git-backed EventCore authority and never publishes them to
-`development-workflow`; the standalone workflow service retains that remote
-authority. Development Discipline reads Tiber's unresolved CI hold when
+a remote authority. Development Discipline reads Tiber's unresolved CI hold when
 evaluating delivery readiness. Tiber is the sole CI-incident and receipt
 authority on `tiber`, in addition to publishing task events there.
 Promptfoo remains an optional MCP owned by the

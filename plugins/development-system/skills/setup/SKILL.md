@@ -108,8 +108,7 @@ incomplete.
 
 The plugin is advisory. Setup does not prove or enforce caller identity,
 per-agent tool filtering, sandboxing, or mutation denial. Ordinary Codex can
-still inspect, edit, verify, commit, and push with the user's authority;
-standalone Tiber owns authoritative workflow and isolation.
+still inspect, edit, verify, commit, and push with the user's authority.
 
 Scopes use repository-relative include/exclude globs and exactly one of `tests`,
 `source`, `documentation`, `developer_environment`, or `build_output`. Reject

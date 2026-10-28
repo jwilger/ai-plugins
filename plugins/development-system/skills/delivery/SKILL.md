@@ -5,11 +5,9 @@ description: Use when committing, pushing, opening or babysitting a PR/MR, mergi
 
 # Delivery
 
-Use the configured semantic repository-local and repository-remote services
-when running inside standalone Tiber. In an ordinary host harness those
-services are advisory components, so use the host's normal Git or forge tools
-when the user has authorized delivery. Do not claim that the plugin denies
-those tools or supplies authoritative delivery receipts.
+Use the host's normal Git and forge tools when the user has authorized
+delivery. Plugin records provide evidence; they do not authorize repository
+effects or restrict ordinary host tools.
 
 For ongoing PR/MR monitoring through merge or an external-intervention blocker,
 load the retained [babysit PR
@@ -19,7 +17,7 @@ When the configured value is unavailable, do not choose a mode. State that
 `.development-system.toml` is authoritative and summarize all three modes so
 the user knows what evidence is missing.
 
-- A semantic commit operation must consume a
+- A commit must consume a
   `passing-awaiting-gates-or-review` per-edit checkpoint whose bounded
   lightweight review has completed. The commit operation itself must trigger
   the Lefthook pre-commit gate and return both its gate receipt and a signed
@@ -32,15 +30,15 @@ the user knows what evidence is missing.
   only the causal repair followed by fresh tests, review, and a new normal
   hook-backed commit attempt. Use its recovery helper for a stranded record,
   never manual checkpoint replacement or fabricated passing receipts.
-- A semantic tag operation is separate from an increment commit: it consumes
+- A tag operation is separate from an increment commit: it consumes
   the repository-authorized delivered revision and release evidence required
   by policy, and returns a tag receipt when signing is required.
-- A semantic push operation must trigger the Lefthook pre-push gate and return
-  its verification plus an idempotent remote receipt. Never run that gate
+- A push operation must trigger the Lefthook pre-push gate and return
+  its verification plus exact remote readback evidence. Never run that gate
   separately before pushing. PR/merge operations return their idempotent remote
-  receipts.
-- Failed pushed CI is blocking recovery work; the CI-recovery service performs
-  only typed recovery actions.
+  evidence.
+- Failed pushed CI is blocking recovery work; use the installed Tiber
+  CI-recovery workflow.
 
 For a PR/MR check failure, inspect the failed job and step before acting.
 Classify it as change-caused, transient/flaky, or infrastructure/external; route

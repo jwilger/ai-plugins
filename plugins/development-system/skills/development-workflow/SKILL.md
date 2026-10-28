@@ -14,9 +14,15 @@ does not deny ordinary host mutation capabilities.
 
 ## Workflow explanation checklist
 
-When explaining implementation increments or terminal-review remediation, cover
-these points explicitly; do not replace them with a generic reference to gates:
+When explaining implementation increments, final review, or terminal-review
+remediation, cover these points explicitly; do not replace them with a generic
+reference to gates:
 
+- Before planning review, use a fresh independent broad risk scout that assesses
+  security and human/physical safety separately, even when overall risk is low.
+- Filter findings deterministically before stronger risk-selected lens review;
+  reserve strong batched verification for blocking, disputed, or materially
+  uncertain findings.
 - Causal repair, with the recorded RED causal claim when applicable, immediate focused tests and
   lightweight review; comprehensive suites belong in CI, without a duplicate
   local comprehensive exact-commit gate.
@@ -206,7 +212,7 @@ behind mirror does not override valid local authority. A malformed, missing,
 non-atomic or stale local, or mismatched authoritative record is a fail-closed
 recovery hold: do not edit, commit, push, or infer progress until the same task
 record is reconciled. This note protocol records evidence only; it does not
-emulate or claim native `workflow.*` enforcement.
+claim to enforce harness capabilities.
 
 For upgrade compatibility, a pre-6.2 `checkpoint-v1` record whose only
 noncanonical field is a free-form `next_action` remains readable evidence, but
@@ -574,28 +580,16 @@ readiness evidence; a clean unchanged review creates no additional commit.
 
 ## Structured lifecycle
 
-The bootstrap plugin exposes structured `final_review.*` coordination, but not
-the native `workflow.*`, `workspace-editor.*`, or `project-runner.*` services.
+The plugin exposes structured `final_review.*` coordination.
 Use ordinary host tools for authorized repository changes and verification, and
 follow the RED-GREEN-refactor, exact-evidence, review, and delivery guidance in
 the specialist contracts above. Do not claim that plugin instructions, hooks,
 or final-review records enforce harness capabilities or authorize external
 actions.
 
-The retained source-level native lifecycle is for the planned standalone Tiber
-scheduler. It is not bound to the currently installed Tiber task-board binary.
-Once that separate scheduler binding ships, assignment-bound editor and runner
-receipts support the mechanical RED, GREEN, verification, review, and delivery
-transitions: `workflow.record_red`,
-`workflow.authorize_implementation`, `workflow.record_green`,
-`workflow.begin_verification`, `workflow.record_verification`,
-`workflow.record_clean_review`, `workflow.authorize_delivery`, and
-`workflow.complete_delivery`. Until then, do not call or emulate those native
-transitions through the advisory bootstrap surface. Installed Tiber task
-transitions enforce only the separate opt-in
-`[final_review].minimum_clean_reviews` completion and trailer-delivery policy;
-they do not enforce RED, GREEN, verification, editor, runner, or
-complete-delivery transitions.
+Installed Tiber task transitions enforce the separate opt-in
+`[final_review].minimum_clean_reviews` completion and trailer-delivery policy.
+They do not enforce editing, execution, or the host's development lifecycle.
 
 Before a new task, inspect forge CI. Require a successful completed run for the
 candidate revision; queued/running is not terminal evidence, and any completed

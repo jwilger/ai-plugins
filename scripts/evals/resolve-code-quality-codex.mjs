@@ -120,10 +120,16 @@ const resourceRg = canonicalRegularFile(
   "Codex packaged ripgrep",
   true,
 );
+const codeModeHost = canonicalRegularFile(
+  path.join(runtimeRoot, "bin", "codex-code-mode-host"),
+  "Codex packaged code-mode host",
+  true,
+);
 
 process.stdout.write(
   `${JSON.stringify({
     codexBin,
+    codeModeHost,
     expectedTarget,
     manifest,
     payloadPackageJson,

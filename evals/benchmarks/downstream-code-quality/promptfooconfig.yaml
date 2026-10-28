@@ -39,6 +39,7 @@ providers:
         CODE_QUALITY_CODEX_REAL_BIN: "{{ env.CODE_QUALITY_CODEX_REAL_BIN }}"
         CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256 }}"
         CODE_QUALITY_CODEX_RG_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256 }}"
         CODE_QUALITY_NODE_BIN: "{{ env.CODE_QUALITY_NODE_BIN }}"
         CODE_QUALITY_OUTPUT_MAX_BYTES: "{{ env.CODE_QUALITY_OUTPUT_MAX_BYTES }}"
         CODE_QUALITY_PRLIMIT_BIN: "{{ env.CODE_QUALITY_PRLIMIT_BIN }}"
@@ -80,7 +81,7 @@ providers:
           browser_use: false
           browser_use_external: false
           browser_use_full_cdp_access: false
-          code_mode_host: false
+          code_mode_host: true
           computer_use: false
           enable_request_compression: true
           fast_mode: false
@@ -136,6 +137,7 @@ providers:
         CODE_QUALITY_CODEX_REAL_BIN: "{{ env.CODE_QUALITY_CODEX_REAL_BIN }}"
         CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256 }}"
         CODE_QUALITY_CODEX_RG_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256 }}"
         CODE_QUALITY_NODE_BIN: "{{ env.CODE_QUALITY_NODE_BIN }}"
         CODE_QUALITY_OUTPUT_MAX_BYTES: "{{ env.CODE_QUALITY_OUTPUT_MAX_BYTES }}"
         CODE_QUALITY_PRLIMIT_BIN: "{{ env.CODE_QUALITY_PRLIMIT_BIN }}"
@@ -177,7 +179,7 @@ providers:
           browser_use: false
           browser_use_external: false
           browser_use_full_cdp_access: false
-          code_mode_host: false
+          code_mode_host: true
           computer_use: false
           enable_request_compression: true
           fast_mode: false
@@ -233,6 +235,7 @@ providers:
         CODE_QUALITY_CODEX_REAL_BIN: "{{ env.CODE_QUALITY_CODEX_REAL_BIN }}"
         CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256 }}"
         CODE_QUALITY_CODEX_RG_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256 }}"
+        CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256: "{{ env.CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256 }}"
         CODE_QUALITY_NODE_BIN: "{{ env.CODE_QUALITY_NODE_BIN }}"
         CODE_QUALITY_OUTPUT_MAX_BYTES: "{{ env.CODE_QUALITY_OUTPUT_MAX_BYTES }}"
         CODE_QUALITY_PRLIMIT_BIN: "{{ env.CODE_QUALITY_PRLIMIT_BIN }}"
@@ -274,7 +277,7 @@ providers:
           browser_use: false
           browser_use_external: false
           browser_use_full_cdp_access: false
-          code_mode_host: false
+          code_mode_host: true
           computer_use: false
           enable_request_compression: true
           fast_mode: false

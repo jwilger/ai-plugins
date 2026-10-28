@@ -486,7 +486,7 @@ function assertSafeConfigOverrides(overrides, workspace, safeToolPath) {
     ["features.browser_use", "false"],
     ["features.browser_use_external", "false"],
     ["features.browser_use_full_cdp_access", "false"],
-    ["features.code_mode_host", "false"],
+    ["features.code_mode_host", "true"],
     ["features.computer_use", "false"],
     ["features.enable_fanout", "false"],
     ["features.enable_request_compression", "true"],
@@ -746,6 +746,8 @@ const expectedVersion = process.env.CODE_QUALITY_CODEX_EXPECTED_VERSION;
 const expectedResourceBwrapSha256 =
   process.env.CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256;
 const expectedRgSha256 = process.env.CODE_QUALITY_CODEX_RG_EXPECTED_SHA256;
+const expectedCodeModeHostSha256 =
+  process.env.CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256;
 const safeToolPath = process.env.CODE_QUALITY_TOOL_PATH;
 const timeout = process.env.CODE_QUALITY_TIMEOUT_BIN;
 const prlimit = process.env.CODE_QUALITY_PRLIMIT_BIN;
@@ -771,6 +773,7 @@ if (
   !expectedVersion ||
   !expectedResourceBwrapSha256 ||
   !expectedRgSha256 ||
+  !expectedCodeModeHostSha256 ||
   !safeToolPath ||
   !timeout ||
   !prlimit ||
@@ -838,6 +841,7 @@ let packageManifestPath;
 let packageManifestContents;
 let resourceBwrap;
 let resourceRg;
+let codeModeHost;
 try {
   runtimeRoot = realpathSync(dirname(dirname(realCodex)));
   packageManifestPath = join(runtimeRoot, "codex-package.json");
@@ -859,6 +863,7 @@ try {
   }
   resourceBwrap = join(runtimeRoot, packageManifest.resourcesDir, "bwrap");
   resourceRg = join(runtimeRoot, packageManifest.pathDir, "rg");
+  codeModeHost = join(runtimeRoot, "bin", "codex-code-mode-host");
 } catch {
   fail("configuration", "codex-package-invalid", 64);
 }
@@ -868,6 +873,11 @@ resourceBwrap = assertPinnedFile(
   "codex-resource-bwrap",
 );
 resourceRg = assertPinnedFile(resourceRg, expectedRgSha256, "codex-rg");
+codeModeHost = assertPinnedFile(
+  codeModeHost,
+  expectedCodeModeHostSha256,
+  "codex-code-mode-host",
+);
 
 const workspaceMetadata = canonicalDirectory(
   workspace,
@@ -1405,6 +1415,12 @@ const snapshotResourceRg = snapshotPinnedFile(
   "codex-rg",
 );
 const snapshotPackageManifest = join(packageSnapshot, "codex-package.json");
+const snapshotCodeModeHost = snapshotPinnedFile(
+  codeModeHost,
+  join(packageSnapshotBin, "codex-code-mode-host"),
+  expectedCodeModeHostSha256,
+  "codex-code-mode-host",
+);
 writeFileSync(snapshotPackageManifest, packageManifestContents, {
   mode: 0o400,
 });
@@ -1607,6 +1623,10 @@ const bwrapArgv = [
   "67108864",
   "--tmpfs",
   "/tmp",
+  "--perms",
+  "0700",
+  "--dir",
+  `/tmp/codex-daemon-${uid}`,
   "--dev",
   "/dev",
   "--proc",
@@ -1683,6 +1703,9 @@ const bwrapArgv = [
   "--ro-bind",
   snapshotCodex,
   "/runtime/codex-package/bin/codex",
+  "--ro-bind",
+  snapshotCodeModeHost,
+  "/runtime/codex-package/bin/codex-code-mode-host",
   "--ro-bind",
   snapshotPackageManifest,
   "/runtime/codex-package/codex-package.json",
@@ -1792,7 +1815,8 @@ const child = spawn(
     "--kill-after=5s",
     `${wallTimeoutSeconds}s`,
     snapshotPrlimit,
-    "--as=8589934592",
+    // V8 reserves a large virtual sandbox; the cgroup still caps physical memory at 8 GiB.
+    "--as=2199023255552",
     "--cpu=1800",
     "--fsize=1073741824",
     "--nofile=1024",

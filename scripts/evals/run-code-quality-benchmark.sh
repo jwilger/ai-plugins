@@ -689,15 +689,18 @@ codex_runtime_root="$(jq -er '.runtimeRoot' <<<"$codex_resolution")"
 codex_runtime_manifest="$(jq -er '.runtimeManifest' <<<"$codex_resolution")"
 codex_resource_bwrap="$(jq -er '.resourceBwrap' <<<"$codex_resolution")"
 codex_resource_rg="$(jq -er '.resourceRg' <<<"$codex_resolution")"
+codex_code_mode_host="$(jq -er '.codeModeHost' <<<"$codex_resolution")"
 codex_wrapper_version="$(jq -er '.wrapperVersion' <<<"$codex_resolution")"
 codex_payload_version="$(jq -er '.payloadVersion' <<<"$codex_resolution")"
 codex_resource_bwrap_sha256="$(sha256sum "$codex_resource_bwrap" | cut -d' ' -f1)"
 codex_resource_rg_sha256="$(sha256sum "$codex_resource_rg" | cut -d' ' -f1)"
+codex_code_mode_host_sha256="$(sha256sum "$codex_code_mode_host" | cut -d' ' -f1)"
 tool_records+=(
   "codex-wrapper:$codex_wrapper_version"
   "codex-payload:$codex_payload_version"
   "codex-resource-bwrap:$codex_resource_bwrap_sha256"
   "codex-resource-rg:$codex_resource_rg_sha256"
+  "codex-code-mode-host:$codex_code_mode_host_sha256"
 )
 codex_expected_version="$(
   env -i \
@@ -895,6 +898,7 @@ env -i \
   CODE_QUALITY_CODEX_EXPECTED_VERSION="$codex_expected_version" \
   CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256="$codex_resource_bwrap_sha256" \
   CODE_QUALITY_CODEX_RG_EXPECTED_SHA256="$codex_resource_rg_sha256" \
+  CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256="$codex_code_mode_host_sha256" \
   CODE_QUALITY_TOOL_PATH="$safe_tool_path" \
   CODE_QUALITY_WALL_TIMEOUT_SECONDS=7200 \
   CODE_QUALITY_OUTPUT_MAX_BYTES=16777216 \

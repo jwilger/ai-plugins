@@ -4,14 +4,13 @@ setup() {
   PROJECT="$BATS_TEST_TMPDIR/project"
   PARENT="$BATS_TEST_TMPDIR/parent"
   MOCK_BIN="$BATS_TEST_TMPDIR/bin"
-  mkdir -p "$PROJECT/scripts" "$PROJECT/tiber/scripts" "$PARENT" "$MOCK_BIN"
+  mkdir -p "$PROJECT/scripts" "$PARENT" "$MOCK_BIN"
   git -C "$PARENT" init -q
   printf 'parent source\n' > "$PARENT/seed.txt"
   git -C "$PARENT" add seed.txt
   cp "$PARENT/.git/config" "$BATS_TEST_TMPDIR/parent.config"
   cp "$PARENT/.git/index" "$BATS_TEST_TMPDIR/parent.index"
   cp "$BATS_TEST_DIRNAME/../run-pre-commit-gate.sh" "$PROJECT/scripts/"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$PROJECT/tiber/scripts/check-lint-policy.sh"
   export GATE_CALLS="$BATS_TEST_TMPDIR/calls"
   export GATE_FIXTURE_ROOT="$BATS_TEST_TMPDIR/fixture.git"
   export GATE_FIXTURE_WORKTREE="$BATS_TEST_TMPDIR/fixture-source"

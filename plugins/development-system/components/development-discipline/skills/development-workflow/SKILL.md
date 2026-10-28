@@ -28,21 +28,16 @@ verification boundary.
 
 ## Mechanical transitions are not authorization
 
-When the Development Discipline MCP is installed, its `workflow.start`,
-`workflow.record_red`, `workflow.authorize_implementation`,
-`workflow.record_green`, `workflow.authorize_review`,
-`workflow.record_clean_review`, and `workflow.authorize_delivery` calls are
-mechanical lifecycle transitions. They prove that required predecessor evidence
-was recorded and control which repository mutation phase is open. Despite the
-`authorize_*` method names, they do not grant human or policy authorization for
-an edit, destructive operation, commit, push, PR/MR, merge, release, or other
-externally visible action.
+The host checkpoint protocol records predecessor evidence and the next
+permitted development phase. Final-review coordination records independent
+review evidence. Neither grants user or repository authorization for an edit,
+destructive operation, commit, push, PR/MR, merge, release, or other externally
+visible action.
 
-Derive action authorization separately from current user direction and
-repository policy. Require both conditions before acting: the mechanical phase
-permits the operation, and the user or repository authorizes that exact class of
-operation. A model choice, successful transition, review recommendation, or
-standing instruction for a different operation satisfies neither condition.
+Require both current gate evidence and independent authorization for that exact
+class of operation before acting. A model choice, successful transition, review
+recommendation, or standing instruction for a different operation supplies
+neither missing condition.
 
 When the user asks only for a workflow explanation, describe the inspection and
 routing that would occur without claiming to have performed it. For an answer

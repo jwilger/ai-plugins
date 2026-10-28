@@ -53,6 +53,8 @@ setup() {
     >"$RUNTIME_ROOT/codex-package.json"
   printf '%s\n' '#!/bin/sh' 'exit 0' >"$RUNTIME_ROOT/codex-path/rg"
   printf '%s\n' '#!/bin/sh' 'exit 0' >"$RUNTIME_ROOT/codex-resources/bwrap"
+  printf '%s\n' '#!/bin/sh' 'exit 0' >"$RUNTIME_ROOT/bin/codex-code-mode-host"
+  chmod 755 "$RUNTIME_ROOT/bin/codex-code-mode-host"
   chmod 755 "$RUNTIME_ROOT/codex-path/rg" "$RUNTIME_ROOT/codex-resources/bwrap"
   write_fake_bwrap
   write_fake_timeout
@@ -63,6 +65,7 @@ setup() {
   write_execution_surface fixture-model medium
   CODEX_RESOURCE_BWRAP_SHA256="$(sha256sum "$RUNTIME_ROOT/codex-resources/bwrap" | cut -d' ' -f1)"
   CODEX_RG_SHA256="$(sha256sum "$RUNTIME_ROOT/codex-path/rg" | cut -d' ' -f1)"
+  CODEX_CODE_MODE_HOST_SHA256="$(sha256sum "$RUNTIME_ROOT/bin/codex-code-mode-host" | cut -d' ' -f1)"
   BWRAP_SHA256="$(sha256sum "$TOOL_ROOT/bwrap" | cut -d' ' -f1)"
   PRLIMIT_SHA256="$(sha256sum "$TOOL_ROOT/prlimit" | cut -d' ' -f1)"
   TIMEOUT_SHA256="$(sha256sum "$TOOL_ROOT/timeout" | cut -d' ' -f1)"
@@ -180,6 +183,24 @@ case " $* " in
       exit 76
     fi
     printf '%s\n' immutable-inputs-protected
+    ;;
+  *' --model fixture-daemon-directory-probe '*)
+    daemon_directory="/tmp/codex-daemon-$UID"
+    if [ ! -d "$daemon_directory" ]; then
+      printf '%s\n' daemon-directory-missing >&2
+      exit 73
+    fi
+    [ ! -L "$daemon_directory" ]
+    [ -O "$daemon_directory" ]
+    [[ "$(ls -ld "$daemon_directory")" == drwx------* ]]
+    if touch /tmp/forbidden-daemon-probe 2>/dev/null; then
+      exit 91
+    fi
+    if touch "$daemon_directory/forbidden-probe" 2>/dev/null; then
+      exit 92
+    fi
+    printf '%s\n' daemon-prepared >daemon-probe.txt
+    cat daemon-probe.txt
     ;;
   *' --model fixture-inner-sandbox-probe '*)
     [ -z "${OPENAI_API_KEY:-}" ]
@@ -554,6 +575,7 @@ build_boundary_env() {
     "CODE_QUALITY_CODEX_EXPECTED_SHA256=${BOUNDARY_EXPECTED_SHA256:-$CODEX_SHA256}"
     "CODE_QUALITY_CODEX_RESOURCE_BWRAP_EXPECTED_SHA256=${BOUNDARY_CODEX_RESOURCE_BWRAP_SHA256:-$CODEX_RESOURCE_BWRAP_SHA256}"
     "CODE_QUALITY_CODEX_RG_EXPECTED_SHA256=${BOUNDARY_CODEX_RG_SHA256:-$CODEX_RG_SHA256}"
+    "CODE_QUALITY_CODEX_CODE_MODE_HOST_EXPECTED_SHA256=${BOUNDARY_CODEX_CODE_MODE_HOST_SHA256:-$CODEX_CODE_MODE_HOST_SHA256}"
     "CODE_QUALITY_NODE_BIN=$(realpath "$(command -v node)")"
     "CODE_QUALITY_BWRAP_BIN=${BOUNDARY_BWRAP_BIN:-$TOOL_ROOT/bwrap}"
     "CODE_QUALITY_BWRAP_EXPECTED_SHA256=${BOUNDARY_BWRAP_SHA256:-$BWRAP_SHA256}"
@@ -780,6 +802,9 @@ NODE
   )"
   BOUNDARY_CODEX_RG_SHA256="$(
     sha256sum "$(jq -er '.resourceRg' <<<"$resolution")" | cut -d' ' -f1
+  )"
+  BOUNDARY_CODEX_CODE_MODE_HOST_SHA256="$(
+    sha256sum "$(jq -er '.codeModeHost' <<<"$resolution")" | cut -d' ' -f1
   )"
   BOUNDARY_DISCOVERY_CANARY=1
   BOUNDARY_DISCOVERY_PROMPT="$(
@@ -1125,7 +1150,7 @@ NODE
   [[ "$timeout_argv" == \
     "--signal=TERM|--kill-after=5s|3600s|/tmp/workspace-runtime-"*"/runtime-tools/prlimit|"* ]]
   [[ "$prlimit_argv" == \
-    "--as=8589934592|--cpu=1800|--fsize=1073741824|--nofile=1024|--core=0|--|/tmp/workspace-runtime-"*"/runtime-tools/bwrap|"* ]]
+    "--as=2199023255552|--cpu=1800|--fsize=1073741824|--nofile=1024|--core=0|--|/tmp/workspace-runtime-"*"/runtime-tools/bwrap|"* ]]
   [[ "$prlimit_argv" != *"--nproc="* ]]
 }
 
@@ -1410,6 +1435,19 @@ NODE
 
   [ "$status" -eq 64 ]
   [[ "$output" == *"CODE_QUALITY_BOUNDARY_ERROR:configuration:codex-entrypoint-mismatch"* ]]
+  [ ! -e "$FIXTURE_ROOT/bwrap-args" ]
+}
+
+@test "Codex boundary rejects an unpinned packaged code-mode host" {
+  BOUNDARY_CODEX_CODE_MODE_HOST_SHA256="$(printf '0%.0s' {1..64})" \
+    run_boundary \
+      exec \
+      --experimental-json \
+      --sandbox workspace-write \
+      --cd "$WORKSPACE"
+
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"CODE_QUALITY_BOUNDARY_ERROR:integrity:codex-code-mode-host-sha256-mismatch"* ]]
   [ ! -e "$FIXTURE_ROOT/bwrap-args" ]
 }
 
@@ -1785,6 +1823,28 @@ NODE
   [[ "$output" == *"codex-retained-chatgpt-auth"* ]]
 }
 
+@test "middle sandbox prepares private daemon staging while keeping tmp readonly" {
+  command -v bwrap >/dev/null || skip 'bubblewrap is unavailable'
+  prepare_real_nix_closure
+  prepare_real_inner_bwrap
+
+  BOUNDARY_BWRAP_BIN="$(realpath "$(command -v bwrap)")" \
+    BOUNDARY_BWRAP_SHA256="$(sha256sum "$(realpath "$(command -v bwrap)")" | cut -d' ' -f1)" \
+    run_boundary \
+      exec \
+      --experimental-json \
+      --model fixture-daemon-directory-probe \
+      --sandbox workspace-write \
+      --cd "$WORKSPACE"
+
+  if [ "$status" -ne 0 ]; then
+    printf '%s\n' "$output" >&3
+  fi
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"daemon-prepared"* ]]
+  [ "$(cat "$WORKSPACE/daemon-probe.txt")" = daemon-prepared ]
+}
+
 @test "bounded workspace tmpfs contains open-unlinked disk growth" {
   command -v bwrap >/dev/null || skip 'bubblewrap is unavailable'
   prepare_real_nix_closure
@@ -1934,6 +1994,7 @@ printf "model-shell-clean\\n"'
     BOUNDARY_EXPECTED_SHA256="$real_sha256" \
     BOUNDARY_CODEX_RESOURCE_BWRAP_SHA256="$(sha256sum "$real_runtime_root/codex-resources/bwrap" | cut -d' ' -f1)" \
     BOUNDARY_CODEX_RG_SHA256="$(sha256sum "$real_runtime_root/codex-path/rg" | cut -d' ' -f1)" \
+    BOUNDARY_CODEX_CODE_MODE_HOST_SHA256="$(sha256sum "$real_runtime_root/bin/codex-code-mode-host" | cut -d' ' -f1)" \
     BOUNDARY_BWRAP_BIN="$(realpath "$(command -v bwrap)")" \
     BOUNDARY_BWRAP_SHA256="$(sha256sum "$(realpath "$(command -v bwrap)")" | cut -d' ' -f1)" \
     run_boundary \

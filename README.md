@@ -20,10 +20,10 @@ review.
 
 ## Plugin catalog
 
-| Plugin                                                                   | Harness                  | Description                                                                                          | Version |
-| ------------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md)               | Codex, pi (experimental) | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 8.1.0   |
-| [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex                    | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session.         | 0.1.3   |
+| Plugin                                                                   | Harness                  | Description                                                                                  | Version |
+| ------------------------------------------------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md)               | Codex, pi (experimental) | Advisory repository setup, structured multi-agent review, and Git-backed issue tracking.     | 9.0.0   |
+| [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex                    | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session. | 0.1.3   |
 
 ## Using development-system with pi (experimental)
 

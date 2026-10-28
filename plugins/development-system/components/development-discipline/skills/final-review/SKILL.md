@@ -106,9 +106,7 @@ subsequent calls. `final_review.advance` is the canonical filter/state
 transition when the plan has assignments. A plan with `assignments: []` and
 `complete: true` is already terminal; do not call `final_review.advance`. On the
 plugin's advisory surface, stop there without calling a native workflow tool.
-Standalone Tiber may instead return `next_tool: workflow.record_clean_review`;
-when that native workflow service is actually available, pass the plan's
-`state_ref` to it as `review_state_ref`. If the MCP
+If the MCP
 is unavailable, a manual pass may produce review
 observations, but it does not satisfy this final-review gate and cannot support a
 PR, merge, or readiness claim. Disclose that enforcement is unavailable and
@@ -166,11 +164,6 @@ These invariants are non-bypassable:
 - Reject a risk plan that selects no deep-review lens.
 - Require each currently pending selected responsibility and assigned verifier. Normalize schema, lifecycle, provenance, and coverage failures as bounded non-clean results inside the authoritative `final_review.advance` transition. Under v3, replace invalid assignments without credit, preserving independently valid peers. A malformed v3 verifier replaces adjudication and retains authenticated source results without counting them as fresh samples.
 - For retained v2, explicitly describe **bounded classification inside authoritative `final_review.advance`**: the coordinator bounds and classifies schema-invalid lens evidence, invalid caller attestations, and malformed/provenance-invalid verifier evidence before recording the non-clean transition. It clears both `clean_streak` and durable verified-clean evidence, closes any pending verifier, and advances to a fresh iteration with the complete selected lens set. No corrected retry preserves the old streak or frozen verifier assignment. Three new consecutive complete finding-free iterations remain required. The v3 adjudication-only replacement does not apply.
-- In the source-level standalone Tiber review contract, a current result that
-  fails scheduler provenance or finding-identity checks emits durable
-  `AssignmentResultRejected`, invalidates that full iteration, and permits only
-  fresh next-iteration assignments. That contract is not yet bound to the
-  installed Tiber task-board binary.
 - Require complete applicable independent coverage. Each selected responsibility
   normally needs one genuine fresh-context result. Additional samples require the
   concrete consequential risk, residual uncertainty, scope, and count rationale
@@ -445,8 +438,7 @@ When the review is for a tracked ticket, pass its stable tracker ID as
 `work_item_id` to `final_review.plan` (for example, the active Tiber task ID).
 The coordinator stores decisions as EventCore facts. The advisory plugin uses a
 separate local-only Git authority under repository Git metadata and never
-publishes those review facts to a remote; standalone Tiber's native workflow
-service uses its configured Development Workflow authority. One rebuildable
+publishes those review facts to a remote. One rebuildable
 SQLite report/projection per worktree and work item lives in user state
 (`$XDG_STATE_HOME`, or `~/.local/state` as fallback), not in the worktree or in
 per-session files. Each completed review transition replaces that binding's old

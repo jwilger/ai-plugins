@@ -52,9 +52,7 @@ plugin-wide MCP surface is advisory: it exposes bounded repository inspection,
 explicitly confirmed repository-local setup, and the multi-agent final-review
 coordinator. It does not expose the native workflow lifecycle, inspect arbitrary shell
 commands, tool names, patches, or Git arguments, execute project mutations, or
-restrict ordinary harness tools. Editor, runner, local-repository,
-remote-repository, and diagnostics services remain withheld for standalone
-Tiber to authorize behind its own isolation boundary.
+restrict ordinary harness tools.
 
 The advisory final-review coordinator rejects zero-lens plans and completes one risk-selected independent coverage set by default under protocol v3. Every applicable or uncertain responsibility is selected; additional samples require explicit consequential risks. Genuine reviewer lifecycle, exact source dependencies, current shared verification, and independent adjudication remain mandatory. Repairs invalidate affected behavior and dependencies, preserving proven unchanged receipts. Whole-scope impact or unisolatable provenance requires full renewal. Malformed results replace affected assignments; malformed adjudication replaces the verifier while preserving valid source reviews. Budget decisions cannot bypass these gates.
 
@@ -80,10 +78,7 @@ the MCP records typed transition facts on the Git-backed
 superseded state and post-completion transitions fail closed with sanitized
 recovery diagnostics; active sessions and retained review history are bounded.
 
-The native checked-development lifecycle remains an internal service for
-standalone Tiber because its RED, GREEN, verification, and delivery transitions
-depend on assignment-bound mutation and runner receipts. The advisory plugin
-does not advertise that incomplete lifecycle. Tiber is already the sole pushed-CI recovery authority on its
+Tiber is already the sole pushed-CI recovery authority on its
 Git-backed EventCore store. Development Discipline reads its unresolved
 incident hold when evaluating delivery readiness; matching terminal-success
 replacement evidence in Tiber releases that hold.

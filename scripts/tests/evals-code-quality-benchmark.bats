@@ -97,6 +97,7 @@ setup() {
   [ -x "$(jq -er '.codexBin' <<<"$output")" ]
   [ -x "$(jq -er '.resourceBwrap' <<<"$output")" ]
   [ -x "$(jq -er '.resourceRg' <<<"$output")" ]
+  [ -x "$(jq -er '.codeModeHost' <<<"$output")" ]
 }
 
 teardown() {
@@ -420,6 +421,14 @@ mark_benchmark_workspace() {
     [ -f "$workspace/Cargo.lock" ]
     [ -f "$workspace/src/main.rs" ]
     [ -f "$workspace/AGENTS.md" ]
+    run env TMPDIR="$workspace/.tmp" mktemp
+    [ "$status" -eq 0 ]
+    temporary_file="$output"
+    [[ "$temporary_file" == "$workspace/.tmp/"* ]]
+    [ "$(stat -c '%a' "$workspace/.tmp")" = 700 ]
+    printf '%s\n' runtime-ready >"$temporary_file"
+    [ "$(cat "$temporary_file")" = runtime-ready ]
+    rm "$temporary_file"
     [ ! -e "$workspace/.git/hooks/pre-push" ]
     [ "$(git -C "$workspace" rev-parse --is-inside-work-tree)" = true ]
     [ -z "$(git -C "$workspace" remote)" ]

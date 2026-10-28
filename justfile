@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace github-actions hyprland-computer-control pi-extension tiber-harness-rust tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
+ci: validate-marketplace github-actions hyprland-computer-control pi-extension tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
 
 # Build the guarded runtime and run offline Python/C checks without desktop input.
 hyprland-computer-control:
@@ -28,18 +28,6 @@ pi-extension:
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
     actionlint
-
-# Rust gates for the standalone Tiber harness workspace.
-tiber-harness-rust:
-    bash tiber/scripts/check-lint-policy.sh
-    node tiber/scripts/tests/probe-app-server-effective-authority.test.mjs
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo fmt --manifest-path tiber/Cargo.toml --all --check
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo clippy --manifest-path tiber/Cargo.toml --workspace --all-targets --all-features -- -D warnings
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-harness" cargo test --manifest-path tiber/Cargo.toml --workspace --all-features
-
-# Verify the pinned app-server authority fixture against a locally generated schema.
-tiber-app-server-fixture-check schema:
-    bash tiber/scripts/check-app-server-authority-fixture.sh "{{schema}}"
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:

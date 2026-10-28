@@ -14,7 +14,7 @@ Receipts retain original reviewer, source snapshot, shared verification identity
 
 Separate model/document and rendered-artifact responsibilities from production-code responsibilities. Security, boundary checks, regressions, exact-revision readiness, actual CI/CodeRabbit, signing, and failure recovery remain required. Evidence reuse never invents new reviewer runs or concrete model identity.
 
-V2 sessions keep their original three-round contract. Explicit audited migration closes or accounts for prior assignments, preserves source, findings, holds, and history, and requires genuine independent v3 assessment; absent old provenance is never inferred. The standalone unbound Tiber review scheduler is unchanged. Optional task-board minima one and two become valid without weakening committed receipts, independence, fingerprints, or trailer enforcement.
+V2 sessions keep their original three-round contract. Explicit audited migration closes or accounts for prior assignments, preserves source, findings, holds, and history, and requires genuine independent v3 assessment; absent old provenance is never inferred. Optional task-board minima one and two become valid without weakening committed receipts, independence, fingerprints, or trailer enforcement.
 
 ## Consequences
 

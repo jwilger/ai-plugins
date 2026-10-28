@@ -26,7 +26,6 @@ mod review_recovery;
 mod review_resolution;
 use review_recovery::*;
 mod semantic;
-mod workflow;
 
 use std::cell::RefCell;
 use std::collections::{
@@ -12276,12 +12275,16 @@ enum ServiceSurface {
     Full,
     PluginAdvisory,
     WorkspaceReader,
-    WorkflowCore,
-    WorkspaceEditor,
-    ProjectRunner,
-    RepositoryLocal,
-    RepositoryRemote,
-    SystemDiagnostics,
+}
+
+/// Open the Git authority used by final-review persistence and recovery.
+#[cfg(not(test))]
+fn open_final_review_event_store(
+    project_root: &Path,
+    authority: tiber_git::git_event_store::GitEventStoreAuthority,
+) -> Result<tiber_git::git_event_store::GitEventStore, String> {
+    tiber_git::git_event_store::GitEventStore::open_for_authority(project_root, authority)
+        .map_err(|error| format!("final_review.event_store_open_failed source={error}"))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -12314,14 +12317,8 @@ impl ReviewPersistence {
 impl ServiceSurface {
     const fn review_persistence(self) -> ReviewPersistence {
         match self {
-            Self::PluginAdvisory => ReviewPersistence::PluginAdvisoryLocal,
-            Self::Full | Self::WorkflowCore => ReviewPersistence::WorkflowAuthority,
-            Self::WorkspaceReader
-            | Self::WorkspaceEditor
-            | Self::ProjectRunner
-            | Self::RepositoryLocal
-            | Self::RepositoryRemote
-            | Self::SystemDiagnostics => ReviewPersistence::PluginAdvisoryLocal,
+            Self::Full => ReviewPersistence::WorkflowAuthority,
+            Self::PluginAdvisory | Self::WorkspaceReader => ReviewPersistence::PluginAdvisoryLocal,
         }
     }
 
@@ -12347,12 +12344,6 @@ impl ServiceSurface {
         match name {
             "plugin-advisory" => Some(Self::PluginAdvisory),
             "workspace-reader" => Some(Self::WorkspaceReader),
-            "workflow-core" => Some(Self::WorkflowCore),
-            "workspace-editor" => Some(Self::WorkspaceEditor),
-            "project-runner" => Some(Self::ProjectRunner),
-            "repository-local" => Some(Self::RepositoryLocal),
-            "repository-remote" => Some(Self::RepositoryRemote),
-            "system-diagnostics" => Some(Self::SystemDiagnostics),
             _ => None,
         }
     }
@@ -12398,42 +12389,19 @@ impl ServiceSurface {
                 ) || is_advisory_review_tool(name)
             }
             Self::WorkspaceReader => name.starts_with("workspace-reader."),
-            Self::WorkflowCore => {
-                name.starts_with("workflow.") || name.starts_with("final_review.")
-            }
-            Self::WorkspaceEditor => name.starts_with("workspace-editor."),
-            Self::ProjectRunner => name.starts_with("project-runner."),
-            Self::RepositoryLocal => name.starts_with("repository-local."),
-            Self::RepositoryRemote => name.starts_with("repository-remote."),
-            Self::SystemDiagnostics => name.starts_with("system-diagnostics."),
         }
     }
 
     fn instructions(self) -> &'static str {
         match self {
-            Self::Full | Self::WorkflowCore => {
-                "Use workflow status and domain-intent transitions as the authority for lifecycle decisions. Use final_review.assess_risk before final_review.plan, submit only assignment-bound reviewer evidence, and advance through the canonical review transitions."
+            Self::Full => {
+                "Use final_review.assess_risk before final_review.plan, submit only assignment-bound reviewer evidence, and advance through the canonical review transitions."
             }
             Self::PluginAdvisory => {
-                "Inspect repositories, coordinate structured multi-agent final review, and use confirmed setup.apply only for deterministic repository-local configuration. This plugin is advisory: it does not expose the native workflow lifecycle or project-mutation services, execute project mutations, restrict ordinary harness tools, or authorize external actions. If a Git-backed final-review write is blocked by the Codex sandbox, call development_system.codex_sandbox_setup and retry the same structured MCP operation."
+                "Inspect repositories, coordinate structured multi-agent final review, and use confirmed setup.apply only for deterministic repository-local configuration. This plugin is advisory: it does not execute project mutations, restrict ordinary harness tools, or authorize external actions. If a Git-backed final-review write is blocked by the Codex sandbox, call development_system.codex_sandbox_setup and retry the same structured MCP operation."
             }
             Self::WorkspaceReader => {
                 "Inspect files and repository state through workspace-reader tools. This service has no project mutation capability."
-            }
-            Self::WorkspaceEditor => {
-                "Apply hash-checked file mutations only within the current assignment's named path scope. This service cannot run commands or mutate repository history."
-            }
-            Self::ProjectRunner => {
-                "Run only assignment-authorized named project commands with typed parameters. Arbitrary command lines and shell entrypoints are unavailable."
-            }
-            Self::RepositoryLocal => {
-                "Perform only assignment-authorized semantic local-repository operations. Arbitrary Git command arguments are unavailable."
-            }
-            Self::RepositoryRemote => {
-                "Perform only assignment-authorized semantic remote-repository operations. Arbitrary Git and forge command arguments are unavailable."
-            }
-            Self::SystemDiagnostics => {
-                "Inspect bounded system diagnostics in a project-read-only environment. Project and repository mutation are unavailable."
             }
         }
     }
@@ -12694,33 +12662,8 @@ impl ReviewCoordinator {
                         | "workspace-reader.list"
                         | "workspace-reader.search"
                         | "workspace-reader.repository"
-                        | "workspace-editor.create"
-                        | "workspace-editor.patch"
-                        | "workspace-editor.replace"
-                        | "workspace-editor.delete"
-                        | "workspace-editor.move"
-                        | "project-runner.run"
-                        | "repository-local.checkpoint"
-                        | "repository-local.create-signed-commit"
-                        | "repository-local.create-signed-tag"
-                        | "repository-local.preview-checkpoint-abort"
-                        | "repository-local.apply-checkpoint-abort"
-                        | "repository-remote.inspect"
-                        | "repository-remote.fetch-ref"
-                        | "system-diagnostics.status"
                 ) {
                     return match call_semantic_tool(name, &arguments) {
-                        Ok(result) => Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
-                        Err(error) => Ok(error_response(id, tool_error_code(&error), &error)),
-                    };
-                }
-                if name.starts_with("workflow.") {
-                    if name == "workflow.record_clean_review" {
-                        if let Err(error) = self.resolve_review_state_reference(&mut arguments) {
-                            return Ok(error_response(id, -32602, &error));
-                        }
-                    }
-                    return match self.call_workflow_tool(name, &arguments) {
                         Ok(result) => Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result })),
                         Err(error) => Ok(error_response(id, tool_error_code(&error), &error)),
                     };
@@ -12883,169 +12826,6 @@ impl ReviewCoordinator {
         };
 
         Ok(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
-    }
-
-    fn call_workflow_tool(&mut self, name: &str, arguments: &Value) -> Result<Value, String> {
-        let project_root = workflow_project_root(arguments)?;
-        if name != "workflow.status" {
-            match semantic::config_at(&project_root) {
-                semantic::ConfigState::Valid(_) => {}
-                semantic::ConfigState::Absent => {
-                    return Err("development_system.configuration_required".to_string());
-                }
-                semantic::ConfigState::Invalid(error) => return Err(error),
-            }
-        }
-        if name == "workflow.assignment.issue" {
-            let config = match semantic::config_at(&project_root) {
-                semantic::ConfigState::Valid(config) => config,
-                semantic::ConfigState::Absent => {
-                    return Err("development_system.configuration_required".to_string());
-                }
-                semantic::ConfigState::Invalid(error) => return Err(error),
-            };
-            let assignment = semantic::Assignment {
-                id: required_argument(arguments, "assignment_id")?.to_string(),
-                role: semantic_role(arguments)?,
-                state_epoch: arguments
-                    .get("state_epoch")
-                    .and_then(Value::as_u64)
-                    .ok_or_else(|| "development_system.assignment_epoch_required".to_string())?,
-                scope_ids: arguments
-                    .get("scope_ids")
-                    .and_then(Value::as_array)
-                    .ok_or_else(|| "development_system.assignment_scopes_required".to_string())?
-                    .iter()
-                    .map(|value| {
-                        value.as_str().map(str::to_string).ok_or_else(|| {
-                            "development_system.assignment_scope_invalid".to_string()
-                        })
-                    })
-                    .collect::<Result<_, _>>()?,
-                command_ids: arguments
-                    .get("command_ids")
-                    .and_then(Value::as_array)
-                    .map(|values| {
-                        values
-                            .iter()
-                            .map(|value| {
-                                value.as_str().map(str::to_string).ok_or_else(|| {
-                                    "development_system.assignment_command_invalid".to_string()
-                                })
-                            })
-                            .collect::<Result<_, _>>()
-                    })
-                    .unwrap_or_else(|| Ok(std::collections::BTreeSet::new()))?,
-                expires_at: arguments
-                    .get("expires_at")
-                    .and_then(Value::as_u64)
-                    .ok_or_else(|| "development_system.assignment_expiry_required".to_string())?,
-                configuration_digest: config.digest(),
-            };
-            for scope_id in &assignment.scope_ids {
-                let scope = config
-                    .scopes
-                    .get(scope_id)
-                    .ok_or_else(|| "development_system.assignment_scope_denied".to_string())?;
-                if !semantic::role_allows_scope(&assignment.role, &scope.category) {
-                    return Err("development_system.assignment_scope_role_denied".to_string());
-                }
-            }
-            for command_id in &assignment.command_ids {
-                let command = config
-                    .commands
-                    .get(command_id)
-                    .ok_or_else(|| "development_system.assignment_command_denied".to_string())?;
-                if !semantic::role_allows_command(&assignment.role, &command.capability) {
-                    return Err("development_system.assignment_command_role_denied".to_string());
-                }
-            }
-            if assignment.expires_at <= semantic::now_epoch_seconds() {
-                return Err("development_system.assignment_expired".to_string());
-            }
-            if assignment.state_epoch != semantic::workflow_state_epoch_at(&project_root)? {
-                return Err("development_system.assignment_issue_stale_epoch".to_string());
-            }
-            semantic::issue_assignment_at(&project_root, assignment.clone())?;
-            return Ok(semantic_result(serde_json::to_value(assignment).map_err(
-                |error| format!("development_system.assignment_encode_failed source={error}"),
-            )?));
-        }
-        if name == "workflow.start" {
-            let change_kind = arguments
-                .get("change_kind")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "development_workflow.change_kind_required".to_string())?;
-            let change_kind =
-                workflow::ChangeKind::parse(change_kind).map_err(|error| error.to_string())?;
-            let workflow = workflow::start_at(&project_root, change_kind)?;
-            return workflow_result(workflow);
-        }
-        if name == "workflow.status" {
-            return workflow_result(workflow::status_at(&project_root)?);
-        }
-        let clean_review_evidence = if name == "workflow.record_clean_review" {
-            Some(self.require_clean_review_evidence(arguments)?)
-        } else {
-            None
-        };
-        let workflow = match name {
-            "workflow.abandon" => workflow::abandon_workflow_at(&project_root)?,
-            "workflow.record_red" => semantic::accept_red_and_checkpoint_at(
-                &project_root,
-                required_argument(arguments, "evidence_id")?,
-                semantic::now_epoch_seconds(),
-            )?,
-            "workflow.authorize_implementation" => {
-                workflow::authorize_implementation_at(&project_root)?
-            }
-            "workflow.record_green" => semantic::accept_green_and_checkpoint_at(
-                &project_root,
-                required_argument(arguments, "evidence_id")?,
-                semantic::now_epoch_seconds(),
-            )?,
-            "workflow.begin_verification" => workflow::begin_verification_at(&project_root)?,
-            "workflow.record_verification" => workflow::accept_verification_at(
-                &project_root,
-                required_argument(arguments, "evidence_id")?,
-            )?,
-            "workflow.record_clean_review" => workflow::accept_clean_review_at(
-                &project_root,
-                clean_review_evidence.as_deref().ok_or_else(|| {
-                    "development_workflow.clean_review_evidence_required".to_string()
-                })?,
-            )?,
-            "workflow.authorize_delivery" => workflow::authorize_delivery_at(&project_root)?,
-            "workflow.complete_delivery" => workflow::complete_delivery_at(&project_root)?,
-            _ => return Err(format!("unsupported workflow tool: {name}")),
-        };
-        workflow_result(workflow)
-    }
-
-    fn require_clean_review_evidence(&mut self, arguments: &Value) -> Result<String, String> {
-        let state = arguments
-            .get("review_state")
-            .ok_or_else(|| "development_workflow.clean_review_evidence_required".to_string())?;
-        let review_arguments = json!({ "state": state });
-        self.validate_authoritative_state("final_review.clean_status", &review_arguments)
-            .map_err(|_| "development_workflow.clean_review_evidence_required".to_string())?;
-        if !review_state_complete(state) {
-            return Err("development_workflow.clean_review_evidence_required".to_string());
-        }
-        Ok(state_fingerprint(state))
-    }
-
-    fn resolve_review_state_reference(&mut self, arguments: &mut Value) -> Result<(), String> {
-        if arguments.get("review_state").is_some() {
-            return Ok(());
-        }
-        let state_ref = arguments
-            .get("review_state_ref")
-            .cloned()
-            .ok_or_else(|| "development_workflow.clean_review_evidence_required".to_string())?;
-        let state = self.resolve_reference(&state_ref)?;
-        arguments["review_state"] = state;
-        Ok(())
     }
 
     fn resolve_state_reference(&mut self, arguments: &mut Value) -> Result<(), String> {
@@ -13238,7 +13018,7 @@ impl ReviewCoordinator {
             .session_revisions
             .get(session_id)
             .copied()
-            .ok_or_else(&recovery_unavailable)?;
+            .ok_or_else(recovery_unavailable)?;
         let response = load_committed_iteration_response(
             state,
             session_id,
@@ -13257,11 +13037,11 @@ impl ReviewCoordinator {
             "delta-risk" => response.delta_risk_assignment,
             _ => None,
         }
-        .ok_or_else(&recovery_unavailable)?;
+        .ok_or_else(recovery_unavailable)?;
         let assignment_id = assignment
             .get("assignment_id")
             .and_then(Value::as_str)
-            .ok_or_else(&recovery_unavailable)?;
+            .ok_or_else(recovery_unavailable)?;
         let identity_matches = match pending_phase {
             "verifier" => self
                 .pending_verifiers
@@ -14524,119 +14304,6 @@ fn tools() -> Value {
                 "required": ["baseline_commit", "changed_files", "diff_hash", "shared_test_evidence"]
             }
         },
-        {
-            "name": "workflow.assignment.issue",
-            "description": "Issue one durable specialist assignment from the workflow-core coordinator. The assignee's editor/runner service revalidates it immediately before every mutation.",
-            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 }, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string" }, "state_epoch": { "type": "integer", "minimum": 0 }, "scope_ids": { "type": "array", "items": { "type": "string" } }, "command_ids": { "type": "array", "items": { "type": "string" } }, "expires_at": { "type": "integer", "minimum": 1 } }, "required": ["assignment_id", "role", "state_epoch", "scope_ids", "expires_at"], "additionalProperties": false }
-        },
-        {
-            "name": "workflow.start",
-            "description": "Start the mechanical development lifecycle gate. Use production for changed first-party behavior that requires failing focused-test evidence before implementation. Use exempt only for a documented RED exemption; GREEN evidence, final review, and delivery gating still apply.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "change_kind": { "type": "string", "enum": ["production", "exempt"] },
-                    "project_root": { "type": "string", "minLength": 1 }
-                },
-                "required": ["change_kind"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "workflow.status",
-            "description": "Read the current checked development lifecycle phase.",
-            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
-        },
-        {
-            "name": "workflow.abandon",
-            "description": "Mark an active lifecycle abandoned so a replacement lifecycle can begin without deleting workflow state.",
-            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
-        },
-        {
-            "name": "workflow.record_red",
-            "description": "Record RED only from a failed durable receipt emitted by the separately registered project-runner named command. Raw command strings are never accepted.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": { "type": "string", "minLength": 1 },
-                    "evidence_id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Immutable failed-command receipt ID returned by project-runner."
-                    }
-                },
-                "required": ["evidence_id"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "workflow.authorize_implementation",
-            "description": "Advance the mechanical lifecycle gate to implementation after RED evidence. This is not user authorization for destructive or external actions.",
-            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
-        },
-        {
-            "name": "workflow.record_green",
-            "description": "Record GREEN only from a successful durable receipt emitted by the separately registered project-runner named command. Raw command strings are never accepted.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": { "type": "string", "minLength": 1 },
-                    "evidence_id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Immutable successful-command receipt ID returned by project-runner."
-                    }
-                },
-                "required": ["evidence_id"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "workflow.begin_verification",
-            "description": "Begin independent verification after GREEN evidence. Verification runs under a verifier assignment and declared command profile.",
-            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
-        },
-        {
-            "name": "workflow.record_verification",
-            "description": "Record independent verification evidence before final review. This does not advance delivery.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": { "type": "string", "minLength": 1 },
-                    "evidence_id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "description": "Immutable successful-command receipt ID returned by project-runner."
-                    }
-                },
-                "required": ["evidence_id"],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "workflow.record_clean_review",
-            "description": "Record the authoritative completed final-review state before delivery.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": { "type": "string", "minLength": 1 },
-                    "review_state": { "type": "object" },
-                    "review_state_ref": state_reference_schema()
-                },
-                "oneOf": [{ "required": ["review_state"] }, { "required": ["review_state_ref"] }],
-                "additionalProperties": false
-            }
-        },
-        {
-            "name": "workflow.authorize_delivery",
-            "description": "Enter the delivering state after a clean authoritative final review. This does not grant user permission for destructive or external delivery actions.",
-            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
-        },
-        {
-            "name": "workflow.complete_delivery",
-            "description": "Record completion only after repository-local and repository-remote semantic delivery receipts succeed.",
-            "inputSchema": { "type": "object", "properties": { "project_root": { "type": "string", "minLength": 1 } }, "additionalProperties": false }
-        }
     ])
     .as_array()
     .expect("tool inventory is an array")
@@ -14712,11 +14379,7 @@ fn rewrite_advisory_language(value: &mut Value) {
                     "mechanical development lifecycle gate",
                     "advisory development lifecycle record",
                 )
-                .replace("delivery gating", "delivery-readiness recording")
-                .replace(
-                    "The assignee's editor/runner service revalidates it immediately before every mutation.",
-                    "Standalone Tiber's native mutation services may revalidate it; this plugin does not execute mutations.",
-                );
+                .replace("delivery gating", "delivery-readiness recording");
         }
         Value::Array(items) => items.iter_mut().for_each(rewrite_advisory_language),
         Value::Object(fields) => fields.values_mut().for_each(rewrite_advisory_language),
@@ -14751,165 +14414,6 @@ fn semantic_tools() -> Vec<Value> {
             "name": "workspace-reader.repository",
             "description": "Inspect repository status, diff, or recent log through a fixed read-only operation. It accepts no Git argv.",
             "inputSchema": { "type": "object", "properties": { "project_root": project_root, "view": { "type": "string", "enum": ["status", "diff", "log"] } }, "required": ["view"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "workspace-editor.create",
-            "description": "Create one absent assigned, scope-contained file. The preimage digest must be the empty-file digest. Available only from the workspace-editor service.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string" }, "scope_id": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "expected_digest": { "type": "string", "pattern": "^[0-9a-f]{16}$" }, "content": { "type": "string" } }, "required": ["assignment_id", "role", "scope_id", "path", "expected_digest", "content"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "workspace-editor.patch",
-            "description": "Patch one existing assigned, scope-contained file by replacing its exact hash-checked preimage. Available only from the workspace-editor service.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string" }, "scope_id": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "expected_digest": { "type": "string", "pattern": "^[0-9a-f]{16}$" }, "content": { "type": "string" } }, "required": ["assignment_id", "role", "scope_id", "path", "expected_digest", "content"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "workspace-editor.replace",
-            "description": "Replace one assigned, scope-contained file after its exact preimage digest matches. Available only from the workspace-editor service.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string" }, "scope_id": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "expected_digest": { "type": "string", "pattern": "^[0-9a-f]{16}$" }, "content": { "type": "string" } }, "required": ["assignment_id", "role", "scope_id", "path", "expected_digest", "content"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "workspace-editor.delete",
-            "description": "Delete one assigned, scope-contained regular file after its exact preimage digest matches. Available only from the workspace-editor service.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string" }, "scope_id": { "type": "string", "minLength": 1 }, "path": { "type": "string", "minLength": 1 }, "expected_digest": { "type": "string", "pattern": "^[0-9a-f]{16}$" } }, "required": ["assignment_id", "role", "scope_id", "path", "expected_digest"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "workspace-editor.move",
-            "description": "Move one assigned, scope-contained file only when source and destination preimage digests match. Available only from the workspace-editor service.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string" }, "scope_id": { "type": "string", "minLength": 1 }, "from": { "type": "string", "minLength": 1 }, "to": { "type": "string", "minLength": 1 }, "expected_source_digest": { "type": "string", "pattern": "^[0-9a-f]{16}$" }, "expected_destination_digest": { "type": "string", "pattern": "^[0-9a-f]{16}$" } }, "required": ["assignment_id", "role", "scope_id", "from", "to", "expected_source_digest", "expected_destination_digest"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "project-runner.run",
-            "description": "Run one configured direct-argv project command under a current assignment. Available only from the project-runner service.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string" }, "command_id": { "type": "string", "minLength": 1 }, "parameters": { "type": "object", "additionalProperties": { "type": ["string", "integer", "boolean"] } } }, "required": ["assignment_id", "role", "command_id"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "repository-local.checkpoint",
-            "description": "Capture the current Git index tree as an immutable workflow-owned checkpoint under a current delivery assignment. This semantic operation exposes no Git argv.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string", "const": "delivery" } }, "required": ["assignment_id", "role"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "repository-local.create-signed-commit",
-            "description": "Create and verify a signed commit object from the last approved workflow checkpoint while preserving unrelated index entries. The operation accepts no Git argv and does not move a ref.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string", "const": "delivery" }, "message": { "type": "string", "minLength": 1 } }, "required": ["assignment_id", "role", "message"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "repository-local.create-signed-tag",
-            "description": "Create and verify a signed annotated tag for a commit receipt produced by this workflow. The operation accepts no Git argv and reconciles an interrupted retry.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string", "const": "delivery" }, "commit_operation_id": { "type": "string", "pattern": "^signed-commit-[0-9a-f]{16}$" }, "tag_name": { "type": "string", "minLength": 1, "maxLength": 128 }, "message": { "type": "string", "minLength": 1, "maxLength": 16384 } }, "required": ["assignment_id", "role", "commit_operation_id", "tag_name", "message"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "repository-local.preview-checkpoint-abort",
-            "description": "Preview the exact workflow-owned delta that would be archived and restored to the last accepted checkpoint. This operation is read-only.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root }, "additionalProperties": false }
-        }),
-        json!({
-            "name": "repository-local.apply-checkpoint-abort",
-            "description": "After explicit confirmation, archive the previewed workflow delta in the Git common directory, restore only those paths and index entries, invalidate later evidence, and return to RED.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": project_root,
-                    "confirmed": { "type": "boolean", "const": true },
-                    "operation": {
-                        "type": "object",
-                        "properties": {
-                            "operation_id": { "type": "string", "pattern": "^checkpoint-abort-[0-9a-f]{16}$" },
-                            "checkpoint_id": { "type": "string", "minLength": 1 },
-                            "checkpoint_tree": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
-                            "expected_index_tree": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
-                            "affected_paths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true },
-                            "path_digests": { "type": "object", "additionalProperties": { "type": ["string", "null"] } },
-                            "authorized_at": { "type": "integer", "minimum": 0 }
-                        },
-                        "required": ["operation_id", "checkpoint_id", "checkpoint_tree", "expected_index_tree", "affected_paths", "path_digests", "authorized_at"],
-                        "additionalProperties": false
-                    }
-                },
-                "required": ["confirmed", "operation"],
-                "additionalProperties": false
-            }
-        }),
-        json!({
-            "name": "repository-remote.inspect",
-            "description": "Inspect advertised remote heads through a fixed semantic Git operation. This tool neither exposes a remote URL nor accepts Git argv.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "remote": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$" } }, "required": ["remote"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "repository-remote.fetch-ref",
-            "description": "Fetch one fully qualified remote head or tag into FETCH_HEAD under a current delivery assignment. No URL, destination refspec, option, or arbitrary Git argv is accepted.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root, "assignment_id": { "type": "string", "minLength": 1 }, "role": { "type": "string", "const": "delivery" }, "remote": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$" }, "remote_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^refs/(?:heads|tags)/" } }, "required": ["assignment_id", "role", "remote", "remote_ref"], "additionalProperties": false }
-        }),
-        json!({
-            "name": "repository-remote.push-ref",
-            "description": "Push one workflow-produced signed commit to a head or signed tag to a tag under an exact advertised-remote observation. The operation is non-forced and accepts no URL, options, or arbitrary Git argv.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": project_root,
-                    "assignment_id": { "type": "string", "minLength": 1 },
-                    "role": { "type": "string", "const": "delivery" },
-                    "remote": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9._-]+$" },
-                    "remote_ref": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "^refs/(?:heads|tags)/" },
-                    "source_operation_id": { "type": "string", "minLength": 1 },
-                    "expected_remote_object": { "type": ["string", "null"], "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" }
-                },
-                "required": ["assignment_id", "role", "remote", "remote_ref", "source_operation_id", "expected_remote_object"],
-                "additionalProperties": false
-            }
-        }),
-        json!({
-            "name": "repository-remote.open-pr",
-            "description": "Open a pull/merge request from a workflow-produced pushed head using the configured forge and trunk branch. No forge argv, URL, repository, head, or base override is accepted.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": project_root,
-                    "assignment_id": { "type": "string", "minLength": 1 },
-                    "role": { "type": "string", "const": "delivery" },
-                    "push_operation_id": { "type": "string", "minLength": 1 },
-                    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
-                    "body": { "type": "string", "maxLength": 65536 }
-                },
-                "required": ["assignment_id", "role", "push_operation_id", "title", "body"],
-                "additionalProperties": false
-            }
-        }),
-        json!({
-            "name": "repository-remote.update-pr",
-            "description": "Update title and body of a workflow-opened pull/merge request. The durable open receipt supplies the forge, repository, and pull-request identity.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": project_root,
-                    "assignment_id": { "type": "string", "minLength": 1 },
-                    "role": { "type": "string", "const": "delivery" },
-                    "open_operation_id": { "type": "string", "minLength": 1 },
-                    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
-                    "body": { "type": "string", "maxLength": 65536 }
-                },
-                "required": ["assignment_id", "role", "open_operation_id", "title", "body"],
-                "additionalProperties": false
-            }
-        }),
-        json!({
-            "name": "repository-remote.merge-pr",
-            "description": "Merge a workflow-opened pull/merge request using the configured repository merge method. The durable open receipt supplies all remote identity.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "project_root": project_root,
-                    "assignment_id": { "type": "string", "minLength": 1 },
-                    "role": { "type": "string", "const": "delivery" },
-                    "open_operation_id": { "type": "string", "minLength": 1 }
-                },
-                "required": ["assignment_id", "role", "open_operation_id"],
-                "additionalProperties": false
-            }
-        }),
-        json!({
-            "name": "system-diagnostics.status",
-            "description": "Read bounded OS load, memory, and process information. Available only from the system-diagnostics service.",
-            "inputSchema": { "type": "object", "properties": { "project_root": project_root }, "additionalProperties": false }
         }),
         json!({
             "name": "setup.preview",
@@ -15072,285 +14576,10 @@ fn codex_sandbox_setup() -> String {
     .join("\n")
 }
 
-/// Semantic adapters shared by the advisory coordinator and Tiber's future
-/// capability-separated native services. The selected surface filters every
-/// request before dispatch.
+/// Read-only repository and confirmed setup adapters for the advisory coordinator.
 fn call_semantic_tool(name: &str, arguments: &Value) -> Result<Value, String> {
-    if name == "workspace-editor.patch"
-        && arguments.get("assignment_id").and_then(Value::as_str) == Some("probe-invalid")
-    {
-        if let Some(marker) = env::var_os("DEVELOPMENT_SYSTEM_BOUNDARY_PROBE_MARKER") {
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(marker)
-                .and_then(|mut file| file.write_all(b"workspace-editor.patch reached\n"))
-                .map_err(|error| {
-                    format!("development_system.setup_probe_marker_write_failed source={error}")
-                })?;
-        }
-    }
-    if name == "repository-remote.inspect" {
-        if let Some(marker) = env::var_os("DEVELOPMENT_SYSTEM_BOUNDARY_PROBE_REMOTE_MARKER") {
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(marker)
-                .and_then(|mut file| file.write_all(b"repository-remote.inspect reached\n"))
-                .map_err(|error| {
-                    format!("development_system.setup_probe_marker_write_failed source={error}")
-                })?;
-        }
-    }
     let project_root = workflow_project_root(arguments)?;
     match name {
-        "workspace-editor.create" | "workspace-editor.patch" | "workspace-editor.replace" => {
-            let request = semantic::ReplaceFileRequest {
-                assignment_id: required_argument(arguments, "assignment_id")?,
-                role: semantic_role(arguments)?,
-                scope_id: required_argument(arguments, "scope_id")?,
-                relative: Path::new(required_argument(arguments, "path")?),
-                expected_digest: required_argument(arguments, "expected_digest")?,
-                replacement: required_argument(arguments, "content")?.as_bytes(),
-            };
-            let now = semantic::now_epoch_seconds();
-            let digest = match name {
-                "workspace-editor.create" => semantic::create_file_at(&project_root, request, now)?,
-                "workspace-editor.patch" => semantic::patch_file_at(&project_root, request, now)?,
-                "workspace-editor.replace" => {
-                    semantic::replace_file_at(&project_root, request, now)?
-                }
-                _ => unreachable!("semantic editor names are matched above"),
-            };
-            Ok(semantic_result(json!({ "digest": digest })))
-        }
-        "workspace-editor.delete" => {
-            let role = semantic_role(arguments)?;
-            semantic::delete_file_at(
-                &project_root,
-                semantic::DeleteFileRequest {
-                    assignment_id: required_argument(arguments, "assignment_id")?,
-                    role,
-                    scope_id: required_argument(arguments, "scope_id")?,
-                    relative: Path::new(required_argument(arguments, "path")?),
-                    expected_digest: required_argument(arguments, "expected_digest")?,
-                },
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(json!({ "deleted": true })))
-        }
-        "workspace-editor.move" => {
-            let role = semantic_role(arguments)?;
-            let digest = semantic::move_file_at(
-                &project_root,
-                semantic::MoveFileRequest {
-                    assignment_id: required_argument(arguments, "assignment_id")?,
-                    role,
-                    scope_id: required_argument(arguments, "scope_id")?,
-                    from: Path::new(required_argument(arguments, "from")?),
-                    to: Path::new(required_argument(arguments, "to")?),
-                    expected_source_digest: required_argument(arguments, "expected_source_digest")?,
-                    expected_destination_digest: required_argument(
-                        arguments,
-                        "expected_destination_digest",
-                    )?,
-                },
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(json!({ "digest": digest })))
-        }
-        "project-runner.run" => {
-            let parameters = arguments
-                .get("parameters")
-                .map(|value| {
-                    value
-                        .as_object()
-                        .ok_or_else(|| "development_system.command_parameters_invalid".to_string())
-                        .map(|values| {
-                            values
-                                .iter()
-                                .map(|(name, value)| (name.clone(), value.clone()))
-                                .collect::<std::collections::BTreeMap<_, _>>()
-                        })
-                })
-                .transpose()?
-                .unwrap_or_default();
-            let result = semantic::run_named_command_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                semantic_role(arguments)?,
-                required_argument(arguments, "command_id")?,
-                &parameters,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(result).map_err(
-                |error| format!("development_system.runner_result_encode_failed source={error}"),
-            )?))
-        }
-        "repository-local.checkpoint" => {
-            let checkpoint = semantic::capture_checkpoint_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                semantic_role(arguments)?,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(checkpoint).map_err(
-                |error| format!("development_system.checkpoint_encode_failed source={error}"),
-            )?))
-        }
-        "repository-local.create-signed-commit" => {
-            if semantic_role(arguments)? != semantic::Role::Delivery {
-                return Err("development_system.assignment_role_denied".to_string());
-            }
-            let receipt = semantic::create_signed_commit_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                required_argument(arguments, "message")?,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| {
-                    format!("development_system.signed_commit_receipt_encode_failed source={error}")
-                },
-            )?))
-        }
-        "repository-local.create-signed-tag" => {
-            if semantic_role(arguments)? != semantic::Role::Delivery {
-                return Err("development_system.assignment_role_denied".to_string());
-            }
-            let receipt = semantic::create_signed_tag_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                required_argument(arguments, "commit_operation_id")?,
-                required_argument(arguments, "tag_name")?,
-                required_argument(arguments, "message")?,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| {
-                    format!("development_system.signed_tag_receipt_encode_failed source={error}")
-                },
-            )?))
-        }
-        "repository-local.preview-checkpoint-abort" => {
-            let operation = semantic::preview_checkpoint_abort_at(
-                &project_root,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(operation).map_err(
-                |error| format!("development_system.checkpoint_abort_encode_failed source={error}"),
-            )?))
-        }
-        "repository-local.apply-checkpoint-abort" => {
-            if arguments.get("confirmed").and_then(Value::as_bool) != Some(true) {
-                return Err("development_system.checkpoint_abort_confirmation_required".to_string());
-            }
-            let operation =
-                serde_json::from_value(arguments.get("operation").cloned().ok_or_else(|| {
-                    "development_system.checkpoint_abort_operation_required".to_string()
-                })?)
-                .map_err(|error| {
-                    format!("development_system.checkpoint_abort_operation_invalid source={error}")
-                })?;
-            let receipt = semantic::apply_checkpoint_abort_at(
-                &project_root,
-                operation,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| format!("development_system.checkpoint_abort_encode_failed source={error}"),
-            )?))
-        }
-        "repository-remote.inspect" => Ok(semantic_result(semantic::inspect_remote_at(
-            &project_root,
-            required_argument(arguments, "remote")?,
-        )?)),
-        "repository-remote.fetch-ref" => {
-            if semantic_role(arguments)? != semantic::Role::Delivery {
-                return Err("development_system.assignment_role_denied".to_string());
-            }
-            let receipt = semantic::fetch_ref_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                required_argument(arguments, "remote")?,
-                required_argument(arguments, "remote_ref")?,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| {
-                    format!("development_system.fetch_ref_receipt_encode_failed source={error}")
-                },
-            )?))
-        }
-        "repository-remote.push-ref" => {
-            if semantic_role(arguments)? != semantic::Role::Delivery {
-                return Err("development_system.assignment_role_denied".to_string());
-            }
-            let expected_remote_object = arguments
-                .get("expected_remote_object")
-                .and_then(Value::as_str);
-            let receipt = semantic::push_ref_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                required_argument(arguments, "remote")?,
-                required_argument(arguments, "remote_ref")?,
-                required_argument(arguments, "source_operation_id")?,
-                expected_remote_object,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| format!("development_system.push_ref_receipt_encode_failed source={error}"),
-            )?))
-        }
-        "repository-remote.open-pr" => {
-            if semantic_role(arguments)? != semantic::Role::Delivery {
-                return Err("development_system.assignment_role_denied".to_string());
-            }
-            let receipt = semantic::open_pull_request_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                required_argument(arguments, "push_operation_id")?,
-                required_argument(arguments, "title")?,
-                required_argument(arguments, "body")?,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| format!("development_system.open_pr_receipt_encode_failed source={error}"),
-            )?))
-        }
-        "repository-remote.update-pr" => {
-            if semantic_role(arguments)? != semantic::Role::Delivery {
-                return Err("development_system.assignment_role_denied".to_string());
-            }
-            let receipt = semantic::update_pull_request_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                required_argument(arguments, "open_operation_id")?,
-                required_argument(arguments, "title")?,
-                required_argument(arguments, "body")?,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| {
-                    format!("development_system.update_pr_receipt_encode_failed source={error}")
-                },
-            )?))
-        }
-        "repository-remote.merge-pr" => {
-            if semantic_role(arguments)? != semantic::Role::Delivery {
-                return Err("development_system.assignment_role_denied".to_string());
-            }
-            let receipt = semantic::merge_pull_request_at(
-                &project_root,
-                required_argument(arguments, "assignment_id")?,
-                required_argument(arguments, "open_operation_id")?,
-                semantic::now_epoch_seconds(),
-            )?;
-            Ok(semantic_result(serde_json::to_value(receipt).map_err(
-                |error| format!("development_system.merge_pr_receipt_encode_failed source={error}"),
-            )?))
-        }
-        "system-diagnostics.status" => Ok(semantic_result(system_diagnostics_status()?)),
         "workspace-reader.read" => Ok(semantic_result(reader_read(&project_root, arguments)?)),
         "workspace-reader.list" => Ok(semantic_result(reader_list(&project_root, arguments)?)),
         "workspace-reader.search" => Ok(semantic_result(reader_search(&project_root, arguments)?)),
@@ -15608,43 +14837,12 @@ fn migrate_legacy_project_mcp_configuration(project_root: &Path) -> Result<Value
     Ok(json!({ "harness": "codex", "source": "plugin/mcp.json", "legacy_migrated": migrated }))
 }
 
-fn system_diagnostics_status() -> Result<Value, String> {
-    fn bounded(path: &str) -> Result<String, String> {
-        let value = fs::read_to_string(path).map_err(|error| {
-            format!("development_system.diagnostics_unavailable source={error}")
-        })?;
-        Ok(value.chars().take(16 * 1024).collect())
-    }
-    let load = bounded("/proc/loadavg").unwrap_or_else(|_| "unavailable".to_string());
-    let memory = bounded("/proc/meminfo").unwrap_or_else(|_| "unavailable".to_string());
-    let processes = fs::read_dir("/proc")
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|entry| {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit())
-                })
-                .count()
-        })
-        .unwrap_or(0);
-    Ok(json!({ "loadavg": load, "meminfo": memory, "process_count": processes }))
-}
-
 fn required_argument<'a>(arguments: &'a Value, key: &str) -> Result<&'a str, String> {
     arguments
         .get(key)
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| format!("development_system.argument_required key={key}"))
-}
-
-fn semantic_role(arguments: &Value) -> Result<semantic::Role, String> {
-    serde_json::from_value(arguments.get("role").cloned().unwrap_or(Value::Null))
-        .map_err(|_| "development_system.assignment_role_invalid".to_string())
 }
 
 fn reader_relative(arguments: &Value, key: &str) -> Result<PathBuf, String> {
@@ -16199,14 +15397,6 @@ fn workflow_project_root(arguments: &Value) -> Result<PathBuf, String> {
             })
         }),
     }
-}
-
-fn workflow_result(workflow: workflow::Workflow) -> Result<Value, String> {
-    let structured = json!({ "phase": workflow.phase_name() });
-    Ok(json!({
-        "content": [{ "type": "text", "text": structured.to_string() }],
-        "structuredContent": structured
-    }))
 }
 
 #[cfg(test)]
@@ -21567,11 +20757,11 @@ macro_rules! define_final_review_executor {
             {
                 let session_stream = FinalReviewStream(review_stream_id(session_id)?);
                 let catalog_stream = FinalReviewStream(catalog_stream_id()?);
-                let store = crate::workflow::open_final_review_event_store(
-                    Path::new(project_root),
-                    persistence.authority(),
-                )
-                .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
+                let store =
+                    open_final_review_event_store(Path::new(project_root), persistence.authority())
+                        .map_err(|error| {
+                            format!("review_event_store_open_failed source={error}")
+                        })?;
                 let policy = RetryPolicy::new().max_retries(4);
                 let runtime = review_runtime()?;
                 let request = $request::model_builder()
@@ -22110,7 +21300,7 @@ fn execute_legacy_review_import(
     })
     .map_err(|error| format!("review_event_store_open_failed source={error}"))?;
     #[cfg(not(test))]
-    let store = crate::workflow::open_final_review_event_store(
+    let store = open_final_review_event_store(
         _project_root.ok_or_else(|| "review_event_project_root_required=true".to_string())?,
         persistence.authority(),
     )
@@ -22526,7 +21716,7 @@ fn read_review_stream(
     }
     #[cfg(not(test))]
     {
-        let store = crate::workflow::open_final_review_event_store(
+        let store = open_final_review_event_store(
             _project_root.ok_or_else(|| "review_event_project_root_required=true".to_string())?,
             persistence.authority(),
         )
@@ -26373,16 +25563,6 @@ mod tests {
         include!("review_recovery_tests.rs");
     }
     use super::*;
-
-    fn test_executable(program: &str) -> PathBuf {
-        std::env::var_os("PATH")
-            .and_then(|path| {
-                std::env::split_paths(&path)
-                    .map(|directory| directory.join(program))
-                    .find(|candidate| candidate.is_file())
-            })
-            .unwrap_or_else(|| panic!("test executable {program} should be available on PATH"))
-    }
 
     #[test]
     fn internally_tagged_newtype_event_preserves_flat_payload_fields() {
@@ -34712,46 +33892,10 @@ pre_filter = "project-pre"
             "final_review.pending_assignments",
             "final_review.resume_latest",
             "final_review.assess_risk",
-            "workflow.start",
-            "workflow.abandon",
-            "workflow.authorize_delivery",
             "workspace-reader.status",
-            "workspace-editor.create",
-            "workspace-editor.patch",
-            "workspace-editor.replace",
-            "workspace-editor.delete",
-            "workspace-editor.move",
-            "project-runner.run",
-            "repository-local.create-signed-commit",
-            "repository-local.create-signed-tag",
-            "repository-remote.fetch-ref",
-            "repository-remote.push-ref",
-            "repository-remote.open-pr",
-            "repository-remote.update-pr",
-            "repository-remote.merge-pr",
         ] {
             assert_eq!(named(name)["name"], name);
         }
-        assert!(named("workflow.start")["description"]
-            .as_str()
-            .expect("workflow start description")
-            .contains("exempt only for a documented RED exemption"));
-        for name in ["workflow.record_red", "workflow.record_green"] {
-            let description = named(name)["description"]
-                .as_str()
-                .expect("test-evidence description");
-            assert!(description.contains("project-runner"));
-            assert!(
-                named(name)["inputSchema"]["properties"]["evidence_id"]["description"]
-                    .as_str()
-                    .expect("receipt description")
-                    .contains("receipt ID")
-            );
-        }
-        assert!(named("workflow.authorize_implementation")["description"]
-            .as_str()
-            .expect("mechanical authorization description")
-            .contains("not user authorization"));
         assert_eq!(
             named("final_review.plan")["inputSchema"]["properties"]["required_clean_iterations"]
                 ["minimum"],
@@ -40140,24 +39284,6 @@ pre_filter = "project-pre"
             .unwrap()
             .contains("final_review.assess_risk before final_review.plan"));
 
-        let editor = ReviewCoordinator::with_service_surface(ServiceSurface::WorkspaceEditor)
-            .handle_json_rpc(&json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test", "version": "1"}
-                }
-            }))
-            .expect("editor initialize response");
-        let instructions = editor["result"]["instructions"]
-            .as_str()
-            .expect("editor instructions");
-        assert!(instructions.contains("hash-checked file mutations"));
-        assert!(!instructions.contains("final_review"));
-
         let unsupported = handle_json_rpc(&json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -43676,48 +42802,6 @@ pre_filter = "project-pre"
     fn zero_assignment_plan_is_rejected_before_clean_review_handoff() {
         let mut coordinator = ReviewCoordinator::default();
         let project_root = test_project_root("zero-assignment-review");
-        let configuration = format!(
-            "schema_version = 3\n[scopes.source]\ncategory = 'source'\ninclude = ['src/**']\n[commands.verify]\nargv = ['{}']\ncapability = 'verification'\n",
-            test_executable("true").display()
-        );
-        fs::write(
-            project_root.join(".development-system.toml"),
-            &configuration,
-        )
-        .expect("semantic config");
-        workflow::start_at(&project_root, workflow::ChangeKind::Exempt)
-            .expect("start exempt lifecycle");
-        workflow::begin_verification_at(&project_root).expect("begin verification");
-        assert!(
-            workflow::accept_verification_at(&project_root, "missing-verification-receipt")
-                .is_err(),
-            "verification cannot advance without a durable successful command receipt"
-        );
-        let configuration = semantic::ProjectConfig::parse(&configuration).expect("configuration");
-        semantic::issue_assignment_at(
-            &project_root,
-            semantic::Assignment {
-                id: "zero-assignment-verifier".to_string(),
-                role: semantic::Role::Verifier,
-                state_epoch: 2,
-                scope_ids: std::collections::BTreeSet::new(),
-                command_ids: ["verify".to_string()].into_iter().collect(),
-                expires_at: 10,
-                configuration_digest: configuration.digest(),
-            },
-        )
-        .expect("issue verifier assignment");
-        let verification = semantic::run_named_command_at(
-            &project_root,
-            "zero-assignment-verifier",
-            semantic::Role::Verifier,
-            "verify",
-            &std::collections::BTreeMap::new(),
-            9,
-        )
-        .expect("verification command");
-        workflow::accept_verification_at(&project_root, &verification.evidence_id)
-            .expect("record verification");
         let response = coordinator
             .handle_json_rpc(&json!({
                 "jsonrpc": "2.0",
