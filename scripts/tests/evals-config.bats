@@ -26,10 +26,10 @@ make_codex_eval_fixture() {
 {
   "providerVariants": [
     {
-      "id": "codex-gpt-6-sol",
+      "id": "codex-gpt-6.1-sol",
       "provider": "openai:codex-sdk",
       "modelEnv": "CODEX_EVAL_MODEL",
-      "defaultModel": "gpt-6-sol",
+      "defaultModel": "gpt-6.1-sol",
       "reasoningEffortEnv": "CODEX_EVAL_REASONING_EFFORT",
       "defaultReasoningEffort": "medium"
     }
@@ -119,13 +119,25 @@ MD
   [[ "$output" == *"provider:"*$'\n'"      text:"*$'\n'"        id: openai:codex-sdk"* ]]
   [[ "$output" == *"CODEX_HOME: \"{{ env.CODEX_EVAL_HOME_FULL_MARKETPLACE | default(env.CODEX_EVAL_HOME)"* ]]
   [[ "$output" != *"openai:gpt-5-mini"* ]]
+  run node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const config = require("yaml").parse(fs.readFileSync(0, "utf8"));
+const routes = [...config.providers, config.defaultTest.options.provider.text];
+for (const route of routes) {
+  if (route.config.codex_path_override !== path.join(process.argv[1], "node_modules/.bin/codex") || route.config.skip_codex_version_check !== true) {
+    throw new Error("executor and grader must use the explicitly pinned CLI configuration");
+  }
+}
+  ' "$ROOT" <<< "$output"
+  [ "$status" -eq 0 ]
 }
 
 @test "generated Codex config defaults execution to GPT-6 Sol and grading to independent Astra" {
   run node "$GENERATOR" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"model: \"{{ env.CODEX_EVAL_MODEL | default('gpt-6-sol') }}\""* ]]
+  [[ "$output" == *"model: \"{{ env.CODEX_EVAL_MODEL | default('gpt-6.1-sol') }}\""* ]]
   [[ "$output" == *"model_reasoning_effort: \"{{ env.CODEX_EVAL_REASONING_EFFORT | default('medium') }}\""* ]]
   [[ "$output" == *"model: \"{{ env.CODEX_GRADER_MODEL | default('gpt-6-astra') }}\""* ]]
   [[ "$output" == *"model_reasoning_effort: \"{{ env.CODEX_GRADER_REASONING_EFFORT | default('high') }}\""* ]]
@@ -236,7 +248,7 @@ JSON
   run env EVAL_CASE_FILTER=codex-only-case node "$FIXTURE_TMP/scripts/evals/generate-config.mjs" --suite behavior --stdout
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"codex-gpt-6-sol-targeted-plugins"* ]]
+  [[ "$output" == *"codex-gpt-6.1-sol-targeted-plugins"* ]]
 }
 
 @test "generated canary config is separate from natural behavior scenarios" {

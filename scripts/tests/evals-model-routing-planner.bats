@@ -184,7 +184,7 @@ teardown() {
   [ "$(jq -r '.phase' "$PLAN")" = "screening" ]
   [[ "$(jq -r '.case_catalog_sha256' "$PLAN")" =~ ^[0-9a-f]{64}$ ]]
   [[ "$(jq -r '.fixture_specs_sha256' "$PLAN")" =~ ^[0-9a-f]{64}$ ]]
-  [ "$(jq '.jobs | length' "$PLAN")" -eq 744 ]
+  [ "$(jq '.jobs | length' "$PLAN")" -eq 1240 ]
   [ "$(jq '[.jobs[].task_family] | unique | length' "$PLAN")" -eq 6 ]
   [ "$(jq '[.jobs[] | select(.task_family == "mechanical-assistance") | .effort] | unique | sort == ["high", "low", "max", "medium", "none", "xhigh"]' "$PLAN")" = "true" ]
   [ "$(jq '[.jobs[] | select(.task_family != "mechanical-assistance") | .effort] | unique | sort == ["high", "low", "max", "medium", "xhigh"]' "$PLAN")" = "true" ]
@@ -279,7 +279,7 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(jq --arg id "$completed_id" -r '.jobs[] | select(.job_id == $id) | .status' "$PLAN")" = "success" ]
   [ "$(jq --arg id "$completed_id" -r '.jobs[] | select(.job_id == $id) | .result_ref' "$PLAN")" = "checkpoints/example.json" ]
-  [ "$(jq '.jobs | length' "$PLAN")" -eq 744 ]
+  [ "$(jq '.jobs | length' "$PLAN")" -eq 1240 ]
 }
 
 @test "resume fails closed when the campaign identity changes" {

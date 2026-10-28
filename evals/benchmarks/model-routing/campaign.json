@@ -21,7 +21,13 @@
     "regression"
   ],
   "candidates": {
-    "models": ["gpt-6-luna", "gpt-6-sol", "gpt-6-astra"],
+    "models": [
+      "gpt-6-luna",
+      "gpt-6-sol",
+      "gpt-6.1-sol",
+      "gpt-6.1-terra",
+      "gpt-6-astra"
+    ],
     "efforts": ["low", "medium", "high", "xhigh", "max"],
     "mechanical_additional_efforts": ["none"],
     "unsupported_combinations_are_results": true,

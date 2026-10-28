@@ -6,7 +6,7 @@
   "targetName": "final-review",
   "runner": {
     "type": "codex-cli",
-    "model": "gpt-5.6-terra",
+    "model": "gpt-6.1-sol",
     "sandbox": "workspace-write",
     "approvalPolicy": "never",
     "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
@@ -16,7 +16,9 @@
     "setupMode": "copy",
     "preserve": "on-failure"
   },
-  "targetProvisioning": { "mode": "isolated-skill-home" },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
   "verifiers": {
     "commands": [
       "node --test verify-final-review-status.test.mjs",

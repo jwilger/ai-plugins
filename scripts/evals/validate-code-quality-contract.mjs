@@ -101,7 +101,7 @@ export function validateBenchmarkContract(contract) {
   assertObject(contract.provider, "benchmark provider");
   const expectedProvider = {
     id: "openai:codex-sdk",
-    model: "gpt-6-sol",
+    model: "gpt-6.1-sol",
     reasoningEffort: "medium",
     sandboxMode: "workspace-write",
     approvalPolicy: "never",
@@ -117,7 +117,10 @@ export function validateBenchmarkContract(contract) {
       throw new Error(`${label} must be ${String(expected)}`);
     }
   }
-  assertCanonicalPluginList(contract.conditions[0].plugins, "no-marketplace-skills");
+  assertCanonicalPluginList(
+    contract.conditions[0].plugins,
+    "no-marketplace-skills",
+  );
   if (contract.conditions[0].plugins.length !== 0) {
     throw new Error("no-marketplace-skills composition must be empty");
   }

@@ -40,7 +40,7 @@ no-plugin mode installs none. The generated config records exact installed
 provider compositions separately from individual case targets. The lane writes
 JSON, HTML, and JUnit artifacts under `evals/out/`, then builds a static
 dashboard under `site/evals/`. Hosted promptfoo sharing is not used as the
-durable record. Promptfoo is pinned at `0.121.19`; prompt response caching and
+durable record. Promptfoo is pinned at `0.125.1`; prompt response caching and
 hosted sharing are disabled for behavior evidence.
 
 The dashboard reports provider/case/sample pass rates, threshold status, and
@@ -49,7 +49,7 @@ they exercise.
 
 Default eval posture matches intended use:
 
-- Codex execution: `openai:codex-sdk`, `gpt-6-sol` with medium reasoning
+- Codex execution: `openai:codex-sdk`, `gpt-6.1-sol` with medium reasoning
   effort, a read-only sandbox, no approvals, streaming, deep tracing disabled,
   and isolated generated homes containing no plugins, the selected cases'
   deterministic plugin union, or the complete harness-specific catalog

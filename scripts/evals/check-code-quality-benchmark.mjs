@@ -40,8 +40,7 @@ const maximumRawTraceBytes = 16 * 1024 * 1024;
 const maximumTraceItems = 4_096;
 const maximumResults = 64;
 const expectedTurns = 9;
-const skillActivationEvidence =
-  "codex-turn-successful-command-path-references";
+const skillActivationEvidence = "codex-turn-successful-command-path-references";
 const artifactKeys = [
   "baselineOid",
   "benchmarkId",
@@ -649,8 +648,7 @@ function rawBindingDiagnostic(result, row, runtimeState) {
   ];
   for (const [source, vars] of variableSets) {
     for (const [variable, field] of renderedBindingFields) {
-      const diagnosticPrefix =
-        `raw-binding-${source}-${variable.replaceAll("_", "-")}`;
+      const diagnosticPrefix = `raw-binding-${source}-${variable.replaceAll("_", "-")}`;
       if (!Object.hasOwn(vars, variable)) {
         return `${diagnosticPrefix}-missing`;
       }
@@ -765,6 +763,12 @@ function isValidUsage(value) {
     "output_tokens",
     "reasoning_output_tokens",
   ];
+  if (
+    isPlainObject(value) &&
+    Object.hasOwn(value, "cache_write_input_tokens")
+  ) {
+    keys.push("cache_write_input_tokens");
+  }
   return (
     hasExactKeys(value, keys) &&
     keys.every((key) => isBoundedInteger(value[key]))
@@ -1002,9 +1006,7 @@ function missingArtifactDiagnostic(result) {
           knownSafetyCodes.add(`${label}-${failure}`);
         }
       }
-      const code = knownSafetyCodes.has(boundary[2])
-        ? boundary[2]
-        : "unknown";
+      const code = knownSafetyCodes.has(boundary[2]) ? boundary[2] : "unknown";
       return `boundary-${boundary[1]}-${code}`;
     }
   }

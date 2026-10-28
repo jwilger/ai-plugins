@@ -22,6 +22,8 @@ const expectedCaseKinds = [
 const expectedModels = [
   "gpt-6-luna",
   "gpt-6-sol",
+  "gpt-6.1-sol",
+  "gpt-6.1-terra",
   "gpt-6-astra",
 ];
 const expectedEfforts = ["low", "medium", "high", "xhigh", "max"];

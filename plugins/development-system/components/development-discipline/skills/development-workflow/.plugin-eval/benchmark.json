@@ -6,7 +6,7 @@
   "targetName": "development-workflow",
   "runner": {
     "type": "codex-cli",
-    "model": "gpt-5.6-terra",
+    "model": "gpt-6.1-sol",
     "sandbox": "workspace-write",
     "approvalPolicy": "never",
     "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
@@ -16,8 +16,12 @@
     "setupMode": "copy",
     "preserve": "on-failure"
   },
-  "targetProvisioning": { "mode": "isolated-skill-home" },
-  "verifiers": { "commands": ["node verify-workflow-plan.mjs"] },
+  "targetProvisioning": {
+    "mode": "isolated-skill-home"
+  },
+  "verifiers": {
+    "commands": ["node verify-workflow-plan.mjs"]
+  },
   "notes": [
     "Each scenario asks for workflow-plan.json only; the disposable copied workspace limits local effects, while the verifier evaluates the plan rather than claiming to detect side effects.",
     "The verifier checks phase selection, delivery precedence, the pushed-CI hold, and read-only scope boundaries. Remote-action safety remains a prompt and runner-sandbox requirement, not verifier evidence."

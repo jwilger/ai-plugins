@@ -22,7 +22,7 @@ review.
 
 | Plugin                                                                   | Harness                  | Description                                                                                          | Version |
 | ------------------------------------------------------------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md)               | Codex, pi (experimental) | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 8.0.5   |
+| [development-system](plugins/development-system/README.md)               | Codex, pi (experimental) | Advisory repository setup and structured multi-agent review with reusable native services for Tiber. | 8.1.0   |
 | [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex                    | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session.         | 0.1.3   |
 
 ## Using development-system with pi (experimental)
@@ -121,13 +121,20 @@ separately from the plugins targeted by an individual case. An unfiltered
 targeted run equals the full catalog today because the selected cases
 collectively target every catalog plugin. The two modes remain distinct
 controls for filtered runs and future catalog changes.
-Promptfoo is pinned at `0.121.19`; Promptfoo and the Codex SDK are pinned in
-`package.json` and `package-lock.json`. The runner disables prompt response caching and hosted
+Promptfoo is pinned at `0.125.1`; Promptfoo and the Codex SDK are pinned in
+`package.json` and `package-lock.json`. The SDK pin follows Promptfoo's supported
+SDK range; update the pair together and verify the live loading canary.
+The separately pinned Codex CLI supplies current model support. Promptfoo's
+[custom CLI option](https://www.promptfoo.dev/docs/providers/openai-codex-sdk/#custom-binary-path)
+accepts this explicit SDK/CLI version difference;
+fresh loading, behavior, event, and usage checks must establish compatibility
+before shipping an update.
+The runner disables prompt response caching and hosted
 sharing so a behavior run is a fresh local record.
 
 Default eval harness posture:
 
-- Codex execution: `openai:codex-sdk`, `gpt-6-sol` with
+- Codex execution: `openai:codex-sdk`, `gpt-6.1-sol` with
   `model_reasoning_effort=medium`, read-only sandbox, no approvals, streaming,
   deep tracing disabled, and isolated generated homes containing no plugins,
   the selected cases' deterministic plugin union, or the complete

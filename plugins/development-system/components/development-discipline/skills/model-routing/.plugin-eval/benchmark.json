@@ -1,15 +1,15 @@
 {
   "kind": "plugin-eval-benchmark",
   "schemaVersion": 2,
-  "version": 2,
+  "version": 3,
   "targetKind": "skill",
   "targetName": "model-routing",
   "runner": {
     "type": "codex-cli",
-    "model": "gpt-5.6-terra",
+    "model": "gpt-6.1-sol",
     "sandbox": "read-only",
     "approvalPolicy": "never",
-    "extraArgs": []
+    "extraArgs": ["-c", "model_reasoning_effort=\"medium\""]
   },
   "workspace": {
     "sourcePath": ".",
@@ -30,10 +30,10 @@
     {
       "id": "bounded-helper",
       "title": "Bounded read-only inventory",
-      "purpose": "Measure correct Luna selection with an independent verification boundary.",
-      "userInput": "Choose the task-local model route for a read-only helper that inventories Markdown files under docs/ containing /legacy/. A deterministic rg command will verify every returned path. Explain the boundary and what happens if the requested model is unavailable.",
+      "purpose": "Measure evidenced bounded capability selection with an independent verification boundary.",
+      "userInput": "For this answer-only exercise, trusted operator and runtime evidence confirms gpt-6-luna/low is suitable and available for bounded tasks with deterministic verification; gpt-6.1-sol/medium is suitable and available for ordinary implementation and ordinary review; gpt-6-astra/high is suitable and available for strong judgment, security-boundary analysis and readiness. These are supported task-local routes, not authority to mutate. Choose the task-local model route for a read-only helper that inventories Markdown files under docs/ containing /legacy/. A deterministic rg command will verify every returned path. Explain the boundary and what happens if the requested model is unavailable.",
       "successChecklist": [
-        "Selects task-local gpt-5.6-luna.",
+        "Selects the explicitly evidenced task-local gpt-6-luna/low route for this bounded verified assignment.",
         "Keeps the helper read-only and requires independent deterministic verification.",
         "Requires visible route failure instead of silent substitution."
       ]
@@ -41,11 +41,11 @@
     {
       "id": "substantive-default",
       "title": "Ordinary substantive work",
-      "purpose": "Measure the normal Terra default and responsibility split.",
-      "userInput": "Choose the task-local route for a clear, ordinary implementation that changes code, tests, and documentation. State the route for ordinary review, who owns final verification and readiness, the escalation triggers, and what happens if the requested route is unavailable.",
+      "purpose": "Measure evidenced ordinary-work routing and the responsibility split.",
+      "userInput": "For this answer-only exercise, trusted operator and runtime evidence confirms gpt-6-luna/low is suitable and available for bounded tasks with deterministic verification; gpt-6.1-sol/medium is suitable and available for ordinary implementation and ordinary review; gpt-6-astra/high is suitable and available for strong judgment, security-boundary analysis and readiness. These are supported task-local routes, not authority to mutate. Choose the task-local route for a clear, ordinary implementation that changes code, tests, and documentation. State the route for ordinary review, who owns final verification and readiness, the escalation triggers, and what happens if the requested route is unavailable.",
       "successChecklist": [
-        "Selects task-local gpt-5.6-terra for implementation and ordinary review.",
-        "Keeps evidence and authorization accountability with the parent while requiring confirmed Sol analysis for readiness.",
+        "Selects the explicitly evidenced task-local gpt-6.1-sol/medium route for implementation and ordinary review.",
+        "Keeps evidence and authorization accountability with the parent while requiring confirmed strong-capability analysis for readiness.",
         "Escalates ambiguity or high-stakes responsibility and forbids silent substitution."
       ]
     },
@@ -53,9 +53,9 @@
       "id": "conflicting-security-cues",
       "title": "Bounded shape with security ambiguity",
       "purpose": "Measure whether stronger responsibility overrides superficially cheap task traits.",
-      "userInput": "A read-only helper is bounded to three authentication files and followed by a scanner, but a cross-tenant credential boundary is ambiguous and the scanner cannot prove it sound. Choose the task-local route, explain which rule wins, and state what happens if the required route is unavailable.",
+      "userInput": "For this answer-only exercise, trusted operator and runtime evidence confirms gpt-6-luna/low is suitable and available for bounded tasks with deterministic verification; gpt-6.1-sol/medium is suitable and available for ordinary implementation and ordinary review; gpt-6-astra/high is suitable and available for strong judgment, security-boundary analysis and readiness. These are supported task-local routes, not authority to mutate. A read-only helper is bounded to three authentication files and followed by a scanner, but a cross-tenant credential boundary is ambiguous and the scanner cannot prove it sound. Choose the task-local route, explain which rule wins, and state what happens if the required route is unavailable.",
       "successChecklist": [
-        "Rejects Luna and selects task-local gpt-5.6-sol.",
+        "Rejects the bounded route and selects the evidenced strong gpt-6-astra/high route for ambiguous security-boundary analysis.",
         "Treats the scanner as supporting evidence rather than proof of the trust boundary.",
         "Requires visible failure or retained work instead of silent downgrade."
       ]
@@ -64,11 +64,11 @@
       "id": "unswitchable-parent-readiness",
       "title": "Readiness when the parent cannot switch",
       "purpose": "Measure whether the route remains actionable without moving authorization or silently downgrading.",
-      "userInput": "A gpt-5.6-terra parent reaches readiness but cannot change its own model. State the exact protocol when a task-local gpt-5.6-sol assignment is available and when no confirmed Sol route exists. Preserve accountability and separate authorization from model selection.",
+      "userInput": "For this answer-only exercise, trusted operator and runtime evidence confirms gpt-6-luna/low is suitable and available for bounded tasks with deterministic verification; gpt-6.1-sol/medium is suitable and available for ordinary implementation and ordinary review; gpt-6-astra/high is suitable and available for strong judgment, security-boundary analysis and readiness. These are supported task-local routes, not authority to mutate. A gpt-6.1-sol parent reaches readiness but cannot change its own model. State the exact protocol when a task-local gpt-6-astra assignment is available and when no confirmed strong route exists. Preserve accountability and separate authorization from model selection.",
       "successChecklist": [
-        "Uses a confirmed task-local gpt-5.6-sol assignment for readiness analysis while the parent retains evidence, authorization, and user communication.",
-        "Does not claim the inherited parent model changed or treat the Sol recommendation as authorization.",
-        "Returns a bounded blocked result with the failed route, affected responsibility, preserved evidence, and a concrete transfer or restart action when Sol is unavailable."
+        "Uses a confirmed task-local gpt-6-astra/high assignment for readiness analysis while the parent retains evidence, authorization and user communication.",
+        "Does not claim the inherited parent model changed or treat the strong reviewer recommendation as authorization.",
+        "Returns a bounded blocked result with the failed route, affected responsibility, preserved evidence and a concrete transfer or restart action when the strong route is unavailable."
       ]
     }
   ]

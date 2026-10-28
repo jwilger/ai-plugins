@@ -153,6 +153,8 @@ function codexProvider(variant, pluginMode) {
       working_dir: ${quote(evalWorkspace)}
       sandbox_mode: read-only
       approval_policy: never
+      codex_path_override: ${quote(path.join(root, "node_modules/.bin/codex"))}
+      skip_codex_version_check: true
       enable_streaming: true
       deep_tracing: false
       skip_git_repo_check: true
@@ -379,6 +381,8 @@ defaultTest:
           working_dir: ${quote(evalWorkspace)}
           sandbox_mode: read-only
           approval_policy: never
+          codex_path_override: ${quote(path.join(root, "node_modules/.bin/codex"))}
+          skip_codex_version_check: true
           enable_streaming: true
           deep_tracing: false
           skip_git_repo_check: true

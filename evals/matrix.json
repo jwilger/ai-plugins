@@ -1,10 +1,10 @@
 {
   "providerVariants": [
     {
-      "id": "codex-gpt-6-sol",
+      "id": "codex-gpt-6.1-sol",
       "provider": "openai:codex-sdk",
       "modelEnv": "CODEX_EVAL_MODEL",
-      "defaultModel": "gpt-6-sol",
+      "defaultModel": "gpt-6.1-sol",
       "reasoningEffortEnv": "CODEX_EVAL_REASONING_EFFORT",
       "defaultReasoningEffort": "medium"
     }

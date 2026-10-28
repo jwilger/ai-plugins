@@ -128,6 +128,8 @@ const temporaryRoot = process.argv[4];
 const first = (value) => value.providers[0].config;
 const targeted = (value) => value.providers[1].config;
 const mutations = [
+  ["sdk-cli-version-opt-in-removed", (value) => { delete first(value).skip_codex_version_check; }],
+  ["sdk-cli-version-opt-in-false", (value) => { first(value).skip_codex_version_check = false; }],
   ["provider-order", (value) => { value.providers.reverse(); }],
   ["model", (value) => { first(value).model = "different-model"; }],
   ["reasoning", (value) => { first(value).model_reasoning_effort = "low"; }],

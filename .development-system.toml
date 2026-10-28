@@ -21,10 +21,10 @@ pre_filter = "strong-reviewer"
 verifier = "strong-reviewer"
 
 [final_review.models.codex]
-lens_review = "gpt-5.6-terra"
-post_filter = "gpt-5.6-luna"
-pre_filter = "gpt-5.6-sol"
-verifier = "gpt-5.6-sol"
+lens_review = "gpt-6.1-sol"
+post_filter = "gpt-6-luna"
+pre_filter = "gpt-6-astra"
+verifier = "gpt-6-astra"
 
 [scopes.build_output]
 category = "build_output"
@@ -48,3 +48,14 @@ include = ["test/**", "tests/**", "spec/**", "specs/**", "**/test/**", "**/tests
 
 [worktrees]
 root = ".worktrees"
+
+# Workload preferences; confirm capability and runtime support for each assignment.
+[model_routing]
+bounded_model = "gpt-6-luna"
+bounded_ordinary_effort = "low"
+standard_model = "gpt-6.1-sol"
+standard_ordinary_effort = "medium"
+standard_deeper_effort = "high"
+strong_model = "gpt-6-astra"
+strong_deeper_effort = "high"
+strong_maximum_effort = "xhigh"

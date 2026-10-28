@@ -64,7 +64,7 @@ Runs provider-backed promptfoo evals through Codex.
 The provider loads the relevant Codex marketplace surface.
 
 Default harness posture:
-  Codex: provider=openai:codex-sdk, model=gpt-6-sol, model_reasoning_effort=medium
+  Codex: provider=openai:codex-sdk, model=gpt-6.1-sol, model_reasoning_effort=medium
 
 Environment overrides:
   CODEX_EVAL_MODEL

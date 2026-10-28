@@ -5,7 +5,8 @@
     "node": ">=22.22.0"
   },
   "devDependencies": {
-    "@openai/codex-sdk": "0.165.0",
+    "@openai/codex": "0.165.0",
+    "@openai/codex-sdk": "0.156.1",
     "@types/node": "26.6.5",
     "ajv": "8.20.0",
     "promptfoo": "0.125.1",
@@ -13,7 +14,7 @@
     "yaml": "2.9.1"
   },
   "overrides": {
-    "@openai/codex-sdk": "0.165.0",
+    "@openai/codex-sdk": "0.156.1",
     "adm-zip": "0.6.1",
     "@modelcontextprotocol/sdk": {
       "@hono/node-server": "2.1.5"

@@ -11,7 +11,7 @@ providers:
   - id: openai:codex-sdk
     label: openai-codex-sdk-no-marketplace-skills
     config:
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}"
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6.1-sol') }}"
       model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
       working_dir: "{{ workspace }}"
       sandbox_mode: workspace-write
@@ -22,6 +22,7 @@ providers:
       skip_git_repo_check: false
       persist_threads: false
       codex_path_override: "{{ env.CODE_QUALITY_CODEX_LAUNCHER }}"
+      skip_codex_version_check: true
       inherit_process_env: false
       enable_streaming: false
       deep_tracing: false
@@ -107,7 +108,7 @@ providers:
   - id: openai:codex-sdk
     label: openai-codex-sdk-targeted-quality-skills
     config:
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}"
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6.1-sol') }}"
       model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
       working_dir: "{{ workspace }}"
       sandbox_mode: workspace-write
@@ -118,6 +119,7 @@ providers:
       skip_git_repo_check: false
       persist_threads: false
       codex_path_override: "{{ env.CODE_QUALITY_CODEX_LAUNCHER }}"
+      skip_codex_version_check: true
       inherit_process_env: false
       enable_streaming: false
       deep_tracing: false
@@ -203,7 +205,7 @@ providers:
   - id: openai:codex-sdk
     label: openai-codex-sdk-all-marketplace-skills
     config:
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}"
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6.1-sol') }}"
       model_reasoning_effort: "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}"
       working_dir: "{{ workspace }}"
       sandbox_mode: workspace-write
@@ -214,6 +216,7 @@ providers:
       skip_git_repo_check: false
       persist_threads: false
       codex_path_override: "{{ env.CODE_QUALITY_CODEX_LAUNCHER }}"
+      skip_codex_version_check: true
       inherit_process_env: false
       enable_streaming: false
       deep_tracing: false

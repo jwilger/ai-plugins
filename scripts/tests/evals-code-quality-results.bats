@@ -305,7 +305,7 @@ const provenance = {
   workspaceManifestSha256: runtime.workspaceManifestSha256,
   runtimeManifestSha256: digest(runtimeBytes),
   matrixHash: runtime.matrixHash,
-  model: "gpt-6-sol",
+  model: "gpt-6.1-sol",
   reasoningEffort: "medium",
   codexVersion: "0.144.5",
   codexBinarySha256: fixed("d"),
@@ -665,7 +665,7 @@ run_checker() {
       (.skillActivations | length) == 1 and
       all(.skillActivations[]; test("^[a-z0-9-]+:[a-z0-9-]+$"))
     ) and
-    .provenance.model == "gpt-6-sol" and
+    .provenance.model == "gpt-6.1-sol" and
     .provenance.codexVersion == "0.144.5" and
     .provenance.nodeVersion == "22.23.1" and
     .provenance.promptfooVersion == "0.121.18" and
@@ -957,6 +957,50 @@ NODE
       .skillActivations == []
     )
   ' "$OUTPUT"
+}
+
+@test "checker accepts bounded current SDK cache-write usage with activation evidence" {
+  prepare_trusted_runtime
+  write_valid_benchmark_inputs
+  for counter in 0 17; do
+    jq --argjson counter "$counter" '
+      .results.results |= map(
+        .response.raw |= (fromjson | .usage.cache_write_input_tokens = $counter | tojson)
+      )
+    ' "$RAW_RESULTS" >"$RAW_RESULTS.updated"
+    chmod 600 "$RAW_RESULTS.updated"
+    mv "$RAW_RESULTS.updated" "$RAW_RESULTS"
+
+    rm -f -- "$OUTPUT"
+    run_checker
+
+    [ "$status" -eq 0 ]
+    jq -e '
+      .diagnosticEligible == true and
+      all(.runs[];
+        .skillActivationEvidence == "codex-turn-successful-command-path-references"
+      )
+    ' "$OUTPUT"
+  done
+
+  for counter in -1 0.5 '"0"' null 9007199254740992 '{"extra":0}'; do
+    jq --argjson counter "$counter" '
+      .results.results[0].response.raw |=
+        (fromjson | .usage.cache_write_input_tokens = $counter | tojson)
+    ' "$RAW_RESULTS" >"$RAW_RESULTS.updated"
+    chmod 600 "$RAW_RESULTS.updated"
+    mv "$RAW_RESULTS.updated" "$RAW_RESULTS"
+
+    rm -f -- "$OUTPUT"
+    run_checker
+
+    [ "$status" -eq 0 ]
+    jq -e '
+      .diagnosticEligible == false and
+      .diagnostics.provenanceFailures == 1 and
+      ([.runs[] | select(.diagnosticCode == "activation-telemetry-unavailable")] | length) == 1
+    ' "$OUTPUT"
+  done
 }
 
 @test "checker makes a completed run provenance-ineligible when raw telemetry is missing" {

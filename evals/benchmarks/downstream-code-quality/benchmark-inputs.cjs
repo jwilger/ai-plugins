@@ -168,10 +168,11 @@ function expectedProvider(mode) {
         ...cliEnvironment,
       },
       codex_path_override: environmentTemplate("CODE_QUALITY_CODEX_LAUNCHER"),
+      skip_codex_version_check: true,
       deep_tracing: false,
       enable_streaming: false,
       inherit_process_env: false,
-      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6-sol') }}",
+      model: "{{ env.CODE_QUALITY_CODEX_MODEL | default('gpt-6.1-sol') }}",
       model_reasoning_effort:
         "{{ env.CODE_QUALITY_CODEX_REASONING_EFFORT | default('medium') }}",
       network_access_enabled: false,
