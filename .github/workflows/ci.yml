@@ -24,12 +24,41 @@ concurrency:
 
 jobs:
   quality:
-    name: Quality gate
+    name: Quality (${{ matrix.lane }})
     # Ubuntu 24.04's AppArmor policy strips capabilities from unprivileged user
-    # namespaces, so the Nix Bubblewrap binary cannot construct the verifier's
-    # mount namespace. Keep the sandbox tests on the supported 22.04 image.
+    # namespaces used by the retained review-replay sandbox tests.
     runs-on: ubuntu-22.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: static
+            commands: validate-marketplace github-actions hyprland-computer-control pi-extension
+          - lane: tiber
+            commands: tiber-rust tiber-dashboard-smoke
+            rust-workspaces: plugins/development-system/components/tiber/rust -> ../../../../../target/tiber-plugin
+          - lane: discipline
+            commands: development-discipline-rust
+            rust-workspaces: plugins/development-system/components/development-discipline/rust -> ../../../../../target
+          - lane: mutants
+            commands: tiber-mutants
+            rust-workspaces: plugins/development-system/components/tiber/rust -> ../../../../../target/mutants
+          - lane: checkpoints
+            commands: bats-checkpoints
+          - lane: startup
+            commands: bats-startup
+            rust-workspaces: |
+              plugins/development-system/components/tiber/rust -> ../../../../../target/tiber
+              plugins/development-system/components/development-discipline/rust -> ../../../../../target/development-discipline
+          - lane: shell
+            commands: bats-other
+    env:
+      # Match flake.nix; the cache action runs outside the devshell.
+      CARGO_HOME: ${{ github.workspace }}/.dependencies/cargo
+      CARGO_MUTANTS_TARGET_DIR: ${{ github.workspace }}/target/mutants
+      # The installer otherwise builds releases in each test's disposable home.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,8 +71,37 @@ jobs:
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Full gate
-        run: nix develop -c just ci
+      # Cache metadata runs from each Cargo workspace. Avoid running the
+      # shellHook there: it prints banners and derives cache paths from $PWD.
+      - name: Expose Nix toolchain for cache metadata
+        if: matrix.rust-workspaces != ''
+        run: |
+          nix develop -c bash <<'EOF'
+          for tool in cargo rustc rustdoc; do
+            dirname "$(command -v "$tool")"
+          done >> "$GITHUB_PATH"
+          EOF
+
+      - name: Cache Rust dependencies and build artifacts
+        if: matrix.rust-workspaces != ''
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.lane }}-${{ hashFiles('flake.lock') }}
+          workspaces: ${{ matrix.rust-workspaces }}
+          cache-bin: false
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Cache npm downloads
+        if: matrix.lane == 'static' || matrix.lane == 'tiber'
+        uses: actions/cache@v4
+        with:
+          path: .dependencies/npm-cache
+          key: npm-${{ runner.os }}-${{ hashFiles('flake.lock', 'package-lock.json', 'plugins/**/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      - name: Run required deterministic checks
+        run: nix develop -c just ${{ matrix.commands }}
 
   codex-manifests:
     name: Codex manifests
@@ -81,6 +139,13 @@ jobs:
 
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Cache npm downloads
+        uses: actions/cache@v4
+        with:
+          path: .dependencies/npm-cache
+          key: npm-${{ runner.os }}-${{ hashFiles('flake.lock', 'package-lock.json', 'plugins/**/package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
 
       - name: Validate provider-backed eval configuration
         run: |

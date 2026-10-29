@@ -47,11 +47,11 @@ install-development-system-binaries *args:
 # Browser smoke coverage for the read-only tiber dashboard.
 tiber-dashboard-smoke:
     scripts/evals/ensure-node-deps.sh
-    node scripts/tiber/dashboard-smoke.mjs
+    CARGO_TARGET_DIR="$(realpath -m -- "${CARGO_TARGET_DIR:-target}/tiber-plugin")" node scripts/tiber/dashboard-smoke.mjs
 
 # Mutation gate for the pure tiber core.
 tiber-mutants:
-    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${TMPDIR:-/tmp}/tiber-mutants-target" cargo mutants --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${CARGO_MUTANTS_TARGET_DIR:-${TMPDIR:-/tmp}/tiber-mutants-target}" cargo mutants --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core
 
 # Run provider-backed promptfoo evals locally, upload/share the latest result,
 # and print the share URL. This sends eval data to the configured promptfoo
@@ -92,6 +92,16 @@ evals:
 # Shell / plugin-script tests (CI gate).
 bats:
     bats $(find plugins scripts -name '*.bats' | sort)
+
+# Separate CI runners keep the two measured slow suites off the same critical path.
+bats-checkpoints:
+    bats --timing scripts/tests/checkpoint-transitions.bats
+
+bats-startup:
+    bats --timing scripts/tests/mcp-startup.bats
+
+bats-other:
+    bats --timing $(find plugins scripts -name '*.bats' ! -path 'scripts/tests/checkpoint-transitions.bats' ! -path 'scripts/tests/mcp-startup.bats' | sort)
 
 # Install Lefthook-managed local checks and optional worktree bootstrap.
 worktree-hooks:
