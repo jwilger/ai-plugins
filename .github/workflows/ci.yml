@@ -93,12 +93,12 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cache npm downloads
-        if: matrix.lane == 'static' || matrix.lane == 'tiber'
+        if: matrix.lane == 'static' || matrix.lane == 'tiber' || matrix.lane == 'shell'
         uses: actions/cache@v4
         with:
           path: .dependencies/npm-cache
-          key: npm-${{ runner.os }}-${{ hashFiles('flake.lock', 'package-lock.json', 'plugins/**/package-lock.json') }}
-          restore-keys: npm-${{ runner.os }}-
+          key: npm-downloads-${{ runner.os }}-${{ hashFiles('flake.lock', 'package-lock.json', 'plugins/**/package-lock.json') }}
+          restore-keys: npm-downloads-${{ runner.os }}-
 
       - name: Run required deterministic checks
         run: nix develop -c just ${{ matrix.commands }}
@@ -139,13 +139,6 @@ jobs:
 
       - name: Cache Nix store
         uses: DeterminateSystems/magic-nix-cache-action@main
-
-      - name: Cache npm downloads
-        uses: actions/cache@v4
-        with:
-          path: .dependencies/npm-cache
-          key: npm-${{ runner.os }}-${{ hashFiles('flake.lock', 'package-lock.json', 'plugins/**/package-lock.json') }}
-          restore-keys: npm-${{ runner.os }}-
 
       - name: Validate provider-backed eval configuration
         run: |

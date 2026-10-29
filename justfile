@@ -91,6 +91,7 @@ evals:
 
 # Shell / plugin-script tests (CI gate).
 bats:
+    scripts/evals/ensure-node-deps.sh
     bats $(find plugins scripts -name '*.bats' | sort)
 
 # Separate CI runners keep the two measured slow suites off the same critical path.
@@ -101,6 +102,7 @@ bats-startup:
     bats --timing scripts/tests/mcp-startup.bats
 
 bats-other:
+    scripts/evals/ensure-node-deps.sh
     bats --timing $(find plugins scripts -name '*.bats' ! -path 'scripts/tests/checkpoint-transitions.bats' ! -path 'scripts/tests/mcp-startup.bats' | sort)
 
 # Install Lefthook-managed local checks and optional worktree bootstrap.
