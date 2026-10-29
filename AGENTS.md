@@ -299,13 +299,6 @@ execution. Unattended trusted automation may use protected provider credentials
 when it cannot reuse an interactive harness session. Never expose those
 credentials to untrusted pull-request code or events.
 
-This standing authorization covers the canonical downstream code-quality
-benchmark command:
-
-```shell
-nix develop -c scripts/evals/run-code-quality-benchmark.sh
-```
-
 It does not authorize broad `nix develop` execution rules or other external
 destinations.
 

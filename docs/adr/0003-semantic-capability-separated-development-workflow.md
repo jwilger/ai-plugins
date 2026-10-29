@@ -41,5 +41,6 @@ configured hooks, and terminal CI evidence remain distinct requirements.
 
 Earlier generated-agent profiles, hook-denial rules, and short-lived boundary
 proofs did not establish a supported authority boundary and must not be
-regenerated. The isolated code-quality benchmark is a separate, purpose-built
-eval containment mechanism.
+regenerated. The isolated code-quality benchmark was a separate, purpose-built
+eval containment mechanism; it was retired on 2026-10-28 with its custom runner
+and scorer (see ADR-0001).

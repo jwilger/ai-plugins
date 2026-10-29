@@ -2,11 +2,18 @@
 
 ## Status
 
-Accepted
+Retired (2026-10-28)
 
 ## Date
 
 2026-07-16
+
+The writable downstream code-quality benchmark was removed during evaluation
+simplification. Its custom execution and scoring platform imposed disproportionate
+maintenance and CI costs. This ADR preserves the historical threat model and
+decision; it does not describe a currently supported evaluation command. The
+retained native Codex behavior runner has a different scope and does not claim
+the writable benchmark's containment guarantees.
 
 ## Context
 
@@ -171,4 +178,4 @@ supplement but cannot replace the writable benchmark.
 ## Related
 
 - `docs/rules/proportional-threat-modeling.md`
-- `evals/benchmarks/downstream-code-quality/README.md`
+- Historical benchmark documentation was removed with its implementation.

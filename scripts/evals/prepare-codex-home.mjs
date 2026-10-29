@@ -44,7 +44,7 @@ function parseArgs(argv) {
 
   if (!args.codexHome) {
     throw new Error(
-      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|targeted-plugins|full-marketplace|skills-only-marketplace] [--plugins comma,list] [--no-seed-auth]",
+      "Usage: node scripts/evals/prepare-codex-home.mjs <codex-home> [--plugin-mode no-plugins|targeted-plugins|full-marketplace] [--plugins comma,list] [--no-seed-auth]",
     );
   }
   if (
@@ -52,14 +52,13 @@ function parseArgs(argv) {
       "no-plugins",
       "targeted-plugins",
       "full-marketplace",
-      "skills-only-marketplace",
     ].includes(args.pluginMode)
   ) {
     throw new Error(`unknown plugin mode: ${args.pluginMode}`);
   }
   if (
     args.pluginsProvided &&
-    ["targeted-plugins", "skills-only-marketplace"].includes(args.pluginMode) &&
+    args.pluginMode === "targeted-plugins" &&
     args.plugins.length === 0
   ) {
     throw new Error(
@@ -71,7 +70,7 @@ function parseArgs(argv) {
   }
   if (
     args.pluginsProvided &&
-    !["targeted-plugins", "skills-only-marketplace"].includes(args.pluginMode)
+    args.pluginMode !== "targeted-plugins"
   ) {
     throw new Error(
       `--plugins is not supported with plugin mode ${args.pluginMode}`,
@@ -112,20 +111,12 @@ function marketplacePlugins(selectedNames = null) {
   return plugins;
 }
 
-function copyDir(source, target, { skillsOnly = false } = {}) {
+function copyDir(source, target) {
   fs.rmSync(target, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.cpSync(source, target, {
     recursive: true,
-    filter: (entry) => {
-      if (entry.split(path.sep).includes(".git")) return false;
-      if (!skillsOnly) return true;
-
-      const relative = path.relative(source, entry);
-      if (!relative) return true;
-      const [rootEntry] = relative.split(path.sep);
-      return rootEntry === "plugin.json" || rootEntry === "skills";
-    },
+    filter: (entry) => !entry.split(path.sep).includes(".git"),
   });
 }
 
@@ -322,7 +313,6 @@ function main() {
         plugin.name,
         plugin.version,
       ),
-      { skillsOnly: args.pluginMode === "skills-only-marketplace" },
     );
   }
 

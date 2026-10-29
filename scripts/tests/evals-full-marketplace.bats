@@ -362,10 +362,10 @@ NODE
   [[ "$output" == *"unknown targeted plugin(s): missing-plugin"* ]]
 }
 
-@test "explicitly empty targeted and skills-only lists fail before replacing an eval home" {
+@test "explicitly empty targeted lists fail before replacing an eval home" {
   FIXTURE_TMP="$(mktemp -d)"
 
-  for plugin_mode in targeted-plugins skills-only-marketplace; do
+  for plugin_mode in targeted-plugins; do
     eval_home="$FIXTURE_TMP/$plugin_mode"
     mkdir -p "$eval_home"
     printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
@@ -384,10 +384,10 @@ NODE
   done
 }
 
-@test "unknown targeted and skills-only selections fail before replacing an eval home" {
+@test "unknown targeted selections fail before replacing an eval home" {
   FIXTURE_TMP="$(mktemp -d)"
 
-  for plugin_mode in targeted-plugins skills-only-marketplace; do
+  for plugin_mode in targeted-plugins; do
     eval_home="$FIXTURE_TMP/$plugin_mode"
     mkdir -p "$eval_home"
     printf 'ai-plugins Codex eval home\n' >"$eval_home/.ai-plugins-eval-home"
@@ -404,72 +404,6 @@ NODE
     [ -f "$eval_home/sentinel" ]
     [ ! -f "$eval_home/config.toml" ]
   done
-}
-
-@test "omitted skills-only list retains full marketplace behavior" {
-  FIXTURE_TMP="$(mktemp -d)"
-  eval_home="$FIXTURE_TMP/skills-only"
-
-  run env OPENAI_API_KEY=fixture node \
-    "$ROOT/scripts/evals/prepare-codex-home.mjs" \
-    "$eval_home" \
-    --plugin-mode skills-only-marketplace
-
-  [ "$status" -eq 0 ]
-  expected_count="$(jq '.plugins | length' "$ROOT/.agents/plugins/marketplace.json")"
-  [ "$(grep -c '^\[plugins\.' "$eval_home/config.toml")" -eq "$expected_count" ]
-
-  while IFS= read -r plugin; do
-    grep -q "\\[plugins\\.\"${plugin}@ai-plugins\"\\]" "$eval_home/config.toml"
-    [ -d "$eval_home/plugins/cache/ai-plugins/$plugin" ]
-  done < <(jq -r '.plugins[].name' "$ROOT/.agents/plugins/marketplace.json")
-
-  plugin_version="$(jq -r '.version' "$ROOT/plugins/development-system/plugin.json")"
-  plugin_cache="$eval_home/plugins/cache/ai-plugins/development-system/$plugin_version"
-  [ -d "$plugin_cache/skills" ]
-  [ ! -e "$plugin_cache/bin" ]
-  [ ! -e "$plugin_cache/.mcp.json" ]
-}
-
-@test "improvement loop scope guards reject edits outside their allowed surfaces" {
-  TMP_REPO="$(mktemp -d)"
-  tmp_repo="$TMP_REPO"
-  mkdir -p "$tmp_repo/plugins/example/skills/alpha" "$tmp_repo/evals/fixtures/behavior"
-  cd "$tmp_repo"
-  git init -q
-  git config user.email test@example.com
-  git config user.name Test
-  git config commit.gpgsign false
-  echo 'skill' > plugins/example/skills/alpha/SKILL.md
-  echo 'fixture' > evals/fixtures/behavior/cases.json
-  git add .
-  git commit -q -m initial
-
-  echo 'changed' > plugins/example/skills/alpha/SKILL.md
-  run "$ROOT/scripts/evals/check-loop-scope.sh" improve-plugins
-  [ "$status" -eq 0 ]
-
-  echo 'changed' > evals/fixtures/behavior/cases.json
-  run "$ROOT/scripts/evals/check-loop-scope.sh" improve-plugins
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"disallowed path for improve-plugins"* ]]
-
-  git checkout -q -- .
-  echo 'changed' > evals/fixtures/behavior/cases.json
-  run "$ROOT/scripts/evals/check-loop-scope.sh" improve-evals
-  [ "$status" -eq 0 ]
-
-  echo 'changed' > plugins/example/skills/alpha/SKILL.md
-  run "$ROOT/scripts/evals/check-loop-scope.sh" improve-evals
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"disallowed path for improve-evals"* ]]
-
-  git checkout -q -- .
-  mkdir -p docs
-  echo 'new' > docs/new-file.md
-  run "$ROOT/scripts/evals/check-loop-scope.sh" improve-plugins
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"disallowed path for improve-plugins: docs/new-file.md"* ]]
 }
 
 @test "dashboard aggregates provider variant plugin mode and value gates" {

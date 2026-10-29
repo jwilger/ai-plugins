@@ -145,68 +145,21 @@ Default eval harness posture:
   roles separately with `CODEX_EVAL_MODEL` / `CODEX_EVAL_REASONING_EFFORT` and
   `CODEX_GRADER_MODEL` / `CODEX_GRADER_REASONING_EFFORT`.
 
-The retained historical [GPT-5.6 model-family benchmark](evals/benchmarks/gpt-5.6-model-family/README.md)
-compares Sol, Terra, and Luna without running the full marketplace eval suite.
-Its trace-enforced Codex app-server wrapper and skills-only/no-plugin homes are
-benchmark controls; the canonical behavior runner above continues to use the
-native Codex SDK provider and the configured behavior-mode matrix.
+The evaluation path is the native Codex Promptfoo runner, representative behavior
+fixtures, a marketplace-loading canary, and explicit result checks. Run live
+evaluations with `just evals`, which uploads the fresh results with Promptfoo
+share and prints the hosted URL. For local-only results, run
+`nix develop -c scripts/evals/run.sh`. Normal CI checks deterministic
+functionality and evaluation configuration without making provider calls.
 
-The canary suite is separate from behavior evals. Canaries may explicitly ask
-the harness to prove plugin and skill loading. Behavior prompts stay natural and
-do not tell the model to use this repository's plugins.
-
-For attribution, set `EVAL_SKILL_INVOCATION_MODE=forced`. This opt-in diagnostic
-resolves each selected fixture's `plugins` and `skills` metadata to exact
-`$plugin:skill` references and injects them centrally. Forced diagnostics run
-only targeted-plugin and full-marketplace compositions, enforce their ordinary
-per-case pass thresholds, and record the resolved references and invocation
-mode in result artifacts. They never run or substitute for the no-plugin
-baseline, baseline-lift gates, or the canonical natural-routing suite. Compare
-matched natural and forced runs with `EVAL_SAMPLES=3` when measuring per-input
-routing reliability.
-
-Repeated samples are a deliberate measurement choice, not a blanket rule. The
-default one-sample matrix treats every case as a binary pass/fail observation
-and estimates population quality across distinct cases. Set `EVAL_SAMPLES`
-above one only when measuring per-input reliability, pass@k capability, pass^k
-reliability, judge variance, or a small stochastic difference; fractional
-per-case thresholds apply only to those repeated runs. PR dry-runs do not run
-live samples.
-
-Pull-request CI validates the eval configuration with `--dry-run` but does not
-claim behavior evidence. Provider-backed behavior evidence comes from local,
-scheduled, manual, or `main` runs where Codex authentication is available.
-
-To produce the same artifacts locally:
-
-```shell
-just evals  # runs provider-backed evals, shares the result, and prints the URL
-nix develop -c scripts/evals/run.sh
-nix develop -c scripts/evals/run.sh --suite canary
-nix develop -c node scripts/evals/build-site.mjs
-```
-
-Eval runs have no implicit whole-run deadline: a large matrix must not lose
-nearly-complete work to an arbitrary wall-clock cutoff. Set `EVAL_TIMEOUT`
-only when the caller deliberately wants a bounded run. Timed-out or interrupted
-runs write `evals/out/status.json` so the dashboard can show why no fresh
-result completed.
-
-`just evals` uploads the latest eval result through `promptfoo share`. For a
-local-only report, run `scripts/evals/run.sh` and then
-`nix develop -c node_modules/.bin/promptfoo view`. If a behavior eval exits
-with Promptfoo's normal failure status after writing artifacts, `just evals`
-still attempts to share the report and then returns the original eval status. If
-the eval run is interrupted, terminated, or times out, `just evals` stops
-without sharing. Interrupted, terminated, and timed-out runs all retain any
-partial artifacts under
-`evals/out/timeout-artifacts/` for debugging.
-
-If automatic startup repair reports a Development System binary installation
-failure, use its download, checksum, archive, or Cargo diagnostic. A manual
-`just install-development-system-binaries --from-source` remains available for
-diagnosis. For an explicitly configured Promptfoo server, also verify that the
-pinned runtime above is available on `PATH`.
+Historical model-family campaigns, the synthetic downstream code-quality
+benchmark, and automatic improvement loops have been retired. Their custom
+providers, scoring/sandbox platform, and runner-specific tests cost more to
+maintain than the evidence they supplied. Shared credential/home isolation,
+workspace ownership, cleanup, locking, result provenance, and sharing checks
+remain. Deterministic checks establish those contracts; they do not establish
+that the plugin improves agent behavior or downstream code quality. That claim
+requires a suitable live evaluation.
 
 ## Reporting eval cases
 

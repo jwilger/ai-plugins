@@ -75,19 +75,11 @@
             ])
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
               pkgs.bubblewrap
-              pkgs.systemd
             ];
 
           shellHook = ''
             export AI_PLUGINS_RUST_ANALYZER_BIN="${pkgs.rust-analyzer}/bin/rust-analyzer"
-            ${pkgs.lib.optionalString pkgs.stdenv.isLinux ''
-              # Candidate verifiers resolve these exact flake-selected tools;
-              # they must not discover security boundaries through caller PATH.
-              export AI_PLUGINS_BWRAP_BIN="${pkgs.bubblewrap}/bin/bwrap"
-              export AI_PLUGINS_PRLIMIT_BIN="${pkgs.util-linux}/bin/prlimit"
-              export AI_PLUGINS_SYSTEMD_RUN_BIN="${pkgs.systemd}/bin/systemd-run"
-              export AI_PLUGINS_SYSTEMCTL_BIN="${pkgs.systemd}/bin/systemctl"
-            ''}
+
 
             # Give hook installation an unambiguous, lockfile-selected Lefthook
             # source and expected version.
