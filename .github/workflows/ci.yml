@@ -68,9 +68,6 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Cache Nix store
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       # Cache metadata runs from each Cargo workspace. Avoid running the
       # shellHook there: it prints banners and derives cache paths from $PWD.
       - name: Expose Nix toolchain for cache metadata
@@ -114,9 +111,6 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Cache Nix store
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
       # Structural check: every Codex manifest is valid. Full `codex`-CLI
       # runtime verification runs where a Codex login is available.
       - name: Codex manifests are valid JSON
@@ -136,9 +130,6 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Cache Nix store
-        uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Validate provider-backed eval configuration
         run: |
