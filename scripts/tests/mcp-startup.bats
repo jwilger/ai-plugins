@@ -15,6 +15,16 @@ setup() {
 
 }
 
+@test "Tiber forwards current agent for signed SSH publication across caller repositories" {
+  local version platform native
+  version="$(jq -r .version "$ROOT/plugins/tiber/plugin.json")"
+  platform="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+  native="$XDG_DATA_HOME/ai-plugins/tiber/$version/$platform/tiber"
+  run python3 "$ROOT/scripts/tests/tiber-ssh-transport.py" "$ROOT" "$native"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'"caller_repositories": 2'* ]]
+}
+
 teardown() {
   if [ -n "${SIGNING_AGENT_PID:-}" ]; then
     kill "$SIGNING_AGENT_PID" 2>/dev/null || true

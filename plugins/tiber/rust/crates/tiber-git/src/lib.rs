@@ -2363,11 +2363,31 @@ where
     }
 }
 
-fn event_store_error(error: impl std::fmt::Display) -> Error {
+trait EventStoreFailure: std::fmt::Display {
+    fn is_ssh_authentication_failure(&self) -> bool {
+        false
+    }
+}
+
+impl EventStoreFailure for EventStoreError {}
+
+impl EventStoreFailure for git_event_store::GitEventStoreOpenError {
+    fn is_ssh_authentication_failure(&self) -> bool {
+        // Only classify the established SSH public-key rejection. Other Git,
+        // network, signing and filesystem failures retain generic redaction.
+        matches!(self, Self::Git(source) if source.contains("Permission denied (publickey"))
+    }
+}
+
+fn event_store_error(error: impl EventStoreFailure) -> Error {
     if std::env::var_os("TIBER_EVENT_STORE_DIAGNOSTICS").is_some() {
         eprintln!("tiber.event_store_failure source={error}");
     }
-    Error::Parse("event_store_failed source_redacted=true".to_string())
+    if error.is_ssh_authentication_failure() {
+        Error::SshAuthentication
+    } else {
+        Error::Parse("event_store_failed source_redacted=true".to_string())
+    }
 }
 
 /// Preserve deliberately typed domain rejections while ensuring infrastructure
@@ -9759,6 +9779,7 @@ pub struct TaskUpdate<'a> {
 
 #[derive(Debug)]
 pub enum Error {
+    SshAuthentication,
     CommandFailed {
         program: String,
         args: Vec<String>,
@@ -9783,6 +9804,9 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::SshAuthentication => formatter.write_str(
+                "tiber.ssh_authentication_failed source_redacted=true remediation=\"verify SSH agent credentials and SSH_AUTH_SOCK forwarding; rerun the installed configure-codex-mcp.py --apply for Codex; restart Codex from the current agent shell\"",
+            ),
             Self::CommandFailed {
                 program,
                 args,
@@ -9843,6 +9867,7 @@ impl Error {
 
     fn sanitized_sync_source(&self) -> String {
         match self {
+            Self::SshAuthentication => self.to_string(),
             Self::CommandFailed {
                 program,
                 status,
@@ -11617,6 +11642,34 @@ fn command_output(
 #[cfg(test)]
 mod lock_tests {
     use super::*;
+
+    #[test]
+    fn ssh_authentication_diagnostic_is_actionable_without_private_source() {
+        let error = event_store_error(git_event_store::GitEventStoreOpenError::Git(
+            "refresh authoritative tiber ref: git@private-host: Permission denied (publickey). secret-token /private/socket".to_string(),
+        ));
+        assert!(matches!(error, Error::SshAuthentication));
+        let message = error.to_string();
+        assert!(message.contains("SSH_AUTH_SOCK"));
+        assert!(message.contains("source_redacted=true"));
+        assert!(message.contains("restart Codex"));
+        assert_eq!(error.sanitized_sync_source(), message);
+        for secret in [
+            "private-host",
+            "secret-token",
+            "/private/socket",
+            "Permission denied",
+        ] {
+            assert!(!message.contains(secret));
+        }
+        let other = event_store_error(git_event_store::GitEventStoreOpenError::Git(
+            "Could not resolve hostname private-host secret-token".to_string(),
+        ));
+        assert_eq!(
+            other.to_string(),
+            "tiber.parse_error event_store_failed source_redacted=true"
+        );
+    }
 
     #[test]
     fn checked_model_has_registered_mappings_for_current_and_legacy_events() {
