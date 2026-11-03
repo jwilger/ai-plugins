@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+installed_codex_home="${plugin_root%/plugins/cache/ai-plugins/tiber/*}"
+# Portable MCP startup can provision the shared transport before the next Codex
+# launch. Ordinary CLI calls and the already configured dispatcher never write it.
+if [[ "${1:-}" == mcp && "${2:-}" == stdio ]] &&
+  [[ "${TIBER_AGENT_FORWARDING:-}" != current-session ]] &&
+  [[ "$installed_codex_home" != "$plugin_root" ]] &&
+  [[ "${PLUGIN_ROOT:-}" == "$plugin_root" && "${PLUGIN_DATA:-}" == /* ]]; then
+  if python3 -c 'import tomllib' >/dev/null 2>&1; then
+    CODEX_HOME="$installed_codex_home" python3 "$plugin_root/scripts/configure-codex-mcp.py" --plugin-data "$PLUGIN_DATA" --apply >&2 || true
+  else
+    printf '%s\n' 'tiber.mcp_configuration_skipped reason=python_3_11_required remediation=install_Python_3_11_then_restart_Codex' >&2
+  fi
+fi
 source "$plugin_root/lib/installed-binary.sh"
 export TIBER_LAUNCHER_PATH="$plugin_root/bin/tiber"
 tiber_exec_installed_binary "$plugin_root" tiber "$@"

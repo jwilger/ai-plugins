@@ -39,11 +39,16 @@ try:
  for directory in ['bin','lib']:shutil.copytree(source/'plugins/tiber'/directory,cache/directory)
  shutil.copy2(source/'plugins/tiber/plugin.json',cache/'plugin.json')
  (cache/'scripts').mkdir()
- shutil.copy2(source/'plugins/tiber/scripts/configure-codex-mcp.py',cache/'scripts/configure-codex-mcp.py')
+ for script in (source/'plugins/tiber/scripts').glob('*.py'):shutil.copy2(script,cache/'scripts'/script.name)
  data=root/'data';host=os.uname().sysname.lower()+'-'+os.uname().machine
  install=data/'ai-plugins/tiber'/version/host;install.mkdir(parents=True)
  shutil.copy2(binary,install/'tiber');(install/'.plugin-version').write_text(version)
- config_env=dict(env,CODEX_HOME=str(root/'codex'))
+ # Deterministic inventory fixture; actual Codex selection is verified separately.
+ inventory_bin=root/'inventory-bin';inventory_bin.mkdir()
+ inventory_cli=inventory_bin/'codex'
+ inventory_cli.write_text('#!/usr/bin/env python3\nprint('+repr(json.dumps({'installed':[{'pluginId':'tiber@ai-plugins','version':'VERSION','enabled':True,'installed':True}]}))+')\n')
+ inventory_cli.write_text(inventory_cli.read_text().replace('VERSION',version));inventory_cli.chmod(0o700)
+ config_env=dict(env,CODEX_HOME=str(root/'codex'),PATH=str(inventory_bin)+os.pathsep+env['PATH'])
  run(['python3',cache/'scripts/configure-codex-mcp.py','--plugin-data',data,'--apply'],env=config_env)
  config=tomllib.loads((root/'codex/config.toml').read_text())['mcp_servers']['tiber']
  def transport(parent):

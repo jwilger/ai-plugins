@@ -99,11 +99,26 @@ def main():
         installed = home / 'plugins/cache/ai-plugins/tiber' / manifest['version']
         (installed / 'scripts').mkdir(parents=True)
         (installed / 'bin').mkdir()
-        shutil.copy2(SOURCE / 'plugins/tiber/scripts/configure-codex-mcp.py', installed / 'scripts')
+        for script in (SOURCE / 'plugins/tiber/scripts').glob('*.py'):
+            shutil.copy2(script, installed / 'scripts')
         (installed / 'plugin.json').write_text(json.dumps(manifest))
         launcher = installed / 'bin/tiber'
         launcher.write_text(FAKE.replace("os.environ['PROBE_OUTPUT']", repr(str(root / 'tiber.json'))))
         launcher.chmod(0o700)
+        # Register the fixture through real Codex so dispatcher inventory includes
+        # actual installed/enabled state, not a handwritten approximation.
+        market = root / 'market'
+        (market / '.agents/plugins').mkdir(parents=True)
+        shutil.copytree(installed, market / 'plugins/tiber')
+        (market / '.agents/plugins/marketplace.json').write_text(json.dumps({
+            'name': 'ai-plugins', 'interface': {'displayName': 'Synthetic probe'},
+            'plugins': [{'name': 'tiber', 'version': manifest['version'],
+                         'source': {'source': 'local', 'path': './plugins/tiber'}}]}))
+        fixture_env = dict(os.environ, CODEX_HOME=str(home))
+        fixture_env.pop('SSH_AUTH_SOCK', None)
+        for command in [['codex', 'plugin', 'marketplace', 'add', str(market), '--json'],
+                        ['codex', 'plugin', 'add', 'tiber@ai-plugins', '--json']]:
+            subprocess.run(command, env=fixture_env, cwd=root, check=True, capture_output=True)
         subprocess.run([sys.executable, str(installed / 'scripts/configure-codex-mcp.py'), '--plugin-data', str(root / 'data'), '--apply'], env=dict(os.environ, CODEX_HOME=str(home)), check=True, capture_output=True)
         for socket in ['/synthetic/current-agent', '/synthetic/rotated-agent', None]:
             result = launch(home, root, socket, names + ['tiber'])

@@ -11,8 +11,19 @@ setup() {
   printf '#!/bin/sh\nexit 0\n' >"$INSTALLED/bin/tiber"
   chmod +x "$INSTALLED/bin/tiber"
   if [ -f "$ROOT/plugins/tiber/scripts/configure-codex-mcp.py" ]; then
-    cp "$ROOT/plugins/tiber/scripts/configure-codex-mcp.py" "$INSTALLED/scripts/"
+    cp "$ROOT/plugins/tiber/scripts/"*.py "$INSTALLED/scripts/"
   fi
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  export TEST_VERSION="$VERSION"
+  cat > "$BATS_TEST_TMPDIR/bin/codex" <<'SH'
+#!/bin/sh
+case "$*" in
+  *plugin*list*) printf '{"installed":[{"pluginId":"tiber@ai-plugins","version":"%s","installed":true,"enabled":true}]}' "$TEST_VERSION" ;;
+  *) printf '[{"name":"tiber","transport":{"env":null}}]' ;;
+esac
+SH
+  chmod +x "$BATS_TEST_TMPDIR/bin/codex"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
 }
 
 repair() {
@@ -35,7 +46,7 @@ raw=pathlib.Path(sys.argv[1]).read_text()
 c=tomllib.loads(raw)
 s=c['mcp_servers']['tiber']
 assert c['model']=='example' and c['mcp_servers']['other']['command']=='/trusted/other'
-assert s['command']==sys.argv[2]+'/bin/tiber'
+assert s['command']==sys.argv[3]+'/mcp-dispatch.py'
 assert s['args']==['mcp','stdio'] and s['env_vars']==['SSH_AUTH_SOCK']
 assert s['env']['PLUGIN_DATA']==sys.argv[3]
 assert s['env']['TIBER_AGENT_FORWARDING']=='current-session'
@@ -85,7 +96,6 @@ PY
 
 @test "repair reports missing plugin data safely when a direct registration has null environment" {
   mkdir -p "$BATS_TEST_TMPDIR/bin"
-  printf '#!/bin/sh\nprintf '\''[{"name":"tiber","transport":{"env":null}}]\\n'\''\n' >"$BATS_TEST_TMPDIR/bin/codex"
   chmod +x "$BATS_TEST_TMPDIR/bin/codex"
   run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" python3 "$INSTALLED/scripts/configure-codex-mcp.py" --apply
   [ "$status" -ne 0 ]

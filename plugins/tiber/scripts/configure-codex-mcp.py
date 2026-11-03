@@ -4,9 +4,11 @@
 import argparse
 import fcntl
 import json
+import importlib
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import tempfile
 import tomllib
@@ -19,7 +21,7 @@ def fail(code, remediation):
     raise ValueError(f'tiber.mcp_configuration_failed reason={code} remediation={remediation}')
 
 
-def configuration(original, root, data):
+def configuration(original, root, data, codex, home):
     parsed = tomllib.loads(original)
     starts, ends = original.count(BEGIN), original.count(END)
     if (starts, ends) not in ((0, 0), (1, 1)):
@@ -43,10 +45,10 @@ def configuration(original, root, data):
     block = '\n'.join([
         BEGIN,
         '[mcp_servers.tiber]',
-        f'command = {quote(root / "bin/tiber")}',
+        f'command = {quote(data / "mcp-dispatch.py")}',
         'args = ["mcp", "stdio"]',
         'env_vars = ["SSH_AUTH_SOCK"]',
-        'env = { PLUGIN_ROOT = ' + quote(root) + ', PLUGIN_DATA = ' + quote(data)
+        'env = { CODEX_HOME = ' + quote(home) + ', TIBER_CODEX_EXECUTABLE = ' + quote(codex) + ', PLUGIN_DATA = ' + quote(data)
         + ', TIBER_AGENT_FORWARDING = "current-session" }',
         END,
         '',
@@ -67,26 +69,38 @@ def main():
     expected = home / 'plugins/cache/ai-plugins/tiber' / version
     if not home.is_absolute() or root != expected.resolve() or not (root / 'bin/tiber').is_file():
         fail('untrusted_launcher_location', 'run_this_helper_from_the_installed_Tiber_plugin_cache')
+    codex = shutil.which('codex')
+    if not codex or not Path(codex).is_absolute():
+        fail('codex_executable_unavailable', 'run_from_a_shell_with_a_trusted_absolute_codex_executable')
+    dispatch = importlib.import_module('mcp-dispatch')
+    if dispatch.installed_root(codex, home) != root:
+        fail('inactive_plugin_version', 'run_the_currently_installed_plugin_helper')
     data = args.plugin_data
     if data is None:
-        inventory = subprocess.run(['codex', '-C', '/tmp', 'mcp', 'list', '--json'], capture_output=True, text=True, timeout=30)
+        inventory_env = dict(os.environ)
+        inventory_env.pop('SSH_AUTH_SOCK', None)
+        inventory = subprocess.run([codex, '-C', '/tmp', 'mcp', 'list', '--json'], capture_output=True, text=True, timeout=30, env=inventory_env)
         if inventory.returncode:
             fail('inventory_unavailable', 'check_codex_mcp_list')
         servers = json.loads(inventory.stdout)
         data = next((Path((item['transport'].get('env') or {}).get('PLUGIN_DATA', '')) for item in servers if item.get('name') == 'tiber'), Path())
     if not data.is_absolute():
         fail('plugin_data_unavailable', 'supply_absolute_plugin_data_from_codex_mcp_list')
+    dispatcher = data / 'mcp-dispatch.py'
+    if dispatcher.is_symlink():
+        fail('dispatcher_symlink', 'remove_the_untrusted_dispatcher_link')
+    dispatcher_source = (root / 'scripts/mcp-dispatch.py').read_bytes()
     target = home / 'config.toml'
     if target.is_symlink():
         fail('configuration_symlink', 'configure_env_vars_in_the_source_of_the_user_config')
 
     def prepare():
         original = target.read_text() if target.exists() else ''
-        return original, configuration(original, root, data)
+        return original, configuration(original, root, data, codex, home)
 
     if not args.apply:
         original, updated = prepare()
-        if original != updated:
+        if original != updated or not dispatcher.is_file() or dispatcher.read_bytes() != dispatcher_source:
             print('tiber.mcp_configuration_needed remediation=rerun_installed_helper_with_--apply')
             return 1
         print('tiber.mcp_configuration_current agent_source=parent_env_vars')
@@ -97,6 +111,19 @@ def main():
         os.chmod(lock.name, 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
         original, updated = prepare()
+        data.mkdir(parents=True, exist_ok=True)
+        dispatcher_changed = not dispatcher.is_file() or dispatcher.read_bytes() != dispatcher_source
+        if dispatcher_changed:
+            with tempfile.NamedTemporaryFile(dir=data, prefix='.tiber-dispatch-', delete=False) as handle:
+                dispatcher_pending = Path(handle.name)
+                try:
+                    handle.write(dispatcher_source)
+                    handle.flush()
+                    os.fchmod(handle.fileno(), 0o700)
+                    os.fsync(handle.fileno())
+                    os.replace(dispatcher_pending, dispatcher)
+                finally:
+                    dispatcher_pending.unlink(missing_ok=True)
         if original != updated:
             pending = None
             try:
@@ -114,14 +141,17 @@ def main():
             finally:
                 if pending is not None:
                     pending.unlink(missing_ok=True)
-    print('tiber.mcp_configuration_ready agent_source=parent_env_vars remediation=restart_Codex_from_current_agent_shell')
+    if original != updated:
+        print('tiber.mcp_configuration_ready agent_source=parent_env_vars remediation=restart_Codex_from_current_agent_shell')
+    else:
+        print('tiber.mcp_configuration_current agent_source=parent_env_vars')
     return 0
 
 
 if __name__ == '__main__':
     try:
         sys.exit(main())
-    except (ValueError, KeyError, OSError, subprocess.SubprocessError):
+    except (ValueError, KeyError, TypeError, AttributeError, ImportError, OSError, subprocess.SubprocessError):
         # No config content, paths, environment values or subprocess stderr escape here.
         error = sys.exc_info()[1]
         if isinstance(error, ValueError) and str(error).startswith('tiber.mcp_configuration_failed '):

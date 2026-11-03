@@ -7,9 +7,9 @@ setup() {
 #!/bin/sh
 case "$*" in
   'plugin marketplace list --json') printf '%s\n' '{"marketplaces":[]}' ;;
-  'plugin list --json')
+  'plugin list --json'|'-C /tmp plugin list --json')
     if [ "${MOCK_INSTALLED:-}" = 1 ]; then
-      printf '%s\n' '{"installed":[{"pluginId":"development-system@ai-plugins","name":"development-system","version":"10.0.0"},{"pluginId":"tiber@ai-plugins","name":"tiber","version":"1.0.0"}],"available":[]}'
+      printf '%s\n' '{"installed":[{"pluginId":"development-system@ai-plugins","name":"development-system","version":"10.0.0"},{"pluginId":"tiber@ai-plugins","name":"tiber","version":"1.0.0","installed":true,"enabled":true}],"available":[]}'
     else
       printf '%s\n' '{"installed":[],"available":[{"name":"github","pluginId":"github@curated"},{"name":"coderabbit","pluginId":"coderabbit@curated"}]}'
     fi
@@ -23,7 +23,7 @@ SH
   export CODEX_HOME="$TMPROOT/codex"
   local installed_root="$CODEX_HOME/plugins/cache/ai-plugins/tiber/1.0.0"
   mkdir -p "$installed_root/scripts" "$installed_root/bin"
-  cp "$ROOT/plugins/tiber/scripts/configure-codex-mcp.py" "$installed_root/scripts/"
+  cp "$ROOT/plugins/tiber/scripts/"*.py "$installed_root/scripts/"
   printf '%s\n' '{"version":"1.0.0"}' >"$installed_root/plugin.json"
   printf '#!/bin/sh\nexit 0\n' >"$installed_root/bin/tiber"
   chmod +x "$installed_root/bin/tiber"
