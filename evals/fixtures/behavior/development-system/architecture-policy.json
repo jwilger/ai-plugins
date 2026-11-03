@@ -322,7 +322,7 @@
   {
     "case_id": "architecture-policy-unadopted",
     "behavior": "Respects explicit architecture-policy adoption: unadopted",
-    "prompt": "Advisory scenario; inspect installed guidance if useful, do not modify any repository. We just installed Development System. Our project has no architecture/ADR policy and no ARCHITECTURE.md. A routine CLI fix passes our existing tests. Must we create the document, adopt immutable ADRs, split commits and run the full checker before delivery? Explain the recommendation and adoption boundary.",
+    "prompt": "Advisory scenario; inspect installed guidance if useful, do not modify any repository. We just installed Development System. Our project has no architecture/ADR policy and no ARCHITECTURE.md. A routine CLI fix passes our existing tests. Must we create the document, adopt immutable ADRs, split commits and run the full checker before delivery? Explain the recommendation and adoption boundary. Also explain what the optional checker reports when no rules have been selected, and whether that establishes compliance.",
     "tags": ["development-system", "architecture", "adr", "advisory"],
     "plugins": ["development-system"],
     "skills": ["development-workflow"],
@@ -384,7 +384,7 @@
   {
     "case_id": "architecture-policy-existing-overrides",
     "behavior": "Respects explicit architecture-policy adoption: existing-overrides",
-    "prompt": "Advisory scenario; inspect installed guidance if useful, do not modify any repository. During setup we find current project instructions use docs/design.md for architecture, include ADR backlinks intentionally, and allow correcting merged ADR typos. The owner wants to keep those conventions and asks about the stronger recommendations. Should setup rewrite them or enable the bundled full checker?",
+    "prompt": "Advisory scenario; inspect installed guidance if useful, do not modify any repository. During setup we find current project instructions use docs/design.md for architecture, include ADR backlinks intentionally, and allow correcting merged ADR typos. The owner wants to keep those conventions and asks about the stronger recommendations. Should setup rewrite them or enable the bundled full checker? Briefly present the stronger profile recommendation and its benefits and costs while preserving those project choices.",
     "tags": ["development-system", "architecture", "adr", "advisory"],
     "plugins": ["development-system"],
     "skills": ["setup"],
