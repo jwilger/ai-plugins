@@ -21,6 +21,34 @@ teardown() {
   fi
 }
 
+@test "combined plugin server instructions leave room for tool schemas and other plugins" {
+  initialize_server "$ROOT/plugins/tiber/bin/tiber" mcp stdio >"$TMPROOT/tiber-init.json"
+  list_server_tools "$ROOT/plugins/tiber/bin/tiber" mcp stdio >"$TMPROOT/tiber-tools.json"
+  initialize_server "$ROOT/plugins/development-system/bin/development-discipline-mcp" >"$TMPROOT/discipline-init.json"
+  list_server_tools "$ROOT/plugins/development-system/bin/development-discipline-mcp" >"$TMPROOT/discipline-tools.json"
+
+  # Codex repeats initialize.instructions in every tool definition. Keep our
+  # contribution below 10 KB of its shared 64 KB agent-plugin budget; this is
+  # a guidance budget, not a substitute for actual Codex inventory checks.
+  run python3 - "$TMPROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+repeated_bytes = 0
+for server in ("tiber", "discipline"):
+    initialization = json.loads((root / f"{server}-init.json").read_text())["result"]
+    tools = json.loads((root / f"{server}-tools.json").read_text())["result"]["tools"]
+    instructions = initialization["instructions"].encode("utf-8")
+    assert instructions and tools, f"{server}: missing guidance or tool inventory"
+    repeated_bytes += len(instructions) * len(tools)
+assert repeated_bytes <= 10_000, f"repeated server instructions consume {repeated_bytes} bytes (budget: 10000)"
+print(f"repeated server instructions: {repeated_bytes}/10000 bytes")
+PY
+  [ "$status" -eq 0 ]
+}
+
 initialize_server() {
   local command=$1
   shift

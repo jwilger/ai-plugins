@@ -10,7 +10,7 @@
         "source": "local",
         "path": "./plugins/development-system"
       },
-      "version": "10.0.1",
+      "version": "10.0.2",
       "policy": {
         "installation": "AVAILABLE",
         "authentication": "ON_INSTALL"
@@ -23,7 +23,7 @@
         "source": "local",
         "path": "./plugins/tiber"
       },
-      "version": "1.0.1",
+      "version": "1.0.2",
       "category": "Developer Tools",
       "description": "Independent Git-backed task board, CLI, MCP server, and dashboard.",
       "keywords": ["tasks", "git", "coordination"]

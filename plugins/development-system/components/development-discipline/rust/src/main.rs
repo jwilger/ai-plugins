@@ -12398,7 +12398,7 @@ impl ServiceSurface {
                 "Use final_review.assess_risk before final_review.plan, submit only assignment-bound reviewer evidence, and advance through the canonical review transitions."
             }
             Self::PluginAdvisory => {
-                "Inspect repositories, coordinate structured multi-agent final review, and use confirmed setup.apply only for deterministic repository-local configuration. This plugin is advisory: it does not execute project mutations, restrict ordinary harness tools, or authorize external actions. If a Git-backed final-review write is blocked by the Codex sandbox, call development_system.codex_sandbox_setup and retry the same structured MCP operation."
+                "Advisory setup/review; no external authority. For sandbox recovery, call development_system.codex_sandbox_setup, then retry the same MCP operation."
             }
             Self::WorkspaceReader => {
                 "Inspect files and repository state through workspace-reader tools. This service has no project mutation capability."

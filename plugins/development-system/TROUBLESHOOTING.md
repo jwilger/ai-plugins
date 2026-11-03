@@ -2,6 +2,25 @@
 
 Configured development workflows for Codex.
 
+## Missing MCP tools in Codex
+
+Codex 0.166.0 limits agent-plugin MCP definitions to 8,000 bytes per tool and
+64,000 bytes across all plugins. Tools exceeding that shared budget are hidden,
+including from Code Mode. Separate plugins do not receive separate allowances.
+See the [Codex implementation](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/core/src/mcp_tool_exposure.rs).
+
+Codex repeats server initialization guidance in every tool definition. Keep that
+guidance short and link to detailed recovery resources instead. Our startup
+regression limits the combined repeated guidance to 10,000 bytes; this reserves
+room for schemas and other plugins but cannot guarantee arbitrary combinations
+fit Codex's shared limit.
+
+If Tiber tools disappear alphabetically after `metadata`, upgrade both plugins
+to Development System 10.0.2 / Tiber 1.0.2 or newer and open a fresh session.
+These versions shorten initialization guidance without removing tools or changing
+their schemas. Compare the session inventory with each server's `tools/list`;
+successful discovery alone does not prove Codex exposes every tool.
+
 ## Host-local binaries
 
 Development System owns `development-discipline-mcp`. From the marketplace

@@ -12,7 +12,7 @@ pub fn codex_sandbox_setup() -> String {
         "Do not run the whole Tiber MCP server outside the sandbox unless these narrow permissions are insufficient.",
         "",
         "If a signed commit fails with `Couldn't get agent socket?`, check the plugin-owned signing-agent-socket setting and the active SSH agent.",
-        "Codex loads Tiber from the Development System plugin's root mcp.json. The bundled launcher reads an absolute socket path from $PLUGIN_DATA/signing-agent-socket, with an XDG config fallback outside a portable harness.",
+        "Codex loads Tiber from the Tiber plugin's root mcp.json. Its launcher reads an absolute socket path from $PLUGIN_DATA/signing-agent-socket, with an XDG config fallback outside a portable harness.",
         "Never send a signing agent socket to a PATH-resolved, repo-relative, or otherwise project-controlled MCP launcher.",
         "Do not try to fix SSH signing by enabling danger-full-access, unsandboxing the whole MCP server, or approving every git command.",
         "",
@@ -124,7 +124,7 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
                 "name": "tiber",
                 "version": env!("CARGO_PKG_VERSION")
             },
-            "instructions": "Mutating task tools publish an EventCore transaction to origin/tiber on success. For Codex sandbox write failures, call tiber.codex_sandbox_setup or read tasks://codex-sandbox before retrying the same structured Tiber MCP operation. Use case-by-case approval for raw Git prefixes; persist approval only when the harness can scope it to the exact Tiber-internal operation. Do not run the whole Tiber MCP server outside the sandbox unless narrow Git permissions are insufficient."
+            "instructions": "Mutations publish to origin/tiber. For sandbox recovery, read tasks://codex-sandbox before retrying the same MCP operation."
         }),
         "tools/list" => json!({ "tools": tools() }),
         "resources/list" => json!({ "resources": resources()? }),
