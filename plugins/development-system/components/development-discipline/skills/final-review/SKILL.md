@@ -306,6 +306,19 @@ the matching first-iteration lens. Do not rely on conversation context alone.
 
 ## Default Lenses
 
+Strongly recommend the [architecture and decision-history practices](../../../../skills/engineering-standards/references/architecture-policy.md)
+for project adoption. First inspect the project's current architecture and
+local policy. Existing conventions and explicit user choices take precedence;
+installation or setup alone does not adopt these recommendations. Record the
+accepted subset, any overrides, document paths and prospective adoption boundary
+in project-owned guidance. Do not add requirements or block delivery solely
+because an unadopted recommendation is absent.
+
+For adopted rules, check the actual candidate and resulting trunk commits,
+including squash delivery. Use only the corresponding checker rules and retain
+semantic review evidence separately from mechanical receipts. Offer unadopted
+practices as recommendations, not findings of noncompliance.
+
 Use repository-agnostic lenses by default:
 
 - `correctness-behavior`: requirements, edge cases, regressions, and observable behavior.
@@ -338,7 +351,9 @@ Use repository-agnostic lenses by default:
   restatement when the findings and disposition already make the action clear.
 - `security-safety`: secrets, injection, permissions, unsafe subprocess/file/network behavior, and trust boundaries.
 - `safety-human-harm`: plausible failures that could harm people or the physical world in the intended deployment.
-- `architecture-maintainability`: fit with local patterns, coupling, complexity, naming, and future change cost.
+- `architecture-maintainability`: current architecture authority and code
+  conformance, adopted architecture/ADR policy above, fit with local patterns, coupling,
+  complexity, naming, and future change cost.
 - `operability-user-impact`: failure messages, ergonomics, configuration, migration, observability, and recovery.
 - `release-integration`: versioning, compatibility, packaging, docs, CI, rollout, and downstream integration.
 - `production-risk-footguns`: latent traps, fragile defaults, data-access or resource-use patterns that pass lower environments but fail at production scale, and burst/DOS-like load behavior.

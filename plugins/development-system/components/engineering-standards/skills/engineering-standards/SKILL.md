@@ -114,9 +114,15 @@ here.
 
 ## Documentation
 
-- Record an **ADR for every architecturally significant or hard-to-reverse
-  decision** (context, decision, consequences, alternatives considered, and the
-  conditions under which to revisit), not for routine implementation choices.
+Strongly recommend the [architecture and decision-history practices](../../../../skills/engineering-standards/references/architecture-policy.md)
+for explicit project adoption. These include self-contained current architecture,
+significant-only ADRs with rejected alternatives and reconsideration conditions,
+substantive same-commit pairing, at most one new ADR per commit, preserved merged
+history with supersession, resulting-delivery checks, and sequential bootstrap.
+Respect existing policy and overrides; apply requirements only to the adopted
+subset from its recorded prospective boundary. Missing unadopted practices are
+recommendations, not delivery blockers. Generate no new policy without adoption.
+
 - Keep guardrails **harness-agnostic** (e.g. `AGENTS.md` + `docs/rules/`);
   harness-specific instruction files are thin pointers.
 

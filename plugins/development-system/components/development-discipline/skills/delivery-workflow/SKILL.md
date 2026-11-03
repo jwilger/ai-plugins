@@ -42,6 +42,19 @@ consequential. Do not invent a pull request.
 
 ## Select one mode
 
+Strongly recommend the [architecture and decision-history practices](../../../../skills/engineering-standards/references/architecture-policy.md)
+for project adoption. First inspect the project's current architecture and
+local policy. Existing conventions and explicit user choices take precedence;
+installation or setup alone does not adopt these recommendations. Record the
+accepted subset, any overrides, document paths and prospective adoption boundary
+in project-owned guidance. Do not add requirements or block delivery solely
+because an unadopted recommendation is absent.
+
+For adopted rules, check the actual candidate and resulting trunk commits,
+including squash delivery. Use only the corresponding checker rules and retain
+semantic review evidence separately from mechanical receipts. Offer unadopted
+practices as recommendations, not findings of noncompliance.
+
 ### Direct-to-trunk
 
 Complete planned implementation and local verification before the full multi-lens review. Preserve signed, exact-verified local checkpoint commits as work progresses. In direct-to-trunk mode, review the completed local batch against the pinned baseline BEFORE pushing any of that batch to trunk; ordinary local increments do not each require full review. In PR/MR mode, authorized branch pushes and draft PR/MR creation may precede review, but creating a ready/non-draft PR/MR or marking a draft ready requires current local multi-lens review. Before pushing source changes to any existing ready PR/MR, FIRST return it to draft and confirm that transition succeeded, even when auto-merge is already off; only then disable auto-merge and confirm it is off. Do not push if either safeguard fails. After pushing, renew affected review before marking it ready, enabling auto-merge, or entering a merge queue. Source changes, baseline changes, scope changes, and conflict resolution invalidate affected review evidence; metadata-only identity changes require fresh exact verification. Local-only review uses the verified local identity and requires no remote CI. Remote CI follows push and remains a separate exact-SHA readiness gate; a failed build preempts work through CI recovery. No passing build, forge approval, or auto-merge substitutes for local multi-lens review.

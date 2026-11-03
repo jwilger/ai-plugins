@@ -11,6 +11,10 @@ first, then realize each goal in _that_ stack's idioms. Generate artifacts
 tailored to what you detect and have the human confirm before writing — never
 copy a fixed bootstrap or assume a language. For the standards themselves, defer
 to the `engineering-standards` guardrail skill; this skill operationalizes them.
+Strongly recommend the [architecture and decision-history practices](../../../../skills/engineering-standards/references/architecture-policy.md).
+They are explicit project-adoption choices. Respect existing policy and record
+accepted rules, overrides and the prospective boundary before generating them.
+Declined or unadopted recommendations do not block scaffold completion.
 
 ## 1. Detect first
 
@@ -19,8 +23,10 @@ Before generating anything, detect:
 - **Language(s) and package manager / build tool** (manifests, lockfiles).
 - **Test runner**, and whether an acceptance/BDD layer already exists.
 - **Whether `nix` is available** (and `direnv`); the **OS / platform**.
-- **Existing** toolchain pins, lint config, CI config, ADRs — extend these,
-  never clobber them.
+- **Existing** toolchain pins, lint config, CI config, `ARCHITECTURE.md`, and ADRs.
+  Identify conflicting authority, ADR dependencies, and history-editing rules.
+  Propose prospective adoption; preserve merged ADRs and unrelated work rather
+  than rewriting historical records or reconstructing old pairing commits.
 
 Summarize what you found and the proposed plan, then confirm with the human
 before writing files.
@@ -28,8 +34,10 @@ before writing files.
 ## 2. Realize each goal in the detected stack
 
 For each area: hit the **goal**, understand the **why**, then realize it with the
-detected stack's idioms. Skip an area only when the ecosystem genuinely cannot
-support it — and record that gap as an ADR.
+detected stack's idioms. Architecture/ADR practices in section f are optional
+project-adoption choices; for the other areas, skip only when the ecosystem
+genuinely cannot support them. Record gaps in the owning project guidance; create an ADR only when
+the resulting decision is architecturally significant or hard to reverse.
 
 ### a. Reproducible dev environment
 
@@ -81,9 +89,9 @@ support it — and record that gap as an ADR.
 - **Realize:** if the ecosystem has a mature mutation-testing tool, wire it,
   define the score denominator, and target 100% of actionable mutants in CI
   (release-gated if it is slow). Record verified equivalent/non-viable mutants,
-  tool errors, and timeouts explicitly. If no mature tool exists, record the gap
-  in an ADR and compensate with the strongest property-based and coverage
-  discipline the stack offers.
+  tool errors, and timeouts explicitly. If no mature tool exists, document the gap
+  in testing guidance and compensate with the strongest property-based and
+  coverage discipline the stack offers. The gap alone does not require an ADR.
 
 ### e. Black-box BDD / acceptance harness
 
@@ -102,13 +110,37 @@ support it — and record that gap as an ADR.
 
 ### f. Decisions + guardrail docs
 
-- **Goal:** every architecturally significant or hard-to-reverse decision is
-  recorded, and the standards live in one harness-agnostic place.
-- **Why:** future readers — human and agent — need the _why_ and the rules
-  without a tool-specific scavenger hunt.
-- **Realize:** create `docs/adr/` with a MADR-lite template and an `NNNN-*.md`
-  numbering scheme; seed ADR 0001 with the overall architecture. Put the
-  guardrails in `AGENTS.md` + `docs/rules/`.
+Strongly recommend the following profile; generate only the rules explicitly
+adopted by the project, adapting document paths and overrides. Partial adoption
+is valid, and existing policy takes precedence. The requirements below describe
+the full profile after adoption, not a prerequisite for using this plugin.
+
+- **Goal:** root `ARCHITECTURE.md` is the self-contained authority for current
+  architecture and goals; significant decision rationale remains in immutable
+  historical ADRs. Code conforms to the architecture document.
+- **Why:** developers and reviewers need current requirements without
+  reconstructing them from decision history, and rationale must survive changes.
+- **Realize:** establish `ARCHITECTURE.md` with boundaries, responsibilities,
+  flows, invariants, constraints, goals, and evidence distinguishing implemented
+  capabilities from intent. Include no ADR backlinks, source tables, or
+  directions to consult ADRs for current requirements. Create `docs/adr/` and a
+  historical-decision template with context, decision, rejected alternatives,
+  consequences, and reconsideration conditions. Do not seed a monolithic
+  overall-architecture ADR or create ADRs for routine choices.
+- Introduce significant decisions one at a time: one new ADR and its substantive
+  cumulative architecture update, verification, independent review, then commit.
+  Each intermediate architecture contains only decisions introduced so far.
+  Never write every ADR first and manufacture incremental history afterward.
+  Premerge edits require the corresponding substantive architecture update in
+  the same commit. Merged ADRs change only in superseded status alongside their
+  replacement decision and paired architecture update; other ADRs in an adding
+  commit may change only for that supersession.
+- Generate `AGENTS.md` and `docs/rules/` guidance for the adopted subset,
+  including historical-rationale consultation before retrying rejected ideas
+  and evidence of materially changed context. Include commit and resulting
+  trunk/squash checks: at most one new ADR per commit, never cosmetic pairing,
+  separate delivery units when a squash would combine new decisions. Distinguish
+  configured checks from actually verified mechanical and semantic enforcement.
 
 ### g. CI/CD themes
 
@@ -146,7 +178,8 @@ support it — and record that gap as an ADR.
 1. Detect the stack + machine, read existing config, summarize the plan, and
    confirm with the human.
 2. Realize each applicable goal, generating artifacts tailored to the stack;
-   adapt or skip what the ecosystem can't support and record the gap as an ADR.
+   adapt or skip what the ecosystem can't support and document the gap in its
+   owning guidance. Apply the significance threshold before creating any ADR.
 3. Install Lefthook and wire separate `pre-commit` and `pre-push` jobs from the
    detected stack. The commit hook owns fast format, lint, unit, manifest, and
    configuration checks; the push hook owns the remaining local verification

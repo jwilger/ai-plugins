@@ -68,6 +68,23 @@ Tiber plugin owns `tiber`. Default marketplace installation installs both.
    source/test globs intentional. Do not require known directory names or a
    detector-supported stack.
 
+   Strongly recommend the [architecture and decision-history practices](../engineering-standards/references/architecture-policy.md)
+   during setup. Inventory existing architecture, ADRs, review and delivery
+   conventions first. Present the practices and tradeoffs as adoption choices;
+   respect existing policy, including alternate paths, ADR backlinks, editable
+   records or batching when the project chooses them. Do not silently migrate
+   policy or treat unadopted practices as setup blockers.
+
+   Record only the accepted subset, overrides and prospective boundary in
+   project-owned guidance. Setup/configuration application and plugin installation
+   do not imply adoption. For authorized scaffolding, load the retained scaffold
+   templates, adapt them to the accepted choices, and generate only adopted
+   requirements. No new configuration schema keys are needed for this policy.
+   Offer optional checker integration for supported adopted rules; do not enable
+   the full profile implicitly. Report unsupported conventions and semantic
+   review needs honestly. Preserve unrelated work and historical records during
+   any separately authorized migration; never reconstruct old commits.
+
 3. Call `setup.preview` again with the complete `proposed_configuration` TOML
    and explicit, independent `pre_commit_command_ids` and
    `pre_push_command_ids`. The preview validates the proposal and shows the

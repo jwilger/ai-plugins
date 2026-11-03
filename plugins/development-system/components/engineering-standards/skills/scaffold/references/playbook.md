@@ -1,8 +1,10 @@
 # Scaffold playbook — per-ecosystem realizations
 
-Concrete options and templates for each scaffold goal. Everything here is an
-**example menu**, not a requirement — pick what fits the detected stack, and
-never adopt a named tool, forge, or registry just because it appears below.
+Concrete options and templates for each scaffold goal. Named tools are an
+**example menu** — pick what fits the detected stack, and never adopt a named
+tool, forge, or registry just because it appears below. The architecture authority
+and decision-history practices in section f are strong adoption recommendations,
+not mandatory project requirements.
 Load this file only when you need the concrete artifact for the stack you
 detected.
 
@@ -64,7 +66,8 @@ decisions. Example strict baselines:
 - **Elixir:** Credo strict + `mix compile --warnings-as-errors` + Dialyzer.
 - **Go:** golangci-lint with a wide enabled set + `go vet`.
 
-Record each relaxation inline with a reason and (where it is policy) in an ADR.
+Record each relaxation inline with a reason and in its owning rule when needed.
+Create an ADR only for an architecturally significant or hard-to-reverse decision.
 Forbid panic-prone constructs on production paths regardless of language.
 
 ## d. Mutation testing
@@ -80,8 +83,9 @@ equivalent/non-viable mutants, tool errors, and timeouts. Gate it in CI
 - JVM → PIT
 - Ruby → mutant
 
-If no mature tool exists for the stack, record the gap as an ADR and lean on
-property-based testing and high, meaningful coverage instead.
+If no mature tool exists for the stack, record the gap in testing guidance and
+lean on property-based testing and high, meaningful coverage instead. A tool gap
+alone does not require an ADR.
 
 ## e. Black-box BDD / acceptance harness
 
@@ -100,8 +104,52 @@ is verified per slice.
 
 ## f. Decisions + guardrail docs
 
-**ADRs** — create `docs/adr/` with `NNNN-title.md` files and this MADR-lite
-template; seed `0001-overall-architecture.md`:
+Strongly recommend the [architecture and decision-history practices](../../../../../skills/engineering-standards/references/architecture-policy.md).
+Present these templates as a full-profile proposal. Record explicit adoption,
+accepted rules, overrides, document paths and prospective boundary in project
+policy before generation. Respect existing conventions and partial adoption;
+leave declined rules out of generated requirements and gates. The examples below
+apply only where adopted; installation and setup are not adoption.
+
+**Current architecture** — create root `ARCHITECTURE.md`, the authoritative,
+self-contained account of current architecture and goals. New and modified code
+must conform to it. Fill in project-specific requirements and evidence; this
+outline is a starting point, not permission to leave requirements implicit:
+
+```markdown
+# Architecture
+
+## Purpose and goals
+
+The outcomes the architecture must support, including future intent.
+
+## Responsibilities and boundaries
+
+Components, ownership, dependencies, interfaces, and external systems.
+
+## Data and control flows
+
+Key operations, state, persistence, failure handling, and trust boundaries.
+
+## Constraints and invariants
+
+Requirements that development and review must enforce.
+
+## Verified implementation and delivery
+
+What exists, evidence supporting each material capability, and known gaps.
+Keep intended future capabilities distinct from verified implementation.
+```
+
+Include no ADR backlinks, source tables, or directions to consult ADRs for
+current requirements in that document. Readers must not reconstruct the current
+design from historical records.
+
+**Historical decisions** — create `docs/adr/` with `NNNN-title.md` files for
+architecturally significant or hard-to-reverse decisions only. Do not seed an
+overall-architecture ADR or generate ADRs for routine choices. Consult existing
+ADRs for rationale and rejected alternatives; identify materially changed
+context before retrying a rejected approach. Use this historical template:
 
 ```markdown
 # ADR-NNNN: <title>
@@ -141,14 +189,39 @@ Description, and why it was rejected.
 ## Revisit when
 
 The conditions under which this decision should be reopened.
-
-## Related
-
-- ADR-NNNN
 ```
 
-**Guardrail docs** — put the canonical rules in `AGENTS.md` + `docs/rules/`.
-`AGENTS.md` links to `docs/rules/`.
+Introduce decisions sequentially: one new ADR, its substantive cumulative
+architecture update, verification, independent review, then its commit. Each
+intermediate architecture stands alone and contains only decisions introduced
+so far. Do not write all ADRs first and manufacture incremental history later.
+
+**Generated guardrail docs** — put engineering rules in `AGENTS.md` +
+`docs/rules/`, with links from `AGENTS.md`. Include only adopted requirements
+from the following full-profile recommendations:
+
+- `ARCHITECTURE.md` governs current architecture and goals; ADRs preserve history.
+  Distinguish intent from verified implementation and delivery.
+- Each commit adds at most one ADR, paired with the corresponding substantive
+  architecture update in that same commit. Other ADRs may change in an adding
+  commit only to mark them superseded by the new decision.
+- Every premerge ADR edit also requires its corresponding substantive architecture
+  update in the same commit. Cosmetic or unrelated edits cannot satisfy pairing.
+- Once merged to main/trunk, preserve the ADR unchanged except its superseded
+  status alongside a replacement decision and paired architecture update.
+  Corrections, deletion, and renaming cannot bypass history preservation.
+- Check resulting trunk commits and the delivery strategy. Split delivery units
+  when a squash would combine multiple new ADRs; valid branch commits alone do
+  not establish valid delivery.
+- Review semantic correspondence, architecture authority, absence of ADR
+  dependencies, and evidence for implementation claims. Report which checks are
+  configured and which were actually run; mechanical checks alone cannot prove
+  semantic correspondence or that bootstrap occurred sequentially.
+
+For existing projects, inventory conflicting authority and guidance and propose
+prospective adoption. Record the adoption boundary outside merged ADRs, preserve
+merged history and unrelated work, and consolidate current requirements without
+reconstructing old commits. Consuming-project edits require their own authority.
 
 Nothing canonical should live under a single harness's directory.
 

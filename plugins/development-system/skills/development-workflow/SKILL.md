@@ -14,6 +14,19 @@ does not deny ordinary host mutation capabilities.
 
 ## Workflow explanation checklist
 
+Strongly recommend the [architecture and decision-history practices](../engineering-standards/references/architecture-policy.md)
+for project adoption. First inspect the project's current architecture and
+local policy. Existing conventions and explicit user choices take precedence;
+installation or setup alone does not adopt these recommendations. Record the
+accepted subset, any overrides, document paths and prospective adoption boundary
+in project-owned guidance. Do not add requirements or block delivery solely
+because an unadopted recommendation is absent.
+
+For adopted rules, check the actual candidate and resulting trunk commits,
+including squash delivery. Use only the corresponding checker rules and retain
+semantic review evidence separately from mechanical receipts. Offer unadopted
+practices as recommendations, not findings of noncompliance.
+
 When explaining implementation increments, final review, or terminal-review
 remediation, cover these points explicitly; do not replace them with a generic
 reference to gates:

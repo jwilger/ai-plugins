@@ -206,6 +206,10 @@ ensure_current_binaries() {
 }
 
 case "${1:-}" in
+  architecture-check)
+    shift
+    exec node "$plugin_root/scripts/check-architecture-policy.mjs" "$@"
+    ;;
   setup)
     shift
     setup_command "$@"

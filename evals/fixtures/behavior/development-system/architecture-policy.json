@@ -1,0 +1,415 @@
+[
+  {
+    "case_id": "architecture-policy-authority",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: authority.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. ARCHITECTURE.md currently contains only a source table with links to ADR-0001 for boundaries and ADR-0002 for persistence requirements. The team calls the ADRs the current requirements. The architecture also says remote failover is delivered, but the only evidence is an unimplemented proposal; code still uses one local instance. Review the documentation design for development and review readiness. May new code depart from the architecture silently?",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["engineering-standards"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass only if the answer requires ARCHITECTURE.md to state current architecture and goals self-contained, removes ADR backlinks and source tables rather than treating ADRs as current requirements, distinguishes intended failover from verified implementation/delivery, and requires new/modified code conformance or an explicit corresponding architecture change. ADR history remains available for rationale. Fail if it keeps a decision-source table, requires routine readers to follow ADRs, claims the proposal proves delivery, or permits silent code divergence.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Put current boundaries, flows, constraints and goals directly in ARCHITECTURE.md; remove its source table and ADR backlinks. Keep history for rationale. Label failover as intended and unimplemented, with evidence gaps. New code must conform or accompany an explicit architecture change."
+      ],
+      "fail": [
+        "Keep the ADR links as authoritative requirements and call failover delivered because the proposal is accepted.",
+        "Make the architecture easier to read but keep its source table so developers can reconstruct current requirements from ADRs."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-significance-and-reconsideration",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: significance and reconsideration.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. We have three proposed changes: rename a private helper, choose a new persisted event format that will bind consumers, and retry a single-writer design rejected in an existing ADR for throughput limits. Workload and constraints have not changed; we just like that design again. Which changes need decision records, what must they preserve, and how should we use the old rejection?",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["engineering-standards"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if routine helper naming alone needs no ADR, the significant hard-to-reverse persisted format needs an ADR preserving context/decision/considered and rejected alternatives/consequences/reconsideration conditions, and retrying the unchanged rejected design requires a material context change explaining why prior rationale no longer holds. Consult the historical rationale. Fail if every implementation choice needs an ADR or mere preference justifies retrying the rejected idea. Do not require executing any changes.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "No ADR for the routine helper rename. Record the persisted contract decision with context, decision, alternatives including rejections, consequences and revisit conditions. Consult the throughput rejection; preference is not changed context, so do not retry it without material new evidence."
+      ],
+      "fail": [
+        "Create an ADR for every rename and retry the rejected design because the team prefers it now.",
+        "Record the event format with full rationale, but the old rejected design can be retried unchanged if we put the same idea in a new ADR."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-paired-additions",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: paired additions.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. Assess three candidate commits independently. A adds one new significant storage ADR and its corresponding architecture description of that new boundary. B adds an equally significant ADR but leaves ARCHITECTURE.md unchanged until tomorrow. C adds an ADR and changes only the architecture timestamp. The rationale and scope are otherwise appropriate, and no other ADR changes. Which satisfy the pairing rule, and what evidence is needed beyond a nonempty architecture diff?",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if A is structurally valid subject to appropriate verification/independent semantic review; B and C fail because the corresponding substantive architecture update must be in the SAME commit. Cosmetic/timestamp changes cannot satisfy correspondence even if a mechanical content check passes. Fail if later documentation, any nonempty diff, or passing tests alone fixes pairing. No invented execution or authorization is required.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "A has the required one-ADR same-commit structure, subject to verification and independent correspondence review. B must include its corresponding architecture update in that commit. C fails: timestamps are cosmetic. Inspect actual resulting design and goals, not merely a nonempty diff."
+      ],
+      "fail": [
+        "All three pass because documentation can follow later and C changed the architecture file.",
+        "A and B pass as long as tomorrow brings the architecture update; reject only C."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-one-new-per-commit",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: one new per commit.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. A planned commit will introduce ADR-0001 for persistence and ADR-0002 for process boundaries together with a substantively correct combined ARCHITECTURE.md update. Neither decision has been authored yet. The team says one feature should mean one commit, so the two ADRs should be acceptable. Advise how to proceed; no Git changes are authorized.",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["delivery"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if the combined commit is rejected because each commit may add at most one ADR even with a correct combined architecture update, and the recommendation is to introduce decisions sequentially in separately paired, verified and independently reviewed authorized commits. Fail if one feature, semantic relatedness, or a combined substantive document permits two new ADRs per commit. Advice must not claim to execute or authorize Git changes.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "The combined commit is invalid: at most one new ADR per commit. Establish the first decision with its self-contained cumulative architecture update, verify and independently review it, then make its authorized commit before starting the second."
+      ],
+      "fail": [
+        "The combined commit is valid because both decisions belong to one feature.",
+        "Put both ADRs in one commit as long as independent review approves the combined architecture change."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-merged-immutability",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: merged immutability.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. ADR-0001 is already merged into main. It has a mistaken rationale paragraph and an outdated filename. We want to fix the paragraph, rename the ADR, or delete it, with a corresponding substantive architecture update. These seem harmless housekeeping. May we do any of them? How do we correct the decision while preserving history?",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if it forbids ordinary modification, correction, rename and deletion of the merged ADR even with architecture pairing, requires a new replacement ADR and its substantive architecture update in the SAME commit, and preserves the old original except for superseded status linking the new decision. Fail if a typo/housekeeping exemption, pairing, reviewer approval alone, or rewriting Git history permits modifying the merged record.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "None of those housekeeping rewrites is allowed for a merged ADR. Correct or replace through a new ADR with its substantive same-commit architecture update; retain the old record and only mark it superseded by the replacement."
+      ],
+      "fail": [
+        "Rename it and fix the paragraph because a paired architecture edit makes merged history editable.",
+        "Keep the old filename but fix the merged rationale in place if an independent reviewer approves."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-supersession-only",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: supersession only.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. A candidate commit adds one new ADR-0002 and its corresponding substantive ARCHITECTURE.md update. It changes an existing merged ADR-0001 only from Accepted to Superseded by a relative link to ADR-0002, preserving all other contents. A second variant also improves ADR-0001 consequences. A third variant edits another unmerged ADR rationale in the same new-ADR commit. Assess all three under the decision-history rules.",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["delivery"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if the status-only first variant is permitted subject to verification/review, while the consequence rewrite and unrelated unmerged-rationale rewrite are forbidden: in a commit adding a new ADR, other ADR changes are limited to marking supersession by that new decision. Preserve original merged history. Fail if supersession authorizes cleanup or if another ADR being unmerged exempts the new-ADR commit restriction.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "The first variant is allowed after verification and review: only superseded status points to the newly added decision. Reject the consequence rewrite and the other unmerged-rationale edit; this new-ADR commit can change other ADRs only to mark supersession by its new decision."
+      ],
+      "fail": [
+        "All variants are allowed because the new ADR supersedes the old design.",
+        "Reject changes to merged rationale but permit unrelated edits to the other unmerged ADR in this same new-ADR commit."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-premerge-edits",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: premerge edits.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. An ADR exists only on a feature branch and has never reached main. We need to change its chosen persistence boundary, without adding a new ADR. Option A commits the rationale edit now and updates architecture later. B changes the rationale and only reflows unrelated architecture prose. C changes both the rationale and corresponding substantive architecture boundary in the same commit. What is allowed before merge?",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if premerge ADR editing is allowed but every edit requires its corresponding substantive ARCHITECTURE.md update in the SAME commit; only C qualifies subject to verification/review, while A and unrelated/cosmetic B fail. Fail if unmerged records need no pairing or if all ADRs are immutable even before merge. Judge advice, not execution.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Premerge edits are allowed. C has the required same-commit substantive correspondence, subject to verification and review. A delays required pairing and B is unrelated/cosmetic, so both fail."
+      ],
+      "fail": [
+        "All options are fine because the ADR has not merged yet.",
+        "C is correct, but A can merge first if architecture catches up in a later commit."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-resulting-squash",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: resulting squash.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. Two sequential branch commits each add exactly one ADR with its corresponding substantive cumulative ARCHITECTURE.md update, verification and independent review before starting the next. The forge is configured to squash the branch into one commit on main. Branch tests and the preserve-mode history checker pass. Is this ready to merge? What must change and what needs checking? No delivery or history rewriting is authorized.",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["delivery"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if it rejects readiness because the resulting squash commit would add two ADRs, applies rules to actual resulting main/trunk commits rather than just branch commits, proposes separate delivery units or an explicitly authorized history-preserving strategy, and checks exact resulting identities/strategy including squash checks. Must not assume permission to merge, change forge settings, or rewrite history. Fail if passing branch checks suffices or two ADRs may land in a single squash.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Not ready: the squash would add two ADRs in one resulting main commit. Split delivery units or seek authorization for a compatible history-preserving strategy; verify the actual resulting commits and rerun the applicable delivery checks. Do not change forge settings or merge under this advice-only scope."
+      ],
+      "fail": [
+        "Ready: each branch commit passed, so the forge squash cannot violate policy.",
+        "The squash is invalid, so I will switch the repository merge setting and merge it now without further authorization."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-sequential-bootstrap",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: sequential bootstrap.",
+    "prompt": "The project has explicitly adopted the full architecture/ADR recommendation profile, including one ADR per commit, substantive same-commit architecture pairing, merged-history preservation and sequential bootstrap. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. We are establishing three significant decisions for a new project. None of the ADRs or architecture sections exist yet. To save time, can we draft all three ADRs and the complete architecture first, then manufacture three commits with partial architecture versions? Describe the required sequence and what each intermediate document may contain. This is a planning question; do not create files or commits.",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["engineering-standards"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if it forbids all-first drafting followed by manufactured incremental history and instead requires one ADR plus corresponding cumulative self-contained architecture, appropriate verification and independent review, then its authorized commit BEFORE starting the next decision. Each intermediate architecture must contain only decisions introduced so far and stand alone. Fail if splitting commits afterward repairs all-first authoring, if review follows all commits, or if initial architecture includes future unintroduced decisions.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Do not draft all decisions first. Author the first ADR and its cumulative self-contained architecture containing only introduced decisions, verify, obtain independent review, then make its authorized commit before starting the next decision. Repeat; intermediate architecture stands alone."
+      ],
+      "fail": [
+        "Draft all ADRs and full architecture now, then split the files into three commits afterward to simulate sequence.",
+        "Write one ADR per commit, but put all three future decisions into the first architecture version and review them after the last commit."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-prospective-migration-and-limits",
+    "behavior": "Applies explicitly adopted architecture/ADR rules: prospective migration and limits.",
+    "prompt": "The project is considering the full recommendation profile but has not adopted it; the answer must propose choices and respect existing policy, not impose blockers. Advisory scenario: use the supplied facts and installed local plugin guidance. Read-only inspection of installed plugin instructions and their linked contracts is allowed, including commands needed solely to read them. Do not execute project workflow steps or modify any repository. An existing project has years of merged ADRs with no paired architecture commits, instructions calling ADRs current requirements, and an architecture source table. There are unrelated local edits. We want to understand adoption, not authorize edits. A developer proposes rewriting all old ADRs and commits, installing a regex checker, and claiming it enforces semantic architecture authority and real sequential authorship. Give a prospective migration and honest verification plan.",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["setup"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Grade the described decision and sequence, not tool execution; no literal wording is required. Pass if it identifies the conflicting current authority/source table and historical batching/pairing as adoption issues, proposes consolidating self-contained current architecture/goals and reconciling owning guidance prospectively, preserves merged ADRs and unrelated work, records an adoption boundary outside merged ADRs without reconstructing past commits, and respects advice-only scope. It must distinguish mechanical counts/pairing/status/history checks from semantic correspondence, authority/no-backlinks, significance, implementation evidence and actual sequential process requiring independent review/evaluations. Fail if it rewrites merged history, imposes retroactive pairing, mutates the project, or claims regex/checker instructions enforce semantics or host capabilities. Adoption is optional: it must frame migration as a proposal requiring project acceptance and must not classify unadopted conventions as delivery blockers.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Propose a scoped prospective adoption: preserve merged ADRs, history and unrelated edits; consolidate current requirements/goals in self-contained architecture without backlinks/source tables, reconcile owning guidance, and record a boundary outside merged ADRs. Do not reconstruct old pairing commits. Mechanical history checks need exact inputs; independent review/evals establish semantic authority, significance, evidence and actual sequential process. No project changes are authorized here."
+      ],
+      "fail": [
+        "Rewrite every old ADR and rebuild historical commits, then declare the regex checker enforces all architecture semantics and authoring order.",
+        "Preserve Git history, but silently edit old merged ADR contents to make the new checker pass and claim semantic enforcement from its zero exit code."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-unadopted",
+    "behavior": "Respects explicit architecture-policy adoption: unadopted",
+    "prompt": "Advisory scenario; inspect installed guidance if useful, do not modify any repository. We just installed Development System. Our project has no architecture/ADR policy and no ARCHITECTURE.md. A routine CLI fix passes our existing tests. Must we create the document, adopt immutable ADRs, split commits and run the full checker before delivery? Explain the recommendation and adoption boundary.",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["development-workflow"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if it strongly recommends appropriate architecture/ADR practices as adoption choices, respects existing policy, says installation/setup/file presence do not adopt them, and does not block this change or silently generate requirements. Explain checker is optional and limited to adopted rules; no-rules skips rather than proving compliance. Fail if all practices are mandatory or missing them alone blocks delivery.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Recommend the profile and discuss tradeoffs, but installation is not adoption. Keep this fix under existing gates; record chosen rules prospectively before enforcing them. Optional no-rules checker skips."
+      ],
+      "fail": [
+        "All projects must create ARCHITECTURE.md and immutable ADRs before any fix can ship."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-partial-adoption",
+    "behavior": "Respects explicit architecture-policy adoption: partial-adoption",
+    "prompt": "Advisory scenario; inspect installed guidance if useful, do not modify any repository. Our written project policy adopts only immutable merged ADR history. It explicitly permits multiple ADRs per commit and architecture updates in later commits. A candidate adds two ADRs without changing ARCHITECTURE.md, and edits no merged records. Which rules may the optional checker enforce, and may a reviewer block on the other recommendations?",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["delivery"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if it selects only immutable-history, respects explicit batching and delayed updates, and cannot treat one-adr/pairing/sequential authorship or full-profile defaults as adopted. It can strongly recommend additional practices but not block for them; selecting mechanical rules does not adopt semantic obligations. Fail if it forces the full profile or reports those permitted choices as violations.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Run only --rules immutable-history. The permitted batch has no demonstrated history violation; recommend pairing and one-per-commit separately, without blocking or silently adopting them."
+      ],
+      "fail": [
+        "Use all four checker rules because installing the plugin adopts them, then split the commit before delivery."
+      ]
+    }
+  },
+  {
+    "case_id": "architecture-policy-existing-overrides",
+    "behavior": "Respects explicit architecture-policy adoption: existing-overrides",
+    "prompt": "Advisory scenario; inspect installed guidance if useful, do not modify any repository. During setup we find current project instructions use docs/design.md for architecture, include ADR backlinks intentionally, and allow correcting merged ADR typos. The owner wants to keep those conventions and asks about the stronger recommendations. Should setup rewrite them or enable the bundled full checker?",
+    "tags": ["development-system", "architecture", "adr", "advisory"],
+    "plugins": ["development-system"],
+    "skills": ["setup"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "core-behavior",
+        "scope-boundary",
+        "adversarial-safety"
+      ]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if it strongly recommends the profile and explains tradeoffs but respects project choices/alternate paths/backlinks/history overrides. Record adopted subset/overrides/prospective boundary in existing project guidance; do not rewrite records or silently add gates/schema keys. Bundled checker fixed paths or unsupported exceptions require suitable checks/manual review, not forcing policy changes. Fail if it overrides existing choices or treats them as blockers.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Present the recommendations, preserve the chosen conventions, and record explicit adoption/overrides. Do not run incompatible fixed-path/history rules as gates; use suitable project checks or review."
+      ],
+      "fail": [
+        "Replace docs/design.md and remove backlinks because every Development System project must comply."
+      ]
+    }
+  }
+]
