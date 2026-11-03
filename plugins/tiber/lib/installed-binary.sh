@@ -96,7 +96,7 @@ tiber_exec_installed_binary() {
       "tiber.binary_missing binary=$binary_path remediation='run scripts/install-tiber-binaries.sh --auto'" >&2
     exit 1
   fi
-  if [[ "$binary_name" == tiber ]] && [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
+  if [[ "$binary_name" == tiber ]] && [[ "${TIBER_AGENT_FORWARDING:-}" != current-session ]] && [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
     local config_home socket_file socket
     config_home="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
     if [[ "${PLUGIN_DATA:-}" == /* ]]; then
