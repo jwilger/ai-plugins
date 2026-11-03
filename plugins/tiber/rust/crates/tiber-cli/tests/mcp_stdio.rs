@@ -349,15 +349,8 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     let instructions = initialize["result"]["instructions"]
         .as_str()
         .expect("initialize instructions should be a string");
-    assert!(instructions.contains(
-        "Mutating task tools publish an EventCore transaction to origin/tiber on success"
-    ));
-    assert!(instructions.contains("tiber.codex_sandbox_setup"));
-    assert!(instructions.contains("case-by-case approval for raw Git prefixes"));
-    assert!(instructions.contains("exact Tiber-internal operation"));
-    assert!(instructions
-        .to_lowercase()
-        .contains("do not run the whole tiber mcp server outside the sandbox"));
+    assert!(instructions.contains("origin/tiber"));
+    assert!(instructions.contains("tasks://codex-sandbox"));
 
     write_message(
         &mut stdin,
@@ -663,6 +656,10 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let codex_setup_resource = read_message(&mut stdout);
     assert!(codex_setup_resource.contains(r#""id":92"#));
+    assert!(codex_setup_resource.contains("Prefer the narrowest approval"));
+    assert!(codex_setup_resource.contains("case-by-case approval for prefix_rule"));
+    assert!(codex_setup_resource.contains("exact Tiber-internal operation"));
+    assert!(codex_setup_resource.contains("Never persist a raw git"));
     assert!(
         codex_setup_resource.contains("Do not run the whole Tiber MCP server outside the sandbox")
     );

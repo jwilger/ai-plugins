@@ -23,7 +23,7 @@
         "source": "local",
         "path": "./plugins/tiber"
       },
-      "version": "1.0.2",
+      "version": "1.0.3",
       "category": "Developer Tools",
       "description": "Independent Git-backed task board, CLI, MCP server, and dashboard.",
       "keywords": ["tasks", "git", "coordination"]
