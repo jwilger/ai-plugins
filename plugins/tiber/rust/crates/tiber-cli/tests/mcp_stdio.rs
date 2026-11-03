@@ -640,8 +640,12 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     let codex_setup_tool = read_message(&mut stdout);
     assert!(codex_setup_tool.contains(r#""id":91"#));
     assert!(codex_setup_tool.contains("Couldn't get agent socket?"));
-    assert!(codex_setup_tool.contains("signing-agent-socket"));
-    assert!(codex_setup_tool.contains("root mcp.json"));
+    assert!(codex_setup_tool.contains("SSH_AUTH_SOCK"));
+    assert!(codex_setup_tool.contains("env_vars name"));
+    assert!(codex_setup_tool.contains("configure-codex-mcp.py --apply"));
+    assert!(codex_setup_tool.contains("fully restart Codex"));
+    assert!(codex_setup_tool.contains("Portable mcp.json cannot forward env_vars"));
+    assert!(!codex_setup_tool.contains("signing-agent-socket"));
     assert!(codex_setup_tool.contains("Never send a signing agent socket to a PATH-resolved"));
     assert!(codex_setup_tool.contains("publish event transactions to origin/tiber"));
     assert!(codex_setup_tool.contains(

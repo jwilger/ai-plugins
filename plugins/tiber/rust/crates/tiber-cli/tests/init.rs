@@ -75,8 +75,12 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     assert!(stdout.contains("Tiber Codex sandbox setup preview"));
     assert!(stdout.contains("Prefer the narrowest approval"));
     assert!(stdout.contains("Couldn't get agent socket?"));
-    assert!(stdout.contains("signing-agent-socket"));
-    assert!(stdout.contains("root mcp.json"));
+    assert!(stdout.contains("SSH_AUTH_SOCK"));
+    assert!(stdout.contains("env_vars name"));
+    assert!(stdout.contains("configure-codex-mcp.py --apply"));
+    assert!(stdout.contains("fully restart Codex"));
+    assert!(stdout.contains("Portable mcp.json cannot forward env_vars"));
+    assert!(!stdout.contains("signing-agent-socket"));
     assert!(stdout.contains("Never send a signing agent socket to a PATH-resolved"));
     assert!(stdout.contains("publish event transactions to origin/tiber"));
     assert!(stdout.contains(
