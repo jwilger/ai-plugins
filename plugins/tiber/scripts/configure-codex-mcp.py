@@ -73,7 +73,7 @@ def main():
         if inventory.returncode:
             fail('inventory_unavailable', 'check_codex_mcp_list')
         servers = json.loads(inventory.stdout)
-        data = next((Path(item['transport'].get('env', {}).get('PLUGIN_DATA', '')) for item in servers if item.get('name') == 'tiber'), Path())
+        data = next((Path((item['transport'].get('env') or {}).get('PLUGIN_DATA', '')) for item in servers if item.get('name') == 'tiber'), Path())
     if not data.is_absolute():
         fail('plugin_data_unavailable', 'supply_absolute_plugin_data_from_codex_mcp_list')
     target = home / 'config.toml'

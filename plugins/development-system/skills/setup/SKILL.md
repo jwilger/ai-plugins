@@ -91,8 +91,13 @@ Tiber plugin owns `tiber`. Default marketplace installation installs both.
 
 4. Tell the user to restart Codex. Each installed plugin starts its own MCP
    server through its plugin-relative launcher and repairs its own versioned
-   binary. Do not add project or global `mcp_servers` entries to compensate for
-   startup failure. From a working directory outside the plugin checkout,
+   binary. Do not add project registrations to compensate for startup failure.
+   For Tiber SSH authentication only, the marketplace installer or installed
+   `configure-codex-mcp.py --apply` maintains a complete shared user transport
+   with `env_vars = ["SSH_AUTH_SOCK"]` and a trusted absolute installed launcher.
+   Follow the Tiber plugin guidance; preserve unmanaged registrations. This
+   repair requires a full Codex restart from the current agent shell and never
+   embeds socket values or keys. Setup itself still does not edit global config. From a working directory outside the plugin checkout,
    initialize `development-discipline-mcp`. When `features.tiber = true`, also
    initialize Tiber's MCP stdio server and require successful startup evidence
    from both. When `features.tiber = false`, Development Discipline startup is

@@ -28,10 +28,65 @@ its optional project configuration is `.tiber.toml`.
 Resolve `bin/tiber` from the installed plugin root. The launcher repairs only
 Tiber's own versioned binary cache. Linux x86_64 uses the checksum-verified
 release; other hosts require Cargo and a verified exact-release source bundle.
-Signing sockets belong in Tiber's own `PLUGIN_DATA/signing-agent-socket`.
-Rerunning the marketplace installer migrates the host socket configuration.
-Existing task history and Git refs require no migration.
+The marketplace installer configures one shared user-level Codex transport that
+forwards `SSH_AUTH_SOCK` by name. It refreshes the trusted installed launcher
+path on upgrades. Existing task history and Git refs require no migration.
 
+### SSH authentication and existing installations
+
+Codex 0.166.0 filters `SSH_AUTH_SOCK` from ordinary MCP environments. Portable
+plugin `mcp.json` does not support `env_vars`, and `${SSH_AUTH_SOCK}` and
+`$SSH_AUTH_SOCK` in `env` remain literal strings. A saved socket path can become
+stale after login or agent restart. This also affects SSH Git fetch/push;
+sandbox access alone cannot restore missing agent credentials.
+
+Run the shared installer to upgrade and repair all caller projects:
+
+```shell
+curl -fsSL https://raw.githubusercontent.com/jwilger/ai-plugins/main/install.sh | sh
+```
+
+Then fully restart Codex from a shell where the current SSH agent is available.
+After agent rotation, restart Codex again from the updated environment. Restarting
+only MCP inside an already running Codex process cannot refresh its parent
+environment. No private keys or session socket paths are stored by this repair.
+HTTPS and unsigned repositories can run with `SSH_AUTH_SOCK` unset; repositories
+that require SSH authentication or signing still need usable credentials.
+
+For an already installed current release, run
+`python3 /absolute/installed/tiber/scripts/configure-codex-mcp.py` to check, or
+append `--apply` to repair. Use the actual installed cache root, never a repository
+copy. The helper preserves unrelated configuration and refuses an unmanaged
+Tiber registration or a symlinked config. Review that registration rather than
+replacing it automatically. Do not run competing config writers during repair.
+Python 3.11 or later is required for the helper.
+
+A supported direct registration in the user-level Codex `config.toml` is:
+
+```toml
+[mcp_servers.tiber]
+command = "/absolute/trusted/installed/tiber"
+args = ["mcp", "stdio"]
+env_vars = ["SSH_AUTH_SOCK"]
+env = { TIBER_AGENT_FORWARDING = "current-session" }
+```
+
+Use an absolute trusted installed native executable, or the installed plugin's
+`bin/tiber` launcher with explicit `PLUGIN_ROOT` and `PLUGIN_DATA` in `env`.
+The helper writes those plugin variables automatically. A complete same-name
+user declaration replaces the plugin transport; a partial `env_vars` overlay
+is invalid and does not retain plugin environment or working directory. Keep
+unrelated existing `env_vars` when repairing a user-owned direct registration.
+Never forward an agent to a PATH-resolved or project-controlled executable.
+Never copy keys, source shell startup files, discover arbitrary sockets, or
+hardcode a session socket in the MCP configuration.
+
+Legacy plugin-only launchers can still read `signing-agent-socket` for
+compatibility, but that snapshot cannot follow socket changes. Current-session
+mode ignores it, including when the parent agent is unset. Rerun the marketplace
+installer after plugin upgrades to refresh its managed absolute command path.
+`tiber.ssh_authentication_failed source_redacted=true` reports a known SSH public-key
+rejection with safe repair guidance; it does not expose Git stderr or remotes.
 For a PATH command, preview `tiber install-bin --target-dir ~/.local/bin --dry-run`.
 The installer never overwrites an existing forwarder. When upgrading a legacy
 Development System forwarder, inspect its printed destination, move that old

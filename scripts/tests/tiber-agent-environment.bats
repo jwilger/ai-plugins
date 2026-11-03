@@ -82,3 +82,14 @@ PY
   [ "$status" -eq 0 ]
   [ "$output" = "agent=$BATS_TEST_TMPDIR/new.sock" ]
 }
+
+@test "repair reports missing plugin data safely when a direct registration has null environment" {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '#!/bin/sh\nprintf '\''[{"name":"tiber","transport":{"env":null}}]\\n'\''\n' >"$BATS_TEST_TMPDIR/bin/codex"
+  chmod +x "$BATS_TEST_TMPDIR/bin/codex"
+  run env PATH="$BATS_TEST_TMPDIR/bin:$PATH" python3 "$INSTALLED/scripts/configure-codex-mcp.py" --apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'reason=plugin_data_unavailable'* ]]
+  [[ "$output" != *'Traceback'* ]]
+  [ ! -f "$CODEX_HOME/config.toml" ]
+}

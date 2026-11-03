@@ -20,6 +20,16 @@ relative to this skill file and prefer that launcher before probing `PATH`.
 - Use `<plugin-root>/bin/tiber` before any `PATH` fallback.
 - Offer `tiber install-bin --target-dir ~/.local/bin --dry-run` on setup or
   upgrade. Run `--apply` only after explicit user approval.
+- For `tiber.ssh_authentication_failed` or a CLI that works while MCP reports a
+  public-key authentication failure, check the current agent and shared Codex
+  forwarding first. Use the marketplace installer or the trusted installed
+  `scripts/configure-codex-mcp.py --apply`, then fully restart Codex from the
+  current agent shell. Direct user-owned transports need `env_vars =
+["SSH_AUTH_SOCK"]`; portable `mcp.json` cannot express it and `env` placeholders
+  are literal. Preserve unmanaged registrations and unrelated environment rules.
+  Do not save socket paths, copy keys, discover sockets, or broaden sandbox access
+  to repair missing credentials. Socket rotation requires a new Codex process;
+  HTTPS/unsigned repositories may leave the agent unset. See the plugin README.
 - During setup, or after a Tiber MCP write/sync fails because Git cannot write
   refs, objects, signed commits, or push credentials from the Codex sandbox,
   call `tiber.codex_sandbox_setup` or run `tiber codex-sandbox --dry-run`.
