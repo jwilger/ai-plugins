@@ -138,6 +138,9 @@ Custom document paths or exceptions outside the supported profile require
 project-appropriate checks or independent review; never force the project to
 change its policy to satisfy this parser. Do not wire unadopted rules into gates.
 
+The optional command below requires Node.js on `PATH`; the ai-plugins Nix
+devshell provides it.
+
 Before committing, review the actual staged ADR and architecture changes; this
 checker reads commits, not the index or working tree. After each authorized
 checkpoint commit, and again when selecting the final delivery strategy, run:
