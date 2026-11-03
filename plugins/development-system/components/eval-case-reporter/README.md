@@ -1,5 +1,8 @@
 # eval-case-reporter
 
+Bundled implementation reference for [Development System](../../README.md).
+Install `development-system` from the marketplace; this component is not a separate public plugin.
+
 Capture bad, surprising, partial, or borderline AI-assistant behavior as a
 sanitized GitHub issue that can later become a regression eval fixture.
 
@@ -9,8 +12,7 @@ sanitized GitHub issue that can later become a regression eval fixture.
   scrubs or anonymizes sensitive data, asks for explicit approval, and posts a
   structured issue to `jwilger/ai-plugins`.
 
-The reporter is intentionally standalone so teams can install it without also
-installing any domain-specific plugin such as `agentic-systems-engineering`.
+Enable `features.eval_case_reporting` through Development System setup to use the reporter.
 
 ## Safety posture
 

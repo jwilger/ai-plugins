@@ -46,7 +46,7 @@ separate; the following build instructions do not install the skill.
   closure; Wayland client libraries and generated protocol code are compiled
   into the helper's package. No root access or `/dev/uinput` is needed.
 
-A program name or matching `0.1.3` label is not enough to establish runtime
+A program name or matching version label is not enough to establish runtime
 provenance. Building this package does not replace an older adapter already on
 PATH. Check the selected executable's derivation/source identity before input;
 if it is an older unpatched build or its provenance is unknown, stop for
@@ -76,18 +76,9 @@ home.packages = [
 
 Plugin installation and Home Manager activation are separate actions requiring
 their own authorization. No switch or installation is performed by this plugin.
-The existing home's optional `jwilger.computerControlProbe.enable` installs a
-read-only readiness probe, not this adapter, and is not required.
+Noctalia, Voxtype, and wtype are optional and add no pointer capability here.
 
-Noctalia supplies the desktop shell, notifications, lock UI, and screenshot
-dependencies in the source Home Manager configuration (`grim`, `slurp`, and
-`wl-clipboard`). Hyprland owns compositor state and Wayland virtual-pointer
-input. This package includes grim itself, so Noctalia is optional. The home's
-Voxtype module supplies `wtype` for transcription and uses Noctalia
-notifications; neither Voxtype nor wtype is a pointer dependency.
-
-For a setup explanation, distinguish these requirements from the source T14's
-optional shell/transcription configuration:
+For a setup explanation, distinguish these requirements from the optional desktop configuration:
 
 | Setup item                      | Required mapping                                                                           |
 | ------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -101,11 +92,15 @@ When installation or switching is denied, describe the missing dependency and
 proposed configuration without applying it. Having shell/transcription tools
 installed does not prove the adapter, authorization, or assistant transport.
 
-Keep each host's configured `CODEX_HOME` and authentication isolated. The source
-T14 setup uses `$HOME/.codex` for CLI and `$HOME/.codex-chatgpt` for Desktop;
-those are examples, not required runtime paths. Do not copy credentials, change
-either host's settings, or assume cloud/dot/voice access from local plugin
-availability. This plugin does not implement native Linux Computer Use.
+Keep each host's configured `CODEX_HOME` and authentication isolated. Do not copy credentials or infer cloud or voice access from plugin availability. This plugin does not implement native Linux Computer Use.
+
+## Example request
+
+“Observe the window I have focused, including its screenshot, then scroll down
+one page. Stop if the target changes.” Keep the desktop idle during the task.
+The assistant inspects the capture, performs bounded pointer actions, and
+re-observes after changes. Typing is unsupported. Prefer an application API
+when available. See [licensing](../../README.md#license).
 
 ## Observe, inspect, act
 

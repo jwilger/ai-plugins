@@ -7,8 +7,8 @@ directories with `{ "source": "local", "path": "./plugins/<plugin-name>" }`.
 
 ```
 plugins/my-plugin/
-├── .codex-plugin/
-│   └── plugin.json        # Codex plugin manifest
+├── plugin.json           # Agent Plugins manifest
+├── mcp.json              # optional plugin-owned MCP servers
 ├── skills/                # <name>/SKILL.md  → /my-plugin:<name>
 ├── commands/              # legacy flat-file slash commands (prefer skills/)
 ├── agents/                # <name>.toml       → subagent /my-plugin:<name>

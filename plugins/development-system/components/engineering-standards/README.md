@@ -1,6 +1,9 @@
 # engineering-standards
 
-John's standard engineering regime as a reusable, **stack-agnostic** starting
+Bundled implementation reference for [Development System](../../README.md).
+Install `development-system` from the marketplace; this component is not a separate public plugin.
+
+A documented engineering regime as a reusable, **stack-agnostic** starting
 point for any serious project — so the same standards don't have to be re-stated
 in every repository.
 

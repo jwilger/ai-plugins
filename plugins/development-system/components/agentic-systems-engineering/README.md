@@ -1,5 +1,8 @@
 # agentic-systems-engineering
 
+Bundled implementation reference for [Development System](../../README.md).
+Install `development-system` from the marketplace; this component is not a separate public plugin.
+
 Portable guardrails for building, evaluating, and delivering LLM and agentic
 systems.
 

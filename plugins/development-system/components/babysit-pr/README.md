@@ -1,10 +1,13 @@
 # babysit-pr
 
+Bundled implementation reference for [Development System](../../README.md).
+Install `development-system` from the marketplace; this component is not a separate public plugin.
+
 Babysit a pull/merge request to completion: watch CI, respond to review
 feedback, and merge once green and approved — across **GitHub, Forgejo, and
 GitLab**, with no forge preferred over the others.
 
-Usable standalone; it only needs the forge's tooling.
+Used through Development System delivery with the forge's tooling.
 
 ## What it provides
 

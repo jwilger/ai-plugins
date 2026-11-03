@@ -1,8 +1,8 @@
 {
   "name": "@jwilger/development-system",
-  "version": "9.0.0",
+  "version": "9.0.1",
   "private": true,
-  "description": "John's consolidated development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
+  "description": "Configured development workflow, engineering standards, worktree, task, review, and agentic-system tooling.",
   "license": "AGPL-3.0-or-later",
   "author": "John Wilger <john@johnwilger.com>",
   "type": "module",
