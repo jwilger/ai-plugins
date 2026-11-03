@@ -108,7 +108,7 @@ data={}
 for server,plugin in (("development-discipline","development-system"),("tiber","tiber")):
  version=installed.get(plugin+"@ai-plugins",{}).get("version","")
  env=servers.get(server,{}).get("transport",{}).get("env",{})
- if not version or not env.get("PLUGIN_ROOT", "").endswith("/"+plugin+"/"+version):
+ if not version or (plugin != "tiber" and not env.get("PLUGIN_ROOT", "").endswith("/"+plugin+"/"+version)):
   sys.exit(f"install: {server} is not provided by the installed {plugin} plugin")
  directory=env.get("PLUGIN_DATA", "")
  if not os.path.isabs(directory): sys.exit(f"install: {plugin} has no absolute PLUGIN_DATA")
@@ -145,20 +145,21 @@ else:
   fi
 done
 
-if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "$SSH_AUTH_SOCK" ]; then
-  if [ "$dry_run" = true ]; then
-    socket_file='${PLUGIN_DATA}/signing-agent-socket'
-  else
-    socket_file="$plugin_data/signing-agent-socket"
-  fi
-  printf 'install: signing agent socket %s\n' "$socket_file"
-  if [ "$dry_run" = false ]; then
-    (
-      umask 077
-      mkdir -p "${socket_file%/*}"
-      printf '%s\n' "$SSH_AUTH_SOCK" >"$socket_file"
-      chmod 600 "$socket_file"
-    )
-  fi
+# Codex filters SSH_AUTH_SOCK from plugin transports and portable MCP has no
+# env_vars field. Use one complete user-level replacement, never per-project
+# entries or a persisted session socket. Reapply after every plugin upgrade.
+if [ "$dry_run" = true ]; then
+  printf '%s\n' 'install: configure the installed Tiber transport with env_vars = ["SSH_AUTH_SOCK"]'
+else
+  tiber_root="$(printf '%s' "$installed_plugins" | python3 -c '
+import json,os,re,sys
+version=next(p["version"] for p in json.load(sys.stdin)["installed"] if p.get("pluginId")=="tiber@ai-plugins")
+if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.+-]+)?", version):
+ sys.exit("install: invalid installed Tiber version")
+home=os.environ.get("CODEX_HOME", os.path.expanduser("~/.codex"))
+if not os.path.isabs(home): sys.exit("install: CODEX_HOME must be absolute")
+print(os.path.join(home, "plugins/cache/ai-plugins/tiber", version))
+')"
+  run python3 "$tiber_root/scripts/configure-codex-mcp.py" --plugin-data "$plugin_data" --apply
 fi
-printf 'install: restart Codex to load the updated plugin and its MCP servers\n'
+printf 'install: restart Codex from a shell with the current SSH agent; repeat after agent rotation\n'

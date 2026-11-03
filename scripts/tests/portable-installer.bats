@@ -14,12 +14,19 @@ case "$*" in
       printf '%s\n' '{"installed":[],"available":[{"name":"github","pluginId":"github@curated"},{"name":"coderabbit","pluginId":"coderabbit@curated"}]}'
     fi
     ;;
-  '-C /tmp mcp list --json') printf '[{"name":"development-discipline","transport":{"env":{"PLUGIN_ROOT":"/tmp/cache/development-system/10.0.0","PLUGIN_DATA":"%s"}}},{"name":"tiber","transport":{"env":{"PLUGIN_ROOT":"/tmp/cache/tiber/1.0.0","PLUGIN_DATA":"%s"}}}]\n' "$MOCK_PLUGIN_DATA-development-system" "$MOCK_PLUGIN_DATA" ;;
+  '-C /tmp mcp list --json') printf '[{"name":"development-discipline","transport":{"env":{"PLUGIN_ROOT":"/tmp/cache/development-system/10.0.0","PLUGIN_DATA":"%s"}}},{"name":"tiber","transport":{"env":{"PLUGIN_ROOT":"%s/plugins/cache/ai-plugins/tiber/1.0.0","PLUGIN_DATA":"%s"}}}]\n' "$MOCK_PLUGIN_DATA-development-system" "$CODEX_HOME" "$MOCK_PLUGIN_DATA" ;;
   *) printf '%s\n' "$*" >>"$CODEX_CALL_LOG" ;;
 esac
 SH
   chmod +x "$TMPROOT/bin/codex"
   export CODEX_CALL_LOG="$TMPROOT/calls"
+  export CODEX_HOME="$TMPROOT/codex"
+  local installed_root="$CODEX_HOME/plugins/cache/ai-plugins/tiber/1.0.0"
+  mkdir -p "$installed_root/scripts" "$installed_root/bin"
+  cp "$ROOT/plugins/tiber/scripts/configure-codex-mcp.py" "$installed_root/scripts/"
+  printf '%s\n' '{"version":"1.0.0"}' >"$installed_root/plugin.json"
+  printf '#!/bin/sh\nexit 0\n' >"$installed_root/bin/tiber"
+  chmod +x "$installed_root/bin/tiber"
 }
 teardown() { rm -rf "$TMPROOT"; }
 
@@ -41,7 +48,7 @@ teardown() { rm -rf "$TMPROOT"; }
   [[ "$output" == *'marketplace points elsewhere'* ]]
 }
 
-@test "installer saves the host signing socket in Codex plugin data" {
+@test "installer converges shared forwarding without persisting the host socket and upgrades idempotently" {
   export MOCK_INSTALLED=1
   export MOCK_PLUGIN_DATA="$TMPROOT/plugin-data"
   mkdir -p "$TMPROOT/plugin-data"
@@ -50,6 +57,19 @@ teardown() { rm -rf "$TMPROOT"; }
     MOCK_INSTALLED=1 MOCK_PLUGIN_DATA="$MOCK_PLUGIN_DATA" \
     sh "$ROOT/install.sh" --with none
   [ "$status" -eq 0 ]
-  [ "$(cat "$MOCK_PLUGIN_DATA/signing-agent-socket")" = "$TMPROOT/agent.sock" ]
-  [ "$(stat -c %a "$MOCK_PLUGIN_DATA/signing-agent-socket")" = 600 ]
+  [ ! -e "$MOCK_PLUGIN_DATA/signing-agent-socket" ]
+  python3 - "$CODEX_HOME/config.toml" "$TMPROOT/agent.sock" <<'PYTEST'
+import sys,tomllib
+text=open(sys.argv[1]).read()
+server=tomllib.loads(text)['mcp_servers']['tiber']
+assert server['env_vars']==['SSH_AUTH_SOCK']
+assert server['env']['TIBER_AGENT_FORWARDING']=='current-session'
+assert sys.argv[2] not in text
+PYTEST
+  cp "$CODEX_HOME/config.toml" "$TMPROOT/before.toml"
+  run env PATH="$TMPROOT/bin:$PATH" SSH_AUTH_SOCK="$TMPROOT/rotated.sock" \
+    MOCK_INSTALLED=1 MOCK_PLUGIN_DATA="$MOCK_PLUGIN_DATA" \
+    sh "$ROOT/install.sh" --with none
+  [ "$status" -eq 0 ]
+  cmp "$TMPROOT/before.toml" "$CODEX_HOME/config.toml"
 }
