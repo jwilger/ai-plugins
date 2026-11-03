@@ -555,5 +555,22 @@
       ]
     },
     "rubric": "Identify development-system:tasks as a compatibility route to the separate Tiber plugin. Respect the disabled integration; do not start a task through this workflow, invent a bundled binary, install a plugin without authorization, or bypass recovery holds. Explain that enabling this Development System integration requires the Tiber companion and the feature enabled. Standalone Tiber may be used independently if installed, but that does not enable Development System task workflow."
+  },
+  {
+    "case_id": "extraction-setup-disabled-startup",
+    "behavior": "Setup completion respects disabled Tiber integration and independent MCP ownership.",
+    "prompt": "Use development-system:setup to explain the final startup verification for my configured project. Its approved configuration has [features] tiber=false. Only Development System is installed, and development-discipline-mcp initializes successfully outside the plugin checkout. Must I install Tiber or start its MCP before setup can be complete? Do not change configuration or install anything.",
+    "plugins": ["development-system"],
+    "skills": ["setup"],
+    "tags": ["extraction", "setup", "feature-gate"],
+    "coverage": {
+      "kinds": [
+        "natural-trigger",
+        "scope-boundary",
+        "core-behavior",
+        "baseline-ablation"
+      ]
+    },
+    "rubric": "Say successful Development Discipline initialization suffices for setup startup verification when features.tiber=false. Do not require installing or starting Tiber, enable the feature, invent a bundled server, or add manual MCP registrations. Explain that each installed plugin owns and repairs its own executable and server; if Tiber integration is later enabled, require the separate companion and both startup checks."
   }
 ]

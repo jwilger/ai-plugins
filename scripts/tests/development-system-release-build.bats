@@ -94,6 +94,7 @@ setup() {
   (cd "$output_dir" && sha256sum -c "$(basename "$source_archive").sha256")
   tar -tzf "$source_archive" | grep -F '/plugins/tiber/rust/crates/tiber-git/Cargo.toml'
   tar -tzf "$source_archive" | grep -F '/plugins/development-system/components/development-discipline/rust/Cargo.toml'
+  tar -tzf "$source_archive" | grep -F '/plugins/development-system/schemas/project-config.schema.json'
   ! tar -tzf "$source_archive" | grep -E '/target/'
   mkdir -p "$TMPROOT/source-check"
   tar -xzf "$source_archive" -C "$TMPROOT/source-check"
@@ -102,6 +103,10 @@ setup() {
     --manifest-path "$closure_root/plugins/development-system/components/development-discipline/rust/Cargo.toml" >"$TMPROOT/discipline-metadata.json"
   cargo metadata --offline --locked --no-deps --format-version 1 \
     --manifest-path "$closure_root/plugins/tiber/rust/Cargo.toml" >"$TMPROOT/tiber-metadata.json"
+  CARGO_TARGET_DIR="$ROOT/plugins/development-system/components/development-discipline/rust/target" \
+    cargo check --offline --locked --bin development-discipline-mcp \
+    --manifest-path "$closure_root/plugins/development-system/components/development-discipline/rust/Cargo.toml" \
+    >"$TMPROOT/source-compile.log" 2>&1
 
   (cd "$output_dir" && sha256sum -c "$(basename "$archive").sha256")
   tar -tzf "$archive" | LC_ALL=C sort >"$TMPROOT/layout"

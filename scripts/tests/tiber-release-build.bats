@@ -94,6 +94,7 @@ setup() {
   (cd "$output_dir" && sha256sum -c "$(basename "$source_archive").sha256")
   tar -tzf "$source_archive" | grep -F '/plugins/tiber/rust/crates/tiber-git/Cargo.toml'
   tar -tzf "$source_archive" | grep -F '/plugins/development-system/components/development-discipline/rust/Cargo.toml'
+  tar -tzf "$source_archive" | grep -F '/plugins/development-system/schemas/project-config.schema.json'
   ! tar -tzf "$source_archive" | grep -E '/target/'
   mkdir -p "$TMPROOT/source-check"
   tar -xzf "$source_archive" -C "$TMPROOT/source-check"

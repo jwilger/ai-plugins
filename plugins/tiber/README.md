@@ -499,17 +499,15 @@ admit the generated workflow.
 
 ## Host-local installation
 
-Tiber ships Rust source and a `bin/tiber` launcher. After installing or
-upgrading Development System, run
-`plugins/tiber/scripts/install-tiber-binaries.sh` from the marketplace
-checkout. It installs Tiber alongside the matching Development Discipline MCP
-binary. Development System's `SessionStart` hook checks the versioned
-installation marker and repairs a missing or stale bundle. Linux x86_64 uses
-the verified version-matched GitHub Release; hosts without a prebuilt release
-use the locked Cargo build before either MCP starts. The Tiber launcher itself
-only executes the installed versioned binary and never invokes Cargo.
+Tiber owns its versioned binary installation. From the marketplace checkout,
+run `plugins/tiber/scripts/install-tiber-binaries.sh` to install or repair
+Tiber. The installer handles only Tiber; Development System repairs its own
+executable independently. Tiber's launcher checks its installation marker and
+automatically repairs a missing or stale binary before starting. Linux x86_64
+uses the verified version-matched release; other hosts use the locked source
+build. Pass `--from-source` to the installer for an intentional source build.
 
 ## Harness Support
 
-Tiber targets Codex. The plugin name, skill name, CLI binary, MCP server name,
-and documentation name are all `tiber`.
+Tiber targets Codex. Its plugin, CLI binary, and MCP server are named `tiber`.
+Its published skills are `tiber:tasks` and `tiber:new-task`.

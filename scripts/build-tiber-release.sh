@@ -91,7 +91,8 @@ source_root="$build_root/$release_name-source"
 mkdir -p "$source_root/plugins/development-system/components/development-discipline" "$source_root/plugins/tiber"
 tar -C "$root" --exclude=target --exclude=.plugin-eval -cf - \
   plugins/development-system/components/development-discipline/rust \
-  plugins/tiber/rust plugins/development-system/plugin.json plugins/tiber/plugin.json |
+  plugins/tiber/rust plugins/development-system/schemas \
+  plugins/development-system/plugin.json plugins/tiber/plugin.json |
   tar -C "$source_root" -xf -
 install -m 0644 "$plugin_root/LICENSE" "$source_root/LICENSE"
 printf '%s\n' "$version" >"$source_root/.plugin-version"

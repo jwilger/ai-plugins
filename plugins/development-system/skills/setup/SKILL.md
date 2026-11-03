@@ -84,19 +84,19 @@ Tiber plugin owns `tiber`. Default marketplace installation installs both.
    apply calls are unsupported. Apply rejects stale previews before writing,
    writes schema-v3 `.development-system.toml` and the approved hooks, installs
    both Git hooks using Lefthook, and removes only the old managed MCP block
-   from project `.codex/config.toml`. The plugin root `mcp.json` owns both server
-   definitions. Stop on unmanaged duplicate registrations. Setup never stages
+   from project `.codex/config.toml`. Each installed plugin owns its server definition in its root
+   `mcp.json`. Stop on unmanaged duplicate registrations. Setup never stages
    or commits, and never changes global Codex, marketplace, shell or SSH
    configuration.
 
-4. Tell the user to restart Codex. The restarted session starts
-   both MCP servers from the plugin-root `mcp.json` through plugin-relative
-   launchers, which repair missing versioned binaries. Do not add project or
-   global `mcp_servers` entries to compensate for startup failure. From a
-   working directory outside the plugin checkout, verify both launchers:
-   initialize `development-discipline-mcp` and initialize Tiber's MCP stdio
-   server. A status response from only one server is not complete startup
-   evidence.
+4. Tell the user to restart Codex. Each installed plugin starts its own MCP
+   server through its plugin-relative launcher and repairs its own versioned
+   binary. Do not add project or global `mcp_servers` entries to compensate for
+   startup failure. From a working directory outside the plugin checkout,
+   initialize `development-discipline-mcp`. When `features.tiber = true`, also
+   initialize Tiber's MCP stdio server and require successful startup evidence
+   from both. When `features.tiber = false`, Development Discipline startup is
+   sufficient for setup; do not require installation or startup of Tiber.
 
 The plugin is advisory. Setup does not prove or enforce caller identity,
 per-agent tool filtering, sandboxing, or mutation denial. Ordinary Codex can

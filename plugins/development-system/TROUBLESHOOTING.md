@@ -4,48 +4,32 @@ Configured development workflows for Codex.
 
 ## Host-local binaries
 
-After installing or upgrading this plugin, download and verify its Rust
-executables once from the marketplace checkout:
+Development System owns `development-discipline-mcp`. From the marketplace
+checkout, run `just install-development-system-binaries` to install or repair it.
+The installer verifies the exact versioned release checksum and archive layout,
+then atomically installs the executable under
+`$PLUGIN_DATA/ai-plugins/development-system/<plugin-version>/<host>/`.
+Direct CLI use falls back to `$XDG_DATA_HOME`, then `~/.local/share`.
+Previous versions remain available. Its `SessionStart` hook and MCP launcher
+repair only this executable. Use `just install-development-system-binaries
+--from-source` for a locked source build. Without `just`, run
+`plugins/development-system/scripts/install-development-system-binaries.sh`.
 
-```shell
-just install-development-system-binaries
-```
+Tiber is an independently installed companion. Its launcher and
+`plugins/tiber/scripts/install-tiber-binaries.sh` repair only Tiber under its
+own `ai-plugins/tiber/<plugin-version>/<host>/` cache. Each plugin's `mcp.json`
+registers its own server. Enable and verify Tiber when the project's
+`features.tiber` integration is enabled; standalone Tiber needs no Development
+System configuration.
 
-On Linux x86_64, the command downloads the exact plugin-version bundle from the
-repository's GitHub Release, verifies its SHA-256 sidecar and fixed archive
-layout, and atomically installs `tiber` and
-`development-discipline-mcp` in
-`$PLUGIN_DATA/ai-plugins/development-system/<plugin-version>/<host>/`
-under Codex. Direct CLI use falls back to `$XDG_DATA_HOME`, then
-`~/.local/share`. Re-running the command
-is safe; a newer plugin version is installed alongside previous versions.
-The plugin root `mcp.json` declares both servers with plugin-relative
-launchers. Each launcher repairs a missing matching binary before starting, so
-consuming projects do not configure MCP servers. Project setup removes only a
-previously managed Development System MCP block from `.codex/config.toml`.
-Signed Tiber operations use the plugin-owned
-`$PLUGIN_DATA/signing-agent-socket` file. Outside a portable harness,
-the launcher uses `$XDG_CONFIG_HOME/ai-plugins/development-system/` (or
-`~/.config`). The root installer captures a valid `SSH_AUTH_SOCK`; update
-the plugin-owned file with an absolute socket path if your agent moves.
-The release bundle contains statically linked Linux x86_64 executables, the
-applicable license, and the exact source tag and commit. To force a locked
-source build for diagnosis:
+Signing belongs to Tiber. The root `install.sh` captures a valid
+`SSH_AUTH_SOCK` in Tiber's verified `$PLUGIN_DATA/signing-agent-socket`.
+Rerun it to migrate the socket after extraction. Outside Codex, Tiber uses
+`$XDG_CONFIG_HOME/ai-plugins/tiber/signing-agent-socket` (or `~/.config`).
+Update that file with an absolute socket path if your agent moves.
 
-```shell
-just install-development-system-binaries --from-source
-```
-
-The repository's Nix devshell is optional. If `just` is unavailable, run
-`scripts/install-development-system-binaries.sh` from the marketplace checkout.
-
-The installed `SessionStart` hook and both MCP launchers verify the binaries
-and atomic installation marker against the plugin manifest version. It repairs
-missing or stale installations automatically: Linux x86_64 uses the verified
-release bundle, while hosts without a prebuilt bundle use the locked Cargo
-build. The `setup` skill performs the same automatic check before configuring a
-repository. Manual use is only needed for diagnosis or an intentional source
-build.
+Linux x86_64 releases are statically linked. Unsupported hosts use locked
+source builds from the checksum-verified dependency-complete source bundle.
 
 It is inert outside a Git repository or without a valid schema-3
 `.development-system.toml`. Read-only repository inspection remains available

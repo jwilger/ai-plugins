@@ -76,7 +76,11 @@ jobs:
           ARCHIVE: ${{ steps.version.outputs.archive }}
         run: |
           if release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null)"; then
-            [ "$(jq -r '.draft' <<<"$release_json")" = false ] || exit 1
+            if [ "$(jq -r '.draft' <<<"$release_json")" = true ]; then
+              echo "existing=false" >>"$GITHUB_OUTPUT"
+              echo "Rebuilding assets to resume draft release $TAG."
+              exit 0
+            fi
             for asset in "$ARCHIVE" "$ARCHIVE.sha256" "$TAG-source.tar.gz" "$TAG-source.tar.gz.sha256"; do
               jq -e --arg asset "$asset" '.assets | any(.name == $asset)' <<<"$release_json" >/dev/null || exit 1
             done
