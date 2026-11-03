@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 
 SOURCE = Path(__file__).resolve().parents[2]
 FAKE = '''#!/usr/bin/env python3
@@ -73,7 +74,69 @@ def launch(home, root, socket, names):
                 process.wait()
 
 
+def portable_bootstrap_upgrade():
+    with tempfile.TemporaryDirectory(prefix='tiber-portable-bootstrap-') as temporary:
+        root = Path(temporary)
+        home = root / 'home'
+        home.mkdir()
+        (home / 'config.toml').write_text('[features]\napps=false\n')
+        market = root / 'market'
+        plugin = market / 'plugins/tiber'
+        plugin.mkdir(parents=True)
+        for name in ['bin', 'lib', 'scripts']:
+            shutil.copytree(SOURCE / 'plugins/tiber' / name, plugin / name)
+        for name in ['plugin.json', 'mcp.json']:
+            shutil.copy2(SOURCE / 'plugins/tiber' / name, plugin / name)
+        manifest = json.loads((plugin / 'plugin.json').read_text())
+        version = manifest['version']
+        metadata = market / '.agents/plugins'
+        metadata.mkdir(parents=True)
+        catalog = {'name': 'ai-plugins', 'interface': {'displayName': 'Synthetic probe'},
+                   'plugins': [{'name': 'tiber', 'version': version,
+                                'source': {'source': 'local', 'path': './plugins/tiber'}}]}
+        (metadata / 'marketplace.json').write_text(json.dumps(catalog))
+        env = dict(os.environ, CODEX_HOME=str(home))
+        env.pop('SSH_AUTH_SOCK', None)
+        for args in [['plugin', 'marketplace', 'add', str(market), '--json'],
+                     ['plugin', 'add', 'tiber@ai-plugins', '--json']]:
+            subprocess.run(['codex', *args], env=env, cwd=root, capture_output=True, check=True)
+        inventory = json.loads(subprocess.check_output(
+            ['codex', '-C', '/tmp', 'mcp', 'list', '--json'], env=env, text=True))
+        data = Path(next(item for item in inventory if item['name'] == 'tiber')['transport']['env']['PLUGIN_DATA'])
+        native = data / 'ai-plugins/tiber' / version / (os.uname().sysname.lower() + '-' + os.uname().machine)
+        native.mkdir(parents=True)
+        executable = native / 'tiber'
+        executable.write_text(FAKE.replace("os.environ['PROBE_OUTPUT']", repr(str(root / 'tiber.json'))))
+        executable.chmod(0o700)
+        (native / '.plugin-version').write_text(version)
+        first = launch(home, root, '/synthetic/current', ['tiber'])
+        config = tomllib.loads((home / 'config.toml').read_text())
+        assert config['mcp_servers']['tiber']['command'] == str(data / 'mcp-dispatch.py'), config
+        assert first['tiber'] is None, first
+        second = launch(home, root, '/synthetic/current', ['tiber'])
+        assert second['tiber'] == '/synthetic/current', second
+        old_cache = home / 'plugins/cache/ai-plugins/tiber' / version
+        manifest['version'] = '99.0.0'
+        (plugin / 'plugin.json').write_text(json.dumps(manifest, indent=2))
+        catalog['plugins'][0]['version'] = '99.0.0'
+        (metadata / 'marketplace.json').write_text(json.dumps(catalog))
+        subprocess.run(['codex', 'plugin', 'add', 'tiber@ai-plugins', '--json'],
+                       env=env, cwd=root, capture_output=True, check=True)
+        new_native = native.parent.parent / '99.0.0' / native.name
+        shutil.copytree(native, new_native)
+        (new_native / '.plugin-version').write_text('99.0.0')
+        # Codex may already have removed the old version during the upgrade.
+        if old_cache.exists():
+            shutil.rmtree(old_cache)
+        third = launch(home, root, '/synthetic/rotated', ['tiber'])
+        assert third['tiber'] == '/synthetic/rotated', third
+        assert tomllib.loads((home / 'config.toml').read_text()) == config
+        print(json.dumps({'portable_bootstrap': 'passed', 'real_upgrade_deleted_cache': 'passed',
+                          'initial_filtered': True, 'next_parent_launch_forwarded': True, 'model_turns': 0}))
+
+
 def main():
+    portable_bootstrap_upgrade()
     version = subprocess.check_output(['codex', '--version'], text=True).strip()
     with tempfile.TemporaryDirectory(prefix='tiber-codex-environment-') as directory:
         root = Path(directory)

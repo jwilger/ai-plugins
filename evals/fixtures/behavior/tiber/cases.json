@@ -887,5 +887,31 @@
       ],
       "fail": ["Persist the current socket path and disable the sandbox."]
     }
+  },
+  {
+    "case_id": "tiber-automatic-upgrade-repair",
+    "behavior": "Explains automatic plugin-owned stable transport maintenance and its one-time migration and parent-environment limits.",
+    "prompt": "I installed current Tiber as a plugin without the root installer. Will SSH forwarding configure itself? After I upgrade Tiber and Codex removes the old cache, must I rerun the installer? What about my older 1.1.x direct registration, disabled Tiber, a removed Codex executable, or restarting my SSH agent? Explain without performing actions.",
+    "tags": ["tiber", "ssh-authentication", "automatic-upgrade"],
+    "plugins": ["tiber"],
+    "skills": ["tasks"],
+    "coverage": {
+      "kinds": ["core-behavior", "error-recovery", "scope-boundary"]
+    },
+    "valueGate": {
+      "mode": "none",
+      "baselineLiftThreshold": 0
+    },
+    "minPassRate": 1,
+    "semanticRubric": "Pass if installed portable MCP startup bootstraps a stable shared dispatcher automatically and needs a full Codex restart to activate it; subsequent Tiber upgrades resolve selected enabled installed Tiber without installer reruns even after old cache deletion. Existing 1.1.x versioned registrations need one migration via the current trusted helper or installer; a deleted command cannot self-repair. Disabled/uninstalled Tiber fails safely. A missing captured trusted Codex executable needs rebootstrap, never arbitrary PATH fallback. Agent rotation requires a new full Codex parent process from current agent environment. Preserve unmanaged config and do not persist socket values or keys. Fail if it relies on SessionStart hooks, requires installer reruns for every Tiber upgrade, or promises to refresh a running parent environment.",
+    "hardAssertions": [],
+    "calibration": {
+      "pass": [
+        "Installed portable MCP startup bootstraps the stable shared dispatcher; fully restart Codex once to activate it. Later Tiber upgrades resolve the selected enabled installed version without installer reruns, including removed old caches. Migrate 1.1.x registrations once using the current trusted helper or installer; deleted commands cannot self-repair. Disabled Tiber fails safely. Rebootstrap if the captured trusted Codex executable disappears, never search runtime PATH. Restart the full Codex parent from the current agent shell after rotation; preserve unmanaged config and never store socket values or keys."
+      ],
+      "fail": [
+        "Use a SessionStart hook and rerun the installer after every Tiber upgrade. Restart MCP to refresh the parent agent."
+      ]
+    }
   }
 ]

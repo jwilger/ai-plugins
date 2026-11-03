@@ -47,7 +47,7 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError) as error:
+    except (ValueError, KeyError, TypeError, AttributeError, OSError, subprocess.SubprocessError) as error:
         allowed = {'codex_executable_unavailable', 'inventory_unavailable', 'plugin_not_enabled',
                    'invalid_installed_version', 'installed_launcher_unavailable', 'installed_manifest_mismatch',
                    'invalid_codex_home'}

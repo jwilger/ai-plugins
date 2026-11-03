@@ -126,3 +126,13 @@ PY'
   [[ "$output" == *invalid_installed_version* ]]
   [[ "$output" != *private* ]]
 }
+@test "malformed inventory fails without a traceback or source disclosure" {
+  run repair
+  [ "$status" -eq 0 ]
+  printf '{"installed":["private-source-marker"]}' > "$INVENTORY"
+  run launch
+  [ "$status" -ne 0 ]
+  [[ "$output" == *tiber.mcp_dispatch_failed*reason=inventory_unavailable* ]]
+  [[ "$output" != *Traceback* ]]
+  [[ "$output" != *private-source-marker* ]]
+}

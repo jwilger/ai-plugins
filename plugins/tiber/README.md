@@ -28,9 +28,11 @@ its optional project configuration is `.tiber.toml`.
 Resolve `bin/tiber` from the installed plugin root. The launcher repairs only
 Tiber's own versioned binary cache. Linux x86_64 uses the checksum-verified
 release; other hosts require Cargo and a verified exact-release source bundle.
-The marketplace installer configures one shared user-level Codex transport that
-forwards `SSH_AUTH_SOCK` by name. It refreshes the trusted installed launcher
-path on upgrades. Existing task history and Git refs require no migration.
+On first installed portable MCP startup, Tiber configures one shared user-level
+Codex transport that forwards `SSH_AUTH_SOCK` by name. The installer can also
+bootstrap it immediately. A stable dispatcher in `PLUGIN_DATA` resolves the
+currently enabled installed Tiber launcher on each launch, so future Tiber
+upgrades require no installer rerun, even when Codex removes the old cache. Existing task history and Git refs require no migration.
 
 ### SSH authentication and existing installations
 
@@ -40,7 +42,11 @@ plugin `mcp.json` does not support `env_vars`, and `${SSH_AUTH_SOCK}` and
 stale after login or agent restart. This also affects SSH Git fetch/push;
 sandbox access alone cannot restore missing agent credentials.
 
-Run the shared installer to upgrade and repair all caller projects:
+Fresh plugin-only installations bootstrap automatically on their first MCP
+startup. Fully restart Codex once after that bootstrap to activate forwarding.
+For existing 1.1.x versioned registrations, migrate once using the current
+installed helper below or the shared installer. An already deleted old command
+cannot repair itself. This one-time migration repairs all caller projects:
 
 ```shell
 curl -fsSL https://raw.githubusercontent.com/jwilger/ai-plugins/main/install.sh | sh
@@ -73,7 +79,14 @@ env = { TIBER_AGENT_FORWARDING = "current-session" }
 
 Use an absolute trusted installed native executable, or the installed plugin's
 `bin/tiber` launcher with explicit `PLUGIN_ROOT` and `PLUGIN_DATA` in `env`.
-The helper writes those plugin variables automatically. A complete same-name
+The helper instead provisions a stable dispatcher, captures an absolute trusted
+Codex CLI path and supplies `PLUGIN_DATA`; the dispatcher sets the selected
+`PLUGIN_ROOT` at launch. It queries Codex inventory from a neutral directory
+without forwarding the agent to that subprocess. Disabled or uninstalled Tiber
+fails safely. Runtime PATH replacements are ignored. If the captured Codex
+executable disappears after a Codex upgrade, rerun the installed helper with
+the current trusted Codex available. Normal Tiber CLI calls never change global
+MCP configuration. Bootstrap diagnostics go to stderr. A complete same-name
 user declaration replaces the plugin transport; a partial `env_vars` overlay
 is invalid and does not retain plugin environment or working directory. Keep
 unrelated existing `env_vars` when repairing a user-owned direct registration.
@@ -83,8 +96,9 @@ hardcode a session socket in the MCP configuration.
 
 Legacy plugin-only launchers can still read `signing-agent-socket` for
 compatibility, but that snapshot cannot follow socket changes. Current-session
-mode ignores it, including when the parent agent is unset. Rerun the marketplace
-installer after plugin upgrades to refresh its managed absolute command path.
+mode ignores it, including when the parent agent is unset. After the one-time
+stable-dispatcher bootstrap, Tiber upgrades need no installer repair. Agent
+rotation still requires a full new Codex process from the current agent shell.
 `tiber.ssh_authentication_failed source_redacted=true` reports a known SSH public-key
 rejection with safe repair guidance; it does not expose Git stderr or remotes.
 For a PATH command, preview `tiber install-bin --target-dir ~/.local/bin --dry-run`.
@@ -447,10 +461,10 @@ caller's repository rather than the plugin cache. A later call from another
 workspace replaces the process-local repository selection.
 
 Codex discovers Tiber through the plugin-root `mcp.json`. Because Codex filters
-`SSH_AUTH_SOCK`, the marketplace installer configures the shared user-level
-transport described under [SSH authentication and existing installations](#ssh-authentication-and-existing-installations).
-It forwards the current parent agent by variable name to the trusted installed
-launcher. After agent rotation, fully restart Codex from the updated agent shell;
+`SSH_AUTH_SOCK`, installed portable MCP startup automatically configures the
+shared user-level transport described under [SSH authentication and existing installations](#ssh-authentication-and-existing-installations).
+Its stable dispatcher forwards the current parent agent by variable name to
+the selected enabled installed launcher, surviving removed old version caches. After agent rotation, fully restart Codex from the updated agent shell;
 restarting MCP alone cannot refresh Codex's environment. Saved
 `signing-agent-socket` files remain legacy compatibility only and are ignored
 by the repaired current-session transport. Never pass the agent socket to a

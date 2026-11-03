@@ -22,9 +22,15 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   upgrade. Run `--apply` only after explicit user approval.
 - For `tiber.ssh_authentication_failed` or a CLI that works while MCP reports a
   public-key authentication failure, check the current agent and shared Codex
-  forwarding first. Use the marketplace installer or the trusted installed
-  `scripts/configure-codex-mcp.py --apply`, then fully restart Codex from the
-  current agent shell. Direct user-owned transports need `env_vars =
+  forwarding first. Installed portable MCP startup bootstraps a stable shared
+  dispatcher automatically; activate a new bootstrap with a full Codex restart.
+  Subsequent Tiber upgrades resolve the selected enabled installed launcher
+  automatically even after old caches disappear, without installer reruns.
+  Existing 1.1.x registrations need one migration using the marketplace installer
+  or trusted current installed `scripts/configure-codex-mcp.py --apply`; a deleted
+  old command cannot bootstrap itself. If the captured trusted Codex executable
+  disappears, rebootstrap with the current trusted Codex. Then fully restart
+  Codex from the current agent shell. Direct user-owned transports need `env_vars =
 ["SSH_AUTH_SOCK"]`; portable `mcp.json` cannot express it and `env` placeholders
   are literal. Preserve unmanaged registrations and unrelated environment rules.
   Do not save socket paths, copy keys, discover sockets, or broaden sandbox access

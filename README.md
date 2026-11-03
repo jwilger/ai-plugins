@@ -9,7 +9,7 @@ screenshots and pointer tasks. Codex and Linux x86_64 are the required targets.
 | Plugin                                                                   | Harness | Description                                                                                  | Version |
 | ------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------- | ------- |
 | [development-system](plugins/development-system/README.md)               | Codex   | Advisory repository setup, structured multi-agent review, and delivery workflow.             | 10.0.5  |
-| [tiber](plugins/tiber/README.md)                                         | Codex   | Independent Git-backed task board, CLI, MCP server, and dashboard.                           | 1.2.0   |
+| [tiber](plugins/tiber/README.md)                                         | Codex   | Independent Git-backed task board, CLI, MCP server, and dashboard.                           | 1.2.1   |
 | [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex   | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session. | 0.1.4   |
 
 ## Using the marketplace (Codex)
@@ -25,9 +25,13 @@ installs both plugins by default. Install or update from `main` with:
 curl -fsSL https://raw.githubusercontent.com/jwilger/ai-plugins/main/install.sh | sh
 ```
 
-The installer offers optional GitHub and CodeRabbit plugins and configures
+The installer offers optional GitHub and CodeRabbit plugins and bootstraps
 shared Tiber SSH-agent forwarding by environment-variable name. Restart Codex
 from a shell with the current agent after installation or agent rotation.
+Plugin-only Tiber startup can bootstrap the same stable dispatcher automatically;
+after one activation restart, future Tiber upgrades need no installer rerun.
+Existing 1.1.x registrations need one migration through the current installer
+or installed helper.
 Use `sh install.sh --dry-run` to preview the commands.
 
 After installation, start a new thread and run the setup skill from the target
