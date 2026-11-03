@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-development_system_root="$(cd -- "$plugin_root/../.." && pwd -P)"
-source "$development_system_root/lib/installed-binary.sh"
-development_system_exec_installed_binary "$development_system_root" tiber "$@"

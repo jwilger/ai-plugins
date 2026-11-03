@@ -15,7 +15,7 @@ module.exports = function generateCanaryTests() {
           'This is a discovery-only harness canary, not a behavior eval.',
           'Do not modify files, invoke skills or tools, or perform workflow steps.',
           'Do not inspect repository files or manifests; answer only from loaded plugin and skill context exposed by this harness.',
-          'Reply with every repository marketplace plugin name that is available to this session and at least one representative skill or capability when available.',
+          'Reply with every repository marketplace plugin name that is available to this session and at least one exact skill name for each plugin that provides skills. Use the exposed skill names, not paraphrased capabilities.',
         ].join('\n'),
         sample_index: 1,
       },

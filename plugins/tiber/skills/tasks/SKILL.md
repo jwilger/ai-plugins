@@ -1,5 +1,5 @@
 ---
-name: tiber
+name: tasks
 description: Use whenever Tiber or origin/tiber is mentioned, including repository task tracking, EventCore publication conflicts, ambiguous pushes, tiber sync recovery, force-push safety, cross-worktree task-board coordination, setup, and task workflows.
 ---
 

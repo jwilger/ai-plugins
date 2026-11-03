@@ -51,7 +51,6 @@ development_system_installation_matches_plugin() {
   version="$(development_system_plugin_version "$plugin_root")" || return 1
   host="$(development_system_effective_host)" || return 1
   installation="$data_home/ai-plugins/development-system/$version/$host"
-  [[ -x "$installation/tiber" ]] || return 1
   [[ -x "$installation/development-discipline-mcp" ]] || return 1
   [[ -f "$installation/.plugin-version" ]] || return 1
   [[ "$(<"$installation/.plugin-version")" == "$version" ]]
@@ -96,21 +95,6 @@ development_system_exec_installed_binary() {
     printf '%s\n' \
       "development_system.binary_missing binary=$binary_path remediation='run scripts/install-development-system-binaries.sh --auto'" >&2
     exit 1
-  fi
-  if [[ "$binary_name" == tiber ]] && [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
-    local config_home socket_file socket
-    config_home="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
-    if [[ "${PLUGIN_DATA:-}" == /* ]]; then
-      socket_file="$PLUGIN_DATA/signing-agent-socket"
-    else
-      socket_file="$config_home/ai-plugins/development-system/signing-agent-socket"
-    fi
-    if [[ -f "$socket_file" ]]; then
-      IFS= read -r socket <"$socket_file" || true
-      if [[ "$socket" == /* ]] && [[ -S "$socket" ]]; then
-        export SSH_AUTH_SOCK="$socket"
-      fi
-    fi
   fi
   exec "$binary_path" "$@"
 }

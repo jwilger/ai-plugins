@@ -6,10 +6,11 @@ screenshots and pointer tasks. Codex and Linux x86_64 are the required targets.
 
 ## Plugin catalog
 
-| Plugin                                                                   | Harness                  | Description                                                                                  | Version |
-| ------------------------------------------------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md)               | Codex, pi (experimental) | Advisory repository setup, structured multi-agent review, and Git-backed issue tracking.     | 9.0.1   |
-| [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex                    | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session. | 0.1.4   |
+| Plugin                                                                   | Harness | Description                                                                                  | Version |
+| ------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------- | ------- |
+| [development-system](plugins/development-system/README.md)               | Codex   | Advisory repository setup, structured multi-agent review, and Git-backed issue tracking.     | 10.0.0  |
+| [tiber](plugins/tiber/README.md)                                         | Codex   | Independent Git-backed task board, CLI, MCP server, and dashboard.                           | 1.0.0   |
+| [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex   | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session. | 0.1.4   |
 
 ## Using the marketplace (Codex)
 
@@ -49,7 +50,7 @@ The installer needs Codex, Python 3, and a shell. Binary repair needs Bash,
 curl, tar, checksum tools, and flock on Linux; source fallback needs Cargo.
 Nix is required for repository development, not ordinary Codex plugin use.
 Run the installer again to update its configured GitHub/main marketplace.
-Experimental pi support is described in the Development System reference.
+Tiber can also be installed independently as `tiber@ai-plugins`.
 
 ## Contributing and support
 

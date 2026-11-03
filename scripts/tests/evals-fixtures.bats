@@ -170,7 +170,7 @@ const tests = generateTests();
 if (tests.length === 0) {
   throw new Error('runtime filter returned no tests');
 }
-if (!tests.every((testCase) => testCase.vars?.plugins?.includes('development-system'))) {
+if (!tests.every((testCase) => testCase.vars?.plugins?.includes('tiber'))) {
   throw new Error(`runtime filter returned non-tiber tests: ${tests.map((testCase) => testCase.description).join(', ')}`);
 }
 NODE

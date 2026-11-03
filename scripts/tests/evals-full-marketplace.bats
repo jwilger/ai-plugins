@@ -317,9 +317,9 @@ JSON
     def plugins($label):
       [.providerCompositions[] | select(.label == $label) | .plugins] | first;
     (.providerLabels | sort) == ([.providerCompositions[].label] | sort)
-      and plugins("codex-gpt-6.1-sol-targeted-plugins") == ["development-system"]
+      and plugins("codex-gpt-6.1-sol-targeted-plugins") == ["tiber"]
       and plugins("codex-gpt-6.1-sol-no-plugins") == []
-      and plugins("codex-gpt-6.1-sol-full-marketplace") == ["development-system", "hyprland-computer-control"]
+      and plugins("codex-gpt-6.1-sol-full-marketplace") == ["development-system", "hyprland-computer-control", "tiber"]
   ' "$generated_metadata"
   run node - "$generated_config" "$generated_metadata" <<'NODE'
 const fs = require('node:fs');

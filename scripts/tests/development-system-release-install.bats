@@ -11,9 +11,8 @@ setup() {
   RELEASE_DIR="$TMPROOT/release"
   PAYLOAD_DIR="$TMPROOT/payload/development-system-v${VERSION}-${PLATFORM}"
   mkdir -p "$RELEASE_DIR" "$PAYLOAD_DIR"
-  printf '%s\n' '#!/bin/sh' 'exit 0' >"$PAYLOAD_DIR/tiber"
   printf '%s\n' '#!/bin/sh' 'exit 0' >"$PAYLOAD_DIR/development-discipline-mcp"
-  chmod +x "$PAYLOAD_DIR/tiber" "$PAYLOAD_DIR/development-discipline-mcp"
+  chmod +x "$PAYLOAD_DIR/development-discipline-mcp"
   printf '%s\n' 'AGPL-3.0-or-later' >"$PAYLOAD_DIR/LICENSE"
   printf '%s\n' "source=https://github.com/jwilger/ai-plugins/tree/development-system-v${VERSION}" >"$PAYLOAD_DIR/SOURCE"
   tar -C "$TMPROOT/payload" -czf "$RELEASE_DIR/$ARCHIVE" "development-system-v${VERSION}-${PLATFORM}"
@@ -61,25 +60,9 @@ install_release() {
   [ "$status" -eq 0 ]
   grep -Fx "https://github.com/jwilger/ai-plugins/releases/download/development-system-v${VERSION}/${ARCHIVE}" "$CURL_LOG"
   grep -Fx "https://github.com/jwilger/ai-plugins/releases/download/development-system-v${VERSION}/${ARCHIVE}.sha256" "$CURL_LOG"
-  [ -x "$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/tiber" ]
+  [ ! -e "$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/tiber" ]
   [ -x "$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/development-discipline-mcp" ]
   [ "$(<"$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/.plugin-version")" = "$VERSION" ]
-}
-
-@test "portable launcher uses PLUGIN_DATA and restores the plugin-owned signing socket" {
-  local data="$TMPROOT/plugin-data"
-  PLUGIN_DATA="$data" install_release
-  local installed="$data/ai-plugins/development-system/$VERSION/linux-x86_64/tiber"
-  printf '#!/bin/sh\nprintf "%%s\\n" "$SSH_AUTH_SOCK"\n' >"$installed"
-  chmod +x "$installed"
-  python3 -c 'import socket,sys; s=socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$TMPROOT/agent.sock"
-  printf '%s\n' "$TMPROOT/agent.sock" >"$data/signing-agent-socket"
-
-  run env -u SSH_AUTH_SOCK PLUGIN_DATA="$data" XDG_DATA_HOME="$TMPROOT/wrong-xdg" \
-    "$ROOT/plugins/development-system/bin/tiber" --help
-
-  [ "$status" -eq 0 ]
-  [ "$output" = "$TMPROOT/agent.sock" ]
 }
 
 @test "session start repairs stale binaries and leaves matching binaries untouched" {
@@ -140,7 +123,7 @@ install_release() {
 
   [ "$status" -eq 0 ]
   local installation="$TMPROOT/auto-source-xdg/ai-plugins/development-system/$VERSION/darwin-aarch64"
-  [ -x "$installation/tiber" ]
+  [ ! -e "$installation/tiber" ]
   [ -x "$installation/development-discipline-mcp" ]
   [ "$(<"$installation/.plugin-version")" = "$VERSION" ]
 }
@@ -211,6 +194,32 @@ install_release() {
   [ "$status" -eq 0 ]
   local link="$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64"
   [ -L "$link" ]
-  [ -x "$link/tiber" ]
+  [ -x "$link/development-discipline-mcp" ]
   [ "$(find "$(dirname "$link")" -maxdepth 1 -name '.linux-x86_64.staging.*' | wc -l)" -eq 1 ]
+}
+
+@test "release archive links are rejected before extraction writes outside its root" {
+  install_release
+  local outside="$TMPROOT/outside"
+  mkdir -p "$outside"
+  python3 - "$RELEASE_DIR/$ARCHIVE" "development-system-v${VERSION}-${PLATFORM}" "$outside" <<'PYTHON'
+import io, sys, tarfile
+with tarfile.open(sys.argv[1], "w:gz") as archive:
+    root = tarfile.TarInfo(sys.argv[2] + "/")
+    root.type = tarfile.SYMTYPE
+    root.linkname = sys.argv[3]
+    archive.addfile(root)
+    for name in ["LICENSE", "SOURCE", "development-discipline-mcp"]:
+        data = b"unexpected archive write\n"
+        member = tarfile.TarInfo(sys.argv[2] + "/" + name)
+        member.size = len(data)
+        archive.addfile(member, io.BytesIO(data))
+PYTHON
+  (cd "$RELEASE_DIR" && sha256sum "$ARCHIVE" >"$ARCHIVE.sha256")
+
+  run install_release
+
+  [ "$status" -ne 0 ]
+  [ ! -e "$outside/development-discipline-mcp" ]
+  [ -x "$TMPROOT/xdg-data/ai-plugins/development-system/$VERSION/linux-x86_64/development-discipline-mcp" ]
 }

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "tiber",
+  "version": "1.0.0",
+  "description": "Git-backed task coordination, board operations, and recovery records for Codex.",
+  "author": {
+    "name": "John Wilger",
+    "email": "john@johnwilger.com"
+  },
+  "license": "AGPL-3.0-or-later",
+  "keywords": ["tasks", "git", "coordination"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Tiber",
+        "shortDescription": "Git-backed task coordination for Codex.",
+        "developerName": "John Wilger",
+        "category": "Developer Tools",
+        "capabilities": ["Read"],
+        "websiteURL": "https://github.com/jwilger/ai-plugins"
+      }
+    }
+  }
+}

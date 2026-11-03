@@ -77,7 +77,7 @@ jobs:
         run: |
           if release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null)"; then
             [ "$(jq -r '.draft' <<<"$release_json")" = false ] || exit 1
-            for asset in "$ARCHIVE" "$ARCHIVE.sha256"; do
+            for asset in "$ARCHIVE" "$ARCHIVE.sha256" "$TAG-source.tar.gz" "$TAG-source.tar.gz.sha256"; do
               jq -e --arg asset "$asset" '.assets | any(.name == $asset)' <<<"$release_json" >/dev/null || exit 1
             done
             echo "existing=true" >>"$GITHUB_OUTPUT"
@@ -104,6 +104,8 @@ jobs:
           subject-path: |
             dist/${{ steps.version.outputs.archive }}
             dist/${{ steps.version.outputs.archive }}.sha256
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz.sha256
 
       - name: Preserve assets for isolated publication
         if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
@@ -113,6 +115,8 @@ jobs:
           path: |
             dist/${{ steps.version.outputs.archive }}
             dist/${{ steps.version.outputs.archive }}.sha256
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
 
@@ -156,7 +160,7 @@ jobs:
               echo "Published release $TAG does not have its immutable tag at $GREEN_SHA." >&2
               exit 1
             }
-            for asset in "$ARCHIVE" "$ARCHIVE.sha256"; do
+            for asset in "$ARCHIVE" "$ARCHIVE.sha256" "$TAG-source.tar.gz" "$TAG-source.tar.gz.sha256"; do
               jq -e --arg asset "$asset" '.assets | any(.name == $asset)' <<<"$release_json" >/dev/null || {
                 echo "Published release $TAG is missing $asset and cannot be repaired." >&2
                 exit 1
@@ -170,14 +174,14 @@ jobs:
             gh release create "$TAG" --draft --latest=false --target "$GREEN_SHA" \
               --title "Development System $TAG" \
               --notes "Static linux-x86_64 Development System MCP bundle built from $GREEN_SHA." \
-              "dist/$ARCHIVE" "dist/$ARCHIVE.sha256"
+              "dist/$ARCHIVE" "dist/$ARCHIVE.sha256" "dist/$TAG-source.tar.gz" "dist/$TAG-source.tar.gz.sha256"
           else
-            gh release upload "$TAG" --clobber "dist/$ARCHIVE" "dist/$ARCHIVE.sha256"
+            gh release upload "$TAG" --clobber "dist/$ARCHIVE" "dist/$ARCHIVE.sha256" "dist/$TAG-source.tar.gz" "dist/$TAG-source.tar.gz.sha256"
           fi
 
           verify_dir="$(mktemp -d)"
           trap 'rm -rf -- "$verify_dir"' EXIT
-          gh release download "$TAG" --dir "$verify_dir" --pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256"
-          (cd "$verify_dir" && sha256sum -c "$ARCHIVE.sha256")
+          gh release download "$TAG" --dir "$verify_dir" --pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256" --pattern "$TAG-source.tar.gz" --pattern "$TAG-source.tar.gz.sha256"
+          (cd "$verify_dir" && sha256sum -c "$ARCHIVE.sha256" && sha256sum -c "$TAG-source.tar.gz.sha256")
           gh release edit "$TAG" --draft=false --latest=false --target "$GREEN_SHA"
           [ "$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha')" = "$GREEN_SHA" ]

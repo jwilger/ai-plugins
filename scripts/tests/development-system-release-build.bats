@@ -61,7 +61,7 @@ setup() {
 }
 
 @test "release builder rejects Nix store runtime references" {
-  run env PATH="$FAKE_BIN:$PATH" CARGO_LOG="$TMPROOT/cargo.log" NIX_REFERENCE=tiber \
+  run env PATH="$FAKE_BIN:$PATH" CARGO_LOG="$TMPROOT/cargo.log" NIX_REFERENCE=development-discipline-mcp \
     "$ROOT/scripts/build-development-system-release.sh" "$TMPROOT/dist"
 
   [ "$status" -ne 0 ]
@@ -75,7 +75,7 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-@test "release builder packages two inspected static binaries with license and exact source tag" {
+@test "release builder packages its inspected static binary with license and exact source tag" {
   local output_dir="$TMPROOT/dist"
   local cargo_log="$TMPROOT/cargo.log"
   local version
@@ -89,17 +89,29 @@ setup() {
   [ "$status" -eq 0 ]
   [ -f "$archive" ]
   [ -f "$archive.sha256" ]
+  local source_archive="$output_dir/development-system-v${version}-source.tar.gz"
+  [ -f "$source_archive" ]
+  (cd "$output_dir" && sha256sum -c "$(basename "$source_archive").sha256")
+  tar -tzf "$source_archive" | grep -F '/plugins/tiber/rust/crates/tiber-git/Cargo.toml'
+  tar -tzf "$source_archive" | grep -F '/plugins/development-system/components/development-discipline/rust/Cargo.toml'
+  ! tar -tzf "$source_archive" | grep -E '/target/'
+  mkdir -p "$TMPROOT/source-check"
+  tar -xzf "$source_archive" -C "$TMPROOT/source-check"
+  local closure_root="$TMPROOT/source-check/development-system-v${version}-source"
+  cargo metadata --offline --locked --no-deps --format-version 1 \
+    --manifest-path "$closure_root/plugins/development-system/components/development-discipline/rust/Cargo.toml" >"$TMPROOT/discipline-metadata.json"
+  cargo metadata --offline --locked --no-deps --format-version 1 \
+    --manifest-path "$closure_root/plugins/tiber/rust/Cargo.toml" >"$TMPROOT/tiber-metadata.json"
+
   (cd "$output_dir" && sha256sum -c "$(basename "$archive").sha256")
   tar -tzf "$archive" | LC_ALL=C sort >"$TMPROOT/layout"
   diff -u <(printf '%s\n' \
     "development-system-v${version}-linux-x86_64/" \
     "development-system-v${version}-linux-x86_64/LICENSE" \
     "development-system-v${version}-linux-x86_64/SOURCE" \
-    "development-system-v${version}-linux-x86_64/development-discipline-mcp" \
-    "development-system-v${version}-linux-x86_64/tiber") "$TMPROOT/layout"
+    "development-system-v${version}-linux-x86_64/development-discipline-mcp") "$TMPROOT/layout"
   tar -xOf "$archive" "development-system-v${version}-linux-x86_64/SOURCE" |
     grep -Fx "source=https://github.com/jwilger/ai-plugins/tree/development-system-v${version}"
-  [ "$(wc -l <"$cargo_log")" -eq 2 ]
-  grep -F '|tiber|x86_64-unknown-linux-musl' "$cargo_log"
+  [ "$(wc -l <"$cargo_log")" -eq 1 ]
   grep -F '|development-discipline-mcp|x86_64-unknown-linux-musl' "$cargo_log"
 }

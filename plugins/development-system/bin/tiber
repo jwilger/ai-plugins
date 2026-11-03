@@ -21,10 +21,12 @@ if [ -n "$config_root" ] && [ -f "$config_root/.development-system.toml" ]; then
     exit 2
   fi
 fi
-for bash_bin in /run/current-system/sw/bin/bash /bin/bash /usr/bin/bash; do
-  if [ -x "$bash_bin" ]; then
-    exec "$bash_bin" "$plugin_root/components/tiber/bin/tiber" "$@"
+if [ "${DEVELOPMENT_SYSTEM_TIBER_FORWARDING:-}" != 1 ] && command -v tiber >/dev/null 2>&1; then
+  companion="$(command -v tiber)"
+  if [ "$(realpath "$companion")" != "$(realpath "$0")" ]; then
+    export DEVELOPMENT_SYSTEM_TIBER_FORWARDING=1
+    exec "$companion" "$@"
   fi
-done
-echo "development_system.bash_missing component=tiber" >&2
-exit 127
+fi
+echo "development_system.tiber_companion_missing remediation='install tiber@ai-plugins; use the Tiber plugin launcher and preview tiber install-bin --target-dir ~/.local/bin --dry-run'" >&2
+exit 2

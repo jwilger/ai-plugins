@@ -1,0 +1,187 @@
+name: Release Tiber
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+concurrency:
+  group: release-tiber
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build attested static bundle
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      archive: ${{ steps.version.outputs.archive }}
+      commit: ${{ steps.commit.outputs.sha }}
+      existing: ${{ steps.existing.outputs.existing }}
+      stale: ${{ steps.commit.outputs.stale }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify the green commit is still main
+        id: commit
+        env:
+          GREEN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch --no-tags origin refs/heads/main
+          main_sha="$(git rev-parse FETCH_HEAD)"
+          if [ "$main_sha" != "$GREEN_SHA" ]; then
+            echo "Green commit $GREEN_SHA is no longer the main tip ($main_sha); skipping stale release." >&2
+            echo "stale=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "stale=false" >>"$GITHUB_OUTPUT"
+          [ "$(git rev-parse HEAD)" = "$GREEN_SHA" ]
+          echo "sha=$GREEN_SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Derive synchronized release identity
+        id: version
+        if: steps.commit.outputs.stale != 'true'
+        run: |
+          plugin_version="$(jq -er '.version' plugins/tiber/plugin.json)"
+          marketplace_version="$(jq -er '.plugins[] | select(.name == "tiber") | .version' .agents/plugins/marketplace.json)"
+          [ "$plugin_version" = "$marketplace_version" ]
+          tag="tiber-v$plugin_version"
+          {
+            echo "version=$plugin_version"
+            echo "tag=$tag"
+            echo "archive=$tag-linux-x86_64.tar.gz"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Check for an existing versioned release
+        id: existing
+        if: steps.commit.outputs.stale != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+        run: |
+          if release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null)"; then
+            [ "$(jq -r '.draft' <<<"$release_json")" = false ] || exit 1
+            for asset in "$ARCHIVE" "$ARCHIVE.sha256" "$TAG-source.tar.gz" "$TAG-source.tar.gz.sha256"; do
+              jq -e --arg asset "$asset" '.assets | any(.name == $asset)' <<<"$release_json" >/dev/null || exit 1
+            done
+            echo "existing=true" >>"$GITHUB_OUTPUT"
+            echo "Versioned release $TAG already exists; no rebuild is needed."
+          else
+            echo "existing=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Install pinned Rust target and musl linker
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+          rustup target add --toolchain 1.99.1 x86_64-unknown-linux-musl
+
+      - name: Build and inspect release assets
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
+        run: scripts/build-tiber-release.sh dist
+
+      - name: Generate GitHub build provenance
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
+        uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-path: |
+            dist/${{ steps.version.outputs.archive }}
+            dist/${{ steps.version.outputs.archive }}.sha256
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz.sha256
+
+      - name: Preserve assets for isolated publication
+        if: steps.commit.outputs.stale != 'true' && steps.existing.outputs.existing != 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: tiber-release-${{ steps.commit.outputs.sha }}
+          path: |
+            dist/${{ steps.version.outputs.archive }}
+            dist/${{ steps.version.outputs.archive }}.sha256
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz
+            dist/${{ steps.version.outputs.tag }}-source.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish immutable release
+    needs: build
+    if: needs.build.outputs.stale != 'true' && needs.build.outputs.existing != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.build.outputs.tag }}
+      ARCHIVE: ${{ needs.build.outputs.archive }}
+      GREEN_SHA: ${{ needs.build.outputs.commit }}
+    steps:
+      - name: Download attested build outputs
+        uses: actions/download-artifact@v8.0.2
+        with:
+          name: tiber-release-${{ needs.build.outputs.commit }}
+          path: dist
+
+      - name: Create, repair, verify, and publish the release
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! tag_sha="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha' 2>/dev/null)"; then
+            tag_sha=""
+          fi
+          if [ -n "$tag_sha" ] && [ "$tag_sha" != "$GREEN_SHA" ]; then
+            echo "Tag $TAG points to $tag_sha instead of $GREEN_SHA." >&2
+            exit 1
+          fi
+
+          if ! release_json="$(gh api "repos/$GH_REPO/releases/tags/$TAG" 2>/dev/null)"; then
+            release_json=""
+          fi
+          if [ -n "$release_json" ] && [ "$(jq -r '.draft' <<<"$release_json")" = false ]; then
+            [ "$tag_sha" = "$GREEN_SHA" ] || {
+              echo "Published release $TAG does not have its immutable tag at $GREEN_SHA." >&2
+              exit 1
+            }
+            for asset in "$ARCHIVE" "$ARCHIVE.sha256" "$TAG-source.tar.gz" "$TAG-source.tar.gz.sha256"; do
+              jq -e --arg asset "$asset" '.assets | any(.name == $asset)' <<<"$release_json" >/dev/null || {
+                echo "Published release $TAG is missing $asset and cannot be repaired." >&2
+                exit 1
+              }
+            done
+            echo "Published release $TAG already has the expected immutable assets."
+            exit 0
+          fi
+
+          if [ -z "$release_json" ]; then
+            gh release create "$TAG" --draft --latest=false --target "$GREEN_SHA" \
+              --title "Tiber $TAG" \
+              --notes "Static linux-x86_64 Tiber MCP bundle built from $GREEN_SHA." \
+              "dist/$ARCHIVE" "dist/$ARCHIVE.sha256" "dist/$TAG-source.tar.gz" "dist/$TAG-source.tar.gz.sha256"
+          else
+            gh release upload "$TAG" --clobber "dist/$ARCHIVE" "dist/$ARCHIVE.sha256" "dist/$TAG-source.tar.gz" "dist/$TAG-source.tar.gz.sha256"
+          fi
+
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$verify_dir"' EXIT
+          gh release download "$TAG" --dir "$verify_dir" --pattern "$ARCHIVE" --pattern "$ARCHIVE.sha256" --pattern "$TAG-source.tar.gz" --pattern "$TAG-source.tar.gz.sha256"
+          (cd "$verify_dir" && sha256sum -c "$ARCHIVE.sha256" && sha256sum -c "$TAG-source.tar.gz.sha256")
+          gh release edit "$TAG" --draft=false --latest=false --target "$GREEN_SHA"
+          [ "$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha')" = "$GREEN_SHA" ]

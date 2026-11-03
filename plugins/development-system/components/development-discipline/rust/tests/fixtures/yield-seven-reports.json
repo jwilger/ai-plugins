@@ -390,7 +390,7 @@
       "plugins/development-system/components/development-discipline/skills/final-review/SKILL.md",
       "plugins/development-system/components/development-discipline/skills/final-review/references/mcp-protocol.md",
       "plugins/development-system/components/development-discipline/skills/test-driven-development/SKILL.md",
-      "plugins/development-system/components/tiber/rust/crates/tiber-git/src/git_event_store.rs",
+      "plugins/tiber/rust/crates/tiber-git/src/git_event_store.rs",
       "plugins/development-system/plugin.json",
       "plugins/development-system/scripts/checkpoint-operations.mjs",
       "plugins/development-system/scripts/checkpoint-record.jq",

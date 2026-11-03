@@ -102,7 +102,7 @@ ls_workspace_folders:
 #     - ../sibling-package
 #     - ../shared-lib
 ls_additional_workspace_folders:
-- plugins/development-system/components/tiber/rust
+- plugins/tiber/rust
 - plugins/development-system/components/development-discipline/rust
 
 # list of additional paths to ignore in this project.

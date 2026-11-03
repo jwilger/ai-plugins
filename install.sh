@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install this marketplace's Development System plugin from main with optional companions.
+# Install Development System and Tiber from main with optional companions.
 set -eu
 
 repo='https://github.com/jwilger/ai-plugins.git'
@@ -97,28 +97,26 @@ else
   run codex plugin marketplace upgrade "$marketplace"
 fi
 run codex plugin add "development-system@$marketplace"
+run codex plugin add "tiber@$marketplace"
 if [ "$dry_run" = false ]; then
-  installed_version="$(codex plugin list --json | python3 -c '
-import json,sys
-for plugin in json.load(sys.stdin).get("installed", []):
- if plugin.get("pluginId") == "development-system@ai-plugins":
-  print(plugin.get("version", ""))
-  break
-')"
-  [ -n "$installed_version" ] || { echo 'install: Development System is not installed' >&2; exit 1; }
+  installed_plugins="$(codex plugin list --json)"
   plugin_data="$(codex -C /tmp mcp list --json | python3 -c '
-import json,sys
+import json,os,sys
+installed={p.get("pluginId"):p for p in json.loads(sys.argv[1]).get("installed", [])}
 servers={server.get("name"):server for server in json.load(sys.stdin)}
-data=[]
-for name in ("development-discipline", "tiber"):
- env=servers.get(name,{}).get("transport",{}).get("env",{})
- if not env.get("PLUGIN_ROOT", "").endswith("/development-system/" + sys.argv[1]):
-  sys.exit(f"install: {name} is not provided by the installed portable plugin")
- data.append(env.get("PLUGIN_DATA", ""))
-if not data[0] or data[0] != data[1]: sys.exit("install: plugin MCP data directories disagree")
-print(data[0])
-' "$installed_version")"
-  [ "${plugin_data#/}" != "$plugin_data" ] || { echo 'install: Codex did not expose Development System PLUGIN_DATA' >&2; exit 1; }
+data={}
+for server,plugin in (("development-discipline","development-system"),("tiber","tiber")):
+ version=installed.get(plugin+"@ai-plugins",{}).get("version","")
+ env=servers.get(server,{}).get("transport",{}).get("env",{})
+ if not version or not env.get("PLUGIN_ROOT", "").endswith("/"+plugin+"/"+version):
+  sys.exit(f"install: {server} is not provided by the installed {plugin} plugin")
+ directory=env.get("PLUGIN_DATA", "")
+ if not os.path.isabs(directory): sys.exit(f"install: {plugin} has no absolute PLUGIN_DATA")
+ data[plugin]=directory
+if data["development-system"] == data["tiber"]:
+ sys.exit("install: companion plugins must have separate data directories")
+print(data["tiber"])
+' "$installed_plugins")"
 fi
 
 for name in github coderabbit; do

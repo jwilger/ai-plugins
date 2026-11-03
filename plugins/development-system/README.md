@@ -7,7 +7,7 @@ Configured repository development, task tracking, and independent review for Cod
 Install the plugin, restart Codex, and open the repository's primary checkout.
 Ask: “Use development-system setup to inspect this project and propose its
 configuration.” Review the complete `.development-system.toml` and hook proposal
-before approving it. Confirm both bundled MCP servers are available; do not
+before approving it. Confirm Development System and the Tiber companion MCP servers are available; do not
 register duplicate servers in your project.
 
 ### Greenfield projects
@@ -52,7 +52,7 @@ and CI follow-through. Installed commit/push hooks run their gates; avoid asking
 for duplicate manual runs. These workflows provide guidance, not a sandbox or
 host permission boundary.
 
-Tiber, agentic-system engineering, and eval-case reporting require their
+Development System’s Tiber integration, agentic-system engineering, and eval-case reporting require their
 respective `features.tiber`, `features.agentic_systems`, and
 `features.eval_case_reporting` settings in `.development-system.toml`. Ask setup
 to propose enabling the features you need. For LLM work, try: “Define the boundary
@@ -62,6 +62,6 @@ and explicitly approve the exact sanitized issue before it is posted.
 
 ## Setup and recovery reference
 
-See [troubleshooting](TROUBLESHOOTING.md) for binary repair, signing, model routing, checkpoint recovery, and experimental pi support.
+See [troubleshooting](TROUBLESHOOTING.md) for binary repair, signing, model routing, checkpoint recovery.
 
 See the [marketplace licensing explanation](../../README.md#license).

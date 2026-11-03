@@ -2,6 +2,8 @@
 
 ## Status
 
+Superseded by [ADR-0020](0020-independent-tiber-plugin.md). Experimental pi delivery has been retired. The remainder records the historical decision.
+
 Accepted
 
 ## Date

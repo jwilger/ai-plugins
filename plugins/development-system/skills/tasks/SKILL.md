@@ -1,72 +1,16 @@
 ---
 name: tasks
-description: Use for shared repository task tracking, backlog admission or prioritization, task history/search, dashboard or scaffold setup, and whenever Tiber or origin/tiber is mentioned, including EventCore publication conflicts, ambiguous pushes, tiber sync recovery, force-push safety, and cross-worktree coordination.
+description: Compatibility entry point for Development System task coordination through the independently installed Tiber plugin.
 ---
 
-# Tasks
+# Tiber integration
 
-Require `[features].tiber = true` in `.development-system.toml`. Use the Tiber
-MCP when available and its CLI otherwise.
+Require `[features].tiber = true` in `.development-system.toml` for Development
+System task integration. Invoke the installed `tiber:tasks` skill for task
+operations and `tiber:new-task` for admission. Those skills own board policy,
+publication recovery, signing, and CI-recovery authority.
 
-Load the matching retained contract before answering:
-
-- Creating or admitting a ticket: [new
-  task](../../components/tiber/skills/new-task/SKILL.md).
-- Search/history, transitions, dependencies, acceptance criteria, validation,
-  current-HEAD trailers, dashboard, scaffold/install, CI-recovery interaction,
-  or publication recovery: [Tiber operations](../../components/tiber/skills/tiber/SKILL.md).
-
-This skill owns Tiber publication guidance even when a prompt also mentions Git
-delivery, pushing, rebasing, or force-pushing. A confirmed expected
-stream-version mismatch is an optimistic-concurrency conflict: Tiber refetches
-the authoritative `origin/tiber` branch and retries the pure command with the
-same invocation identity and inputs. If durable publication is neither confirmed
-nor rejected, treat the outcome as ambiguous: stop every further mutation and
-use structured `tiber sync` to reconcile that exact pending invocation. Never
-force-push, rewrite, or manually reconcile the authoritative `tiber` branch.
-
-Keep one active ticket and rank the whole queue strictly by user pain,
-frequency, severity, blocking impact, leverage, confidence, cost, and overlap.
-An optional engine-level capacity remains available to other repositories, but
-this repository does not configure an arbitrary backlog limit.
-
-Before admitting a candidate, call structured `tiber.search` across `backlog`,
-`in-progress`, `done`, and `abandoned`; combine genuine overlap or reject a
-duplicate. Create and update tickets only through structured Tiber operations,
-then run structured validation before claiming success. Leave a new ticket in
-`backlog` unless the user explicitly asks to start it. A locally staged candidate
-is not durable publication evidence.
-
-For operational requests, preserve these exact boundaries:
-
-- Open or reuse the project dashboard with `tiber dashboard serve --open`; use
-  `--port <port>` only for an explicitly requested fixed port and report a
-  conflict rather than starting a second project server.
-- Preview repository integration with `tiber scaffold repo --dry-run`, show
-  already-configured items and every conflict, and require explicit approval of
-  that exact preview before applying. Never infer replacement approval.
-- Run `tiber validate --fix` before a board-health claim. It may repair misplaced
-  claims and missing reciprocal links; dangling references and dependency cycles
-  remain report-only.
-- Treat `close-from-trailers` as successful only when it synchronizes the board,
-  resolves every `Closes:` trailer from current `HEAD`, prints each closed task,
-  and leaves each named task no longer open.
-- When `[final_review].minimum_clean_reviews` is enabled, record every clean
-  result and substantive finding through `tiber.review.record` (or `tiber
-review`) with reviewer identity/type, a requested pathspec scope that Tiber
-  materializes into a durable exact path inventory, a resolvable commit
-  range, outcome, evidence, timestamp, and Tiber-computed source and
-  verification-evidence fingerprints. A
-  finding or changed source, declared scope, commit range, or verification
-  evidence resets or stales the sequence; completion and trailer delivery need
-  the configured number of fresh consecutive clean independent records. Explicit
-  minima one and two are valid; stronger configured minima remain enforced. There is no runtime bypass. Opting out requires an
-  explicit, reviewed repository configuration change, which is the audit
-  record.
-
-When a task-board request coincides with a pushed-CI failure, use Tiber's
-semantic CI-recovery operations. Tiber is the single durable authority for the
-incident, owner lease, diagnosis, selected action, replacement, and
-terminal-success proof. Development Discipline only reads Tiber's unresolved
-hold before delivery; it neither maintains a second incident nor grants or
-releases that hold.
+If the companion is missing, explain how to install `tiber@ai-plugins`; do not
+silently bypass task tracking, CI-recovery holds, or review receipts. Disabling
+Development System integration does not disable standalone Tiber, which uses
+`.tiber.toml` without requiring Development System configuration.

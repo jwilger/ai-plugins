@@ -9,12 +9,12 @@ case "$*" in
   'plugin marketplace list --json') printf '%s\n' '{"marketplaces":[]}' ;;
   'plugin list --json')
     if [ "${MOCK_INSTALLED:-}" = 1 ]; then
-      printf '%s\n' '{"installed":[{"pluginId":"development-system@ai-plugins","name":"development-system","version":"6.8.0"}],"available":[]}'
+      printf '%s\n' '{"installed":[{"pluginId":"development-system@ai-plugins","name":"development-system","version":"10.0.0"},{"pluginId":"tiber@ai-plugins","name":"tiber","version":"1.0.0"}],"available":[]}'
     else
       printf '%s\n' '{"installed":[],"available":[{"name":"github","pluginId":"github@curated"},{"name":"coderabbit","pluginId":"coderabbit@curated"}]}'
     fi
     ;;
-  '-C /tmp mcp list --json') printf '[{"name":"development-discipline","transport":{"env":{"PLUGIN_ROOT":"/tmp/cache/development-system/6.8.0","PLUGIN_DATA":"%s"}}},{"name":"tiber","transport":{"env":{"PLUGIN_ROOT":"/tmp/cache/development-system/6.8.0","PLUGIN_DATA":"%s"}}}]\n' "$MOCK_PLUGIN_DATA" "$MOCK_PLUGIN_DATA" ;;
+  '-C /tmp mcp list --json') printf '[{"name":"development-discipline","transport":{"env":{"PLUGIN_ROOT":"/tmp/cache/development-system/10.0.0","PLUGIN_DATA":"%s"}}},{"name":"tiber","transport":{"env":{"PLUGIN_ROOT":"/tmp/cache/tiber/1.0.0","PLUGIN_DATA":"%s"}}}]\n' "$MOCK_PLUGIN_DATA-development-system" "$MOCK_PLUGIN_DATA" ;;
   *) printf '%s\n' "$*" >>"$CODEX_CALL_LOG" ;;
 esac
 SH
@@ -28,6 +28,7 @@ teardown() { rm -rf "$TMPROOT"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *'codex plugin marketplace add jwilger/ai-plugins --ref main'* ]]
   [[ "$output" == *'codex plugin add development-system@ai-plugins'* ]]
+  [[ "$output" == *'codex plugin add tiber@ai-plugins'* ]]
   [[ "$output" == *'codex plugin add github@curated'* ]]
   [[ "$output" == *'codex plugin add coderabbit@curated'* ]]
   [ ! -e "$CODEX_CALL_LOG" ]

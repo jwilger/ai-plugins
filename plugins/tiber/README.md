@@ -18,6 +18,26 @@ creating the top-level tasks for the rename/merge work.
 
 ![Tiber docs browser listing repository markdown docs](docs/screenshots/docs-browser.png)
 
+## Installation
+
+Install the independent plugin with `codex plugin add tiber@ai-plugins` after
+adding this marketplace. The repository's `install.sh` installs Tiber and
+Development System together by default. Tiber needs no `.development-system.toml`;
+its optional project configuration is `.tiber.toml`.
+
+Resolve `bin/tiber` from the installed plugin root. The launcher repairs only
+Tiber's own versioned binary cache. Linux x86_64 uses the checksum-verified
+release; other hosts require Cargo and a verified exact-release source bundle.
+Signing sockets belong in Tiber's own `PLUGIN_DATA/signing-agent-socket`.
+Rerunning the marketplace installer migrates the host socket configuration.
+Existing task history and Git refs require no migration.
+
+For a PATH command, preview `tiber install-bin --target-dir ~/.local/bin --dry-run`.
+The installer never overwrites an existing forwarder. When upgrading a legacy
+Development System forwarder, inspect its printed destination, move that old
+file to a backup, then explicitly run `--apply` using the new Tiber launcher.
+Do not remove an unrelated executable or silently replace a user's forwarder.
+
 ## Quick Start
 
 ```shell
@@ -374,7 +394,7 @@ workspace replaces the process-local repository selection.
 Codex loads Tiber from the plugin-root `mcp.json`. Codex filters the MCP
 process environment, so the bundled launcher reads a user-owned absolute
 socket path from `$PLUGIN_DATA/signing-agent-socket`. Outside a portable harness it uses
-`$XDG_CONFIG_HOME/ai-plugins/development-system/` (or `~/.config`). The root
+`$XDG_CONFIG_HOME/ai-plugins/tiber/` (or `~/.config`). The root
 installer records the current valid `SSH_AUTH_SOCK`; update this plugin-owned
 file if the agent socket moves.
 Never pass the signing socket to a project-controlled executable.
@@ -481,7 +501,7 @@ admit the generated workflow.
 
 Tiber ships Rust source and a `bin/tiber` launcher. After installing or
 upgrading Development System, run
-`just install-development-system-binaries` from the marketplace
+`plugins/tiber/scripts/install-tiber-binaries.sh` from the marketplace
 checkout. It installs Tiber alongside the matching Development Discipline MCP
 binary. Development System's `SessionStart` hook checks the versioned
 installation marker and repairs a missing or stale bundle. Linux x86_64 uses

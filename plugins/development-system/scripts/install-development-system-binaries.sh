@@ -4,6 +4,7 @@ set -euo pipefail
 plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 marketplace_root="$(cd -- "$plugin_root/../.." && pwd -P)"
 source "$plugin_root/lib/installed-binary.sh"
+source "$plugin_root/lib/source-bundle.sh"
 
 from_source=false
 auto_mode=false
@@ -73,6 +74,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
+release_name="development-system-v${version}"
+release_base_url="${DEVELOPMENT_SYSTEM_RELEASE_BASE_URL:-https://github.com/jwilger/ai-plugins/releases/download/$release_name}"
 staged_dir="$(mktemp -d "$version_dir/.${host}.staging.XXXXXX")"
 if [[ "$from_source" == true ]]; then
   if ! command -v cargo >/dev/null 2>&1 || ! cargo --version >/dev/null 2>&1; then
@@ -89,21 +92,14 @@ if [[ "$from_source" == true ]]; then
   fi
   mkdir -p "$build_dir"
 
-  # Cargo discovers each component's pinned rust-toolchain.toml. Both
-  # lockfiles are enforced; the repository Nix devshell is optional.
+  plugin_prepare_source development-system "$plugin_root" "$version" "$version_dir" "$release_base_url"
+
+  # Cargo enforces the workspace lockfile and pinned toolchain.
   (
-    cd "$plugin_root/components/tiber/rust"
-    CARGO_TARGET_DIR="$build_dir/tiber" cargo build --locked --release --bin tiber
+    cd "$source_root/plugins/development-system/components/development-discipline/rust"
+    CARGO_TARGET_DIR="$build_dir" cargo build --locked --release --bin development-discipline-mcp
   )
-  (
-    cd "$plugin_root/components/development-discipline/rust"
-    CARGO_TARGET_DIR="$build_dir/development-discipline" \
-      cargo build --locked --release --bin development-discipline-mcp
-  )
-  install -m 0755 "$build_dir/tiber/release/tiber" "$staged_dir/tiber"
-  install -m 0755 \
-    "$build_dir/development-discipline/release/development-discipline-mcp" \
-    "$staged_dir/development-discipline-mcp"
+  install -m 0755 "$build_dir/release/development-discipline-mcp" "$staged_dir/development-discipline-mcp"
 else
   if [[ "$host" != linux-x86_64 ]]; then
     printf '%s\n' \
@@ -145,8 +141,7 @@ else
     "$archive_root/" \
     "$archive_root/LICENSE" \
     "$archive_root/SOURCE" \
-    "$archive_root/development-discipline-mcp" \
-    "$archive_root/tiber")"
+    "$archive_root/development-discipline-mcp")"
   actual_layout="$(tar -tzf "$archive_path" 2>/dev/null | LC_ALL=C sort)" || {
     printf '%s\n' "development_system.release_archive_invalid asset=$archive_name" >&2
     exit 1
@@ -155,11 +150,16 @@ else
     printf '%s\n' "development_system.release_archive_invalid asset=$archive_name" >&2
     exit 1
   fi
+  # Reject links and special nodes before extraction can follow archive paths.
+  if ! tar -tvzf "$archive_path" | awk 'substr($0,1,1) !~ /[-d]/ {bad=1} END {exit bad}'; then
+    printf '%s\n' "development_system.release_archive_invalid asset=$archive_name" >&2
+    exit 1
+  fi
   tar -xzf "$archive_path" -C "$download_dir" --no-same-owner --no-same-permissions || {
     printf '%s\n' "development_system.release_archive_invalid asset=$archive_name" >&2
     exit 1
   }
-  for binary in tiber development-discipline-mcp; do
+  for binary in development-discipline-mcp; do
     if [[ ! -f "$download_dir/$archive_root/$binary" ]] || [[ -L "$download_dir/$archive_root/$binary" ]]; then
       printf '%s\n' "development_system.release_archive_invalid asset=$archive_name" >&2
       exit 1

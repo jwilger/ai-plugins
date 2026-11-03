@@ -7,7 +7,7 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default: ci
 
 # Full local quality gate.
-ci: validate-marketplace github-actions hyprland-computer-control pi-extension tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
+ci: validate-marketplace github-actions hyprland-computer-control tiber-rust development-discipline-rust tiber-dashboard-smoke tiber-mutants bats
 
 # Build the guarded runtime and run offline Python/C checks without desktop input.
 hyprland-computer-control:
@@ -19,21 +19,15 @@ hyprland-computer-control:
 pre-commit:
     bash scripts/run-pre-commit-gate.sh
 
-# Type-check and behavior-test the pi adapter for development-system.
-pi-extension:
-    scripts/evals/ensure-node-deps.sh
-    node_modules/.bin/tsc -p plugins/development-system/pi/tsconfig.json
-    node --test scripts/tests/pi-extension.test.mts
-
 # Validate GitHub Actions syntax and semantics used by repository tests.
 github-actions:
     actionlint
 
 # Rust gates for the tiber plugin workspace.
 tiber-rust:
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
-    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml -- --test-threads=1
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo fmt --manifest-path plugins/tiber/rust/Cargo.toml --all --check
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo clippy --manifest-path plugins/tiber/rust/Cargo.toml --all-targets -- -D warnings
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}/tiber-plugin" cargo test --manifest-path plugins/tiber/rust/Cargo.toml -- --test-threads=1
 
 # Rust gates for the development-discipline MCP coordinator.
 development-discipline-rust:
@@ -51,7 +45,7 @@ tiber-dashboard-smoke:
 
 # Mutation gate for the pure tiber core.
 tiber-mutants:
-    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${CARGO_MUTANTS_TARGET_DIR:-${TMPDIR:-/tmp}/tiber-mutants-target}" cargo mutants --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --package tiber-core
+    CARGO_MUTANTS_OUTPUT="${TMPDIR:-/tmp}/tiber-mutants" CARGO_TARGET_DIR="${CARGO_MUTANTS_TARGET_DIR:-${TMPDIR:-/tmp}/tiber-mutants-target}" cargo mutants --manifest-path plugins/tiber/rust/Cargo.toml --package tiber-core
 
 # Run provider-backed promptfoo evals locally, upload/share the latest result,
 # and print the share URL. This sends eval data to the configured promptfoo

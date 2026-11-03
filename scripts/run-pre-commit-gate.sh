@@ -14,10 +14,10 @@ done <<< "$git_local_env_names"
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$project_root"
-just validate-marketplace github-actions pi-extension
-cargo fmt --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all --check
-cargo clippy --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path plugins/development-system/components/tiber/rust/Cargo.toml --workspace --lib
+just validate-marketplace github-actions
+cargo fmt --manifest-path plugins/tiber/rust/Cargo.toml --all --check
+cargo clippy --manifest-path plugins/tiber/rust/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path plugins/tiber/rust/Cargo.toml --workspace --lib
 cargo fmt --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all --check
 cargo clippy --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path plugins/development-system/components/development-discipline/rust/Cargo.toml --bin development-discipline-mcp -- --test-threads=1

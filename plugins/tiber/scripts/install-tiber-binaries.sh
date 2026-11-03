@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+marketplace_root="$(cd -- "$plugin_root/../.." && pwd -P)"
+source "$plugin_root/lib/installed-binary.sh"
+source "$plugin_root/lib/source-bundle.sh"
+
+from_source=false
+auto_mode=false
+case "${1:-}" in
+  "") ;;
+  --auto)
+    auto_mode=true
+    shift
+    ;;
+  --from-source)
+    from_source=true
+    shift
+    ;;
+  *)
+    printf '%s\n' "tiber.install_usage usage='$0 [--auto|--from-source]'" >&2
+    exit 2
+    ;;
+esac
+if [[ $# -ne 0 ]]; then
+  printf '%s\n' "tiber.install_usage usage='$0 [--auto|--from-source]'" >&2
+  exit 2
+fi
+
+data_home="$(tiber_data_home)" || {
+  printf '%s\n' "tiber.binary_install_location_unavailable remediation=set_XDG_DATA_HOME_or_HOME" >&2
+  exit 1
+}
+version="$(tiber_plugin_version "$plugin_root")" || {
+  printf '%s\n' "tiber.plugin_version_unavailable plugin_root=$plugin_root" >&2
+  exit 1
+}
+host="${TIBER_HOST_OVERRIDE:-$(tiber_host)}" || {
+  printf '%s\n' "tiber.host_unavailable" >&2
+  exit 1
+}
+if [[ "$auto_mode" == true ]] && [[ "$host" != linux-x86_64 ]]; then
+  from_source=true
+fi
+
+version_dir="$data_home/ai-plugins/tiber/$version"
+mkdir -p "$version_dir"
+if ! command -v flock >/dev/null 2>&1; then
+  printf '%s\n' "tiber.flock_unavailable remediation=install_or_activate_a_working_flock" >&2
+  exit 1
+fi
+exec 9>"$version_dir/.install.lock"
+flock -x 9
+staged_dir=""
+staged_link=""
+previous_target=""
+download_dir=""
+host_link="$version_dir/$host"
+cleanup() {
+  if [[ -n "$staged_link" ]]; then
+    rm -f -- "$staged_link"
+  fi
+  if [[ -n "$staged_dir" ]]; then
+    if [[ -L "$host_link" ]] && [[ "$(readlink "$host_link")" == "$(basename "$staged_dir")" ]]; then
+      : # The atomic rename published this directory before an interruption.
+    else
+      rm -rf -- "$staged_dir"
+    fi
+  fi
+  if [[ -n "$download_dir" ]]; then
+    rm -rf -- "$download_dir"
+  fi
+}
+trap cleanup EXIT
+
+release_name="tiber-v${version}"
+release_base_url="${TIBER_RELEASE_BASE_URL:-https://github.com/jwilger/ai-plugins/releases/download/$release_name}"
+staged_dir="$(mktemp -d "$version_dir/.${host}.staging.XXXXXX")"
+if [[ "$from_source" == true ]]; then
+  if ! command -v cargo >/dev/null 2>&1 || ! cargo --version >/dev/null 2>&1; then
+    printf '%s\n' "tiber.cargo_unavailable remediation=install_or_activate_a_working_Cargo_environment" >&2
+    exit 1
+  fi
+  if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+    build_dir="$CARGO_TARGET_DIR"
+  else
+    build_dir="$data_home/ai-plugins/tiber/build-cache/$version/$host"
+  fi
+  if [[ "$build_dir" != /* ]]; then
+    build_dir="$marketplace_root/$build_dir"
+  fi
+  mkdir -p "$build_dir"
+
+  plugin_prepare_source tiber "$plugin_root" "$version" "$version_dir" "$release_base_url"
+
+  # Cargo enforces the workspace lockfile and pinned toolchain.
+  (
+    cd "$source_root/plugins/tiber/rust"
+    CARGO_TARGET_DIR="$build_dir" cargo build --locked --release --bin tiber
+  )
+  install -m 0755 "$build_dir/release/tiber" "$staged_dir/tiber"
+else
+  if [[ "$host" != linux-x86_64 ]]; then
+    printf '%s\n' \
+      "tiber.release_host_unsupported host=$host remediation='rerun with --from-source'" >&2
+    exit 1
+  fi
+  for dependency in curl tar sha256sum; do
+    if ! command -v "$dependency" >/dev/null 2>&1; then
+      printf '%s\n' "tiber.release_dependency_unavailable dependency=$dependency" >&2
+      exit 1
+    fi
+  done
+
+  release_name="tiber-v${version}"
+  archive_name="${release_name}-linux-x86_64.tar.gz"
+  release_base_url="${TIBER_RELEASE_BASE_URL:-https://github.com/jwilger/ai-plugins/releases/download/$release_name}"
+  download_dir="$(mktemp -d "$version_dir/.${host}.download.XXXXXX")"
+  archive_path="$download_dir/$archive_name"
+  checksum_path="$archive_path.sha256"
+  curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+    --output "$archive_path" "$release_base_url/$archive_name" || {
+    printf '%s\n' "tiber.release_download_failed asset=$archive_name" >&2
+    exit 1
+  }
+  curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+    --output "$checksum_path" "$release_base_url/$archive_name.sha256" || {
+    printf '%s\n' "tiber.release_download_failed asset=$archive_name.sha256" >&2
+    exit 1
+  }
+  expected_checksum="$(sed -nE "s/^([0-9a-fA-F]{64})[[:space:]]+\\*?${archive_name//./\\.}$/\\1/p" "$checksum_path")"
+  actual_checksum="$(sha256sum "$archive_path" | cut -d ' ' -f 1)"
+  if [[ -z "$expected_checksum" ]] || [[ "${expected_checksum,,}" != "$actual_checksum" ]]; then
+    printf '%s\n' "tiber.release_checksum_mismatch asset=$archive_name" >&2
+    exit 1
+  fi
+
+  archive_root="${release_name}-linux-x86_64"
+  expected_layout="$(printf '%s\n' \
+    "$archive_root/" \
+    "$archive_root/LICENSE" \
+    "$archive_root/SOURCE" \
+    "$archive_root/tiber")"
+  actual_layout="$(tar -tzf "$archive_path" 2>/dev/null | LC_ALL=C sort)" || {
+    printf '%s\n' "tiber.release_archive_invalid asset=$archive_name" >&2
+    exit 1
+  }
+  if [[ "$actual_layout" != "$expected_layout" ]]; then
+    printf '%s\n' "tiber.release_archive_invalid asset=$archive_name" >&2
+    exit 1
+  fi
+  # Reject links and special nodes before extraction can follow archive paths.
+  if ! tar -tvzf "$archive_path" | awk 'substr($0,1,1) !~ /[-d]/ {bad=1} END {exit bad}'; then
+    printf '%s\n' "tiber.release_archive_invalid asset=$archive_name" >&2
+    exit 1
+  fi
+  tar -xzf "$archive_path" -C "$download_dir" --no-same-owner --no-same-permissions || {
+    printf '%s\n' "tiber.release_archive_invalid asset=$archive_name" >&2
+    exit 1
+  }
+  for binary in tiber; do
+    if [[ ! -f "$download_dir/$archive_root/$binary" ]] || [[ -L "$download_dir/$archive_root/$binary" ]]; then
+      printf '%s\n' "tiber.release_archive_invalid asset=$archive_name" >&2
+      exit 1
+    fi
+    install -m 0755 "$download_dir/$archive_root/$binary" "$staged_dir/$binary"
+  done
+  for metadata in LICENSE SOURCE; do
+    if [[ ! -f "$download_dir/$archive_root/$metadata" ]] || [[ -L "$download_dir/$archive_root/$metadata" ]]; then
+      printf '%s\n' "tiber.release_archive_invalid asset=$archive_name" >&2
+      exit 1
+    fi
+  done
+  install -m 0644 "$download_dir/$archive_root/LICENSE" "$staged_dir/LICENSE"
+  install -m 0644 "$download_dir/$archive_root/SOURCE" "$staged_dir/SOURCE"
+fi
+
+printf '%s\n' "$version" >"$staged_dir/.plugin-version"
+
+staged_link="$(mktemp "$version_dir/.${host}.link.XXXXXX")"
+rm -f -- "$staged_link"
+ln -s "$(basename "$staged_dir")" "$staged_link"
+
+if [[ -L "$host_link" ]]; then
+  previous_target="$(readlink "$host_link")"
+fi
+
+if mv -fT "$staged_link" "$host_link" 2>/dev/null; then
+  :
+elif mv -fh "$staged_link" "$host_link" 2>/dev/null; then
+  :
+else
+  printf '%s\n' "tiber.atomic_install_unavailable host=$host" >&2
+  exit 1
+fi
+staged_link=""
+staged_dir=""
+
+if [[ "$previous_target" == ".${host}.staging."* ]]; then
+  rm -rf -- "$version_dir/$previous_target"
+fi
+
+printf '%s\n' \
+  "tiber.binaries_installed version=$version host=$host directory=$version_dir/$host"

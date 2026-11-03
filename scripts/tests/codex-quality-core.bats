@@ -113,7 +113,7 @@ seed_marketplace() {
 }
 
 @test "tasks router advertises Tiber publication conflict ownership" {
-  skill="$ROOT/plugins/development-system/skills/tasks/SKILL.md"
+  skill="$ROOT/plugins/tiber/skills/tasks/SKILL.md"
   description="$(sed -n 's/^description: //p' "$skill")"
 
   [[ "$description" == *"Tiber"* ]]

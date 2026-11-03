@@ -34,22 +34,22 @@ jobs:
       matrix:
         include:
           - lane: static
-            commands: validate-marketplace github-actions hyprland-computer-control pi-extension
+            commands: validate-marketplace github-actions hyprland-computer-control
           - lane: tiber
             commands: tiber-rust tiber-dashboard-smoke
-            rust-workspaces: plugins/development-system/components/tiber/rust -> ../../../../../target/tiber-plugin
+            rust-workspaces: plugins/tiber/rust -> ../../../target/tiber-plugin
           - lane: discipline
             commands: development-discipline-rust
             rust-workspaces: plugins/development-system/components/development-discipline/rust -> ../../../../../target
           - lane: mutants
             commands: tiber-mutants
-            rust-workspaces: plugins/development-system/components/tiber/rust -> ../../../../../target/mutants
+            rust-workspaces: plugins/tiber/rust -> ../../../target/mutants
           - lane: checkpoints
             commands: bats-checkpoints
           - lane: startup
             commands: bats-startup
             rust-workspaces: |
-              plugins/development-system/components/tiber/rust -> ../../../../../target/tiber
+              plugins/tiber/rust -> ../../../target/tiber
               plugins/development-system/components/development-discipline/rust -> ../../../../../target/development-discipline
           - lane: shell
             commands: bats-other

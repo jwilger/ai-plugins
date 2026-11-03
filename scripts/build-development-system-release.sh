@@ -21,36 +21,20 @@ if [[ "$version" != "$marketplace_version" ]]; then
   exit 1
 fi
 
-tiber_toolchain="$(sed -nE 's/^channel = "([^"]+)"$/\1/p' "$plugin_root/components/tiber/rust/rust-toolchain.toml")"
-discipline_toolchain="$(sed -nE 's/^channel = "([^"]+)"$/\1/p' "$plugin_root/components/development-discipline/rust/rust-toolchain.toml")"
-if [[ -z "$tiber_toolchain" ]] || [[ "$tiber_toolchain" != "$discipline_toolchain" ]]; then
-  printf '%s\n' "development_system.release_toolchain_mismatch tiber=$tiber_toolchain development_discipline=$discipline_toolchain" >&2
-  exit 1
-fi
-
 build_root="$(mktemp -d "${TMPDIR:-/tmp}/development-system-release.XXXXXX")"
 cleanup() {
   rm -rf -- "$build_root"
 }
 trap cleanup EXIT
 
-build_component() {
-  local component=$1
-  local binary=$2
-  local manifest_dir="$plugin_root/components/$component/rust"
-  local target_dir="$build_root/target/$component"
-  (
-    cd "$manifest_dir"
-    CARGO_TARGET_DIR="$target_dir" cargo build --locked --release --target "$target" --bin "$binary"
-  )
-  install -m 0755 "$target_dir/$target/release/$binary" "$build_root/$binary"
-}
-
-build_component tiber tiber
-build_component development-discipline development-discipline-mcp
+(
+  cd "$plugin_root/components/development-discipline/rust"
+  CARGO_TARGET_DIR="$build_root/target" cargo build --locked --release --target "$target" --bin development-discipline-mcp
+)
+install -m 0755 "$build_root/target/$target/release/development-discipline-mcp" "$build_root/development-discipline-mcp"
 
 mkdir -p "$build_root/home" "$build_root/codex-home"
-for binary in tiber development-discipline-mcp; do
+for binary in development-discipline-mcp; do
   binary_path="$build_root/$binary"
   file "$binary_path" | grep -Eq 'static(-pie|ally) linked' || {
     printf '%s\n' "development_system.release_binary_not_static binary=$binary" >&2
@@ -81,12 +65,10 @@ initialize_binary() {
     grep -Fq "\"name\":\"$expected_name\""
 }
 initialize_binary development-discipline-mcp development-discipline --service plugin-advisory
-initialize_binary tiber tiber mcp stdio
 
 release_name="development-system-v${version}"
 bundle_root="$build_root/$release_name-$platform"
 mkdir -p "$bundle_root" "$output_dir"
-install -m 0755 "$build_root/tiber" "$bundle_root/tiber"
 install -m 0755 "$build_root/development-discipline-mcp" "$bundle_root/development-discipline-mcp"
 install -m 0644 "$plugin_root/LICENSE" "$bundle_root/LICENSE"
 printf '%s\n' \
@@ -104,3 +86,16 @@ tar --sort=name --mtime="@$source_date_epoch" --owner=0 --group=0 --numeric-owne
 )
 
 printf '%s\n' "development_system.release_built archive=$archive_path checksum=$archive_path.sha256"
+
+source_root="$build_root/$release_name-source"
+mkdir -p "$source_root/plugins/development-system/components/development-discipline" "$source_root/plugins/tiber"
+tar -C "$root" --exclude=target --exclude=.plugin-eval -cf - \
+  plugins/development-system/components/development-discipline/rust \
+  plugins/tiber/rust plugins/development-system/plugin.json plugins/tiber/plugin.json |
+  tar -C "$source_root" -xf -
+install -m 0644 "$plugin_root/LICENSE" "$source_root/LICENSE"
+printf '%s\n' "$version" >"$source_root/.plugin-version"
+source_archive="$release_name-source.tar.gz"
+tar --sort=name --mtime="@$source_date_epoch" --owner=0 --group=0 --numeric-owner \
+  -C "$build_root" -czf "$output_dir/$source_archive" "$(basename "$source_root")"
+(cd "$output_dir" && sha256sum "$source_archive" >"$source_archive.sha256")

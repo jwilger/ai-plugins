@@ -6,6 +6,7 @@ setup_file() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd -P)"
   export XDG_DATA_HOME="$BATS_FILE_TMPDIR/xdg-data"
   just --justfile "$ROOT/justfile" install-development-system-binaries --from-source
+  "$ROOT/plugins/tiber/scripts/install-tiber-binaries.sh" --from-source
 }
 
 setup() {
@@ -56,10 +57,10 @@ list_server_tools() {
     PATH="$TMPROOT/failing-bin:$PATH" \
     XDG_DATA_HOME="$TMPROOT/empty-xdg-data" \
     HOME="$TMPROOT/home" \
-    "$ROOT/plugins/development-system/bin/tiber" --help
+    "$ROOT/plugins/tiber/bin/tiber" --help
 
   [ "$status" -ne 0 ]
-  [[ "$output" == *"development_system.binary_repair_failed"* ]]
+  [[ "$output" == *"tiber.binary_repair_failed"* ]]
 }
 
 @test "the host-local bootstrap is safe to rerun" {
@@ -69,11 +70,12 @@ list_server_tools() {
   local first_target
   local second_target
   source "$ROOT/plugins/development-system/lib/installed-binary.sh"
-  tiber_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" tiber)"
+  source "$ROOT/plugins/tiber/lib/installed-binary.sh"
+  tiber_path="$(tiber_installed_binary_path "$ROOT/plugins/tiber" tiber)"
   discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
   [ -x "$tiber_path" ]
   [ -x "$discipline_path" ]
-  host_link="$(dirname "$tiber_path")"
+  host_link="$(dirname "$discipline_path")"
   first_target="$(readlink "$host_link")"
   [[ -n "$first_target" ]]
 
@@ -93,7 +95,6 @@ list_server_tools() {
   local fake_target="$TMPROOT/fake-cargo-target"
   local call_log="$TMPROOT/cargo-working-directories"
   local fake_cargo="$fake_bin/cargo"
-  local tiber_rust="$ROOT/plugins/development-system/components/tiber/rust"
   local discipline_rust="$ROOT/plugins/development-system/components/development-discipline/rust"
   local -a directories
 
@@ -122,8 +123,8 @@ list_server_tools() {
 
   [ "$status" -eq 0 ]
   mapfile -t directories <"$call_log"
-  [ "${directories[0]}" = "$tiber_rust" ]
-  [ "${directories[1]}" = "$discipline_rust" ]
+  [ "${#directories[@]}" -eq 1 ]
+  [ "${directories[0]}" = "$discipline_rust" ]
 }
 
 @test "the host-local bootstrap keeps its default build cache outside the checkout" {
@@ -155,7 +156,7 @@ list_server_tools() {
     "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" --from-source
 
   [ "$status" -eq 0 ]
-  [ "$(wc -l <"$target_log")" -eq 2 ]
+  [ "$(wc -l <"$target_log")" -eq 1 ]
   while IFS= read -r target; do
     [[ "$target" == "$data_home/ai-plugins/development-system/build-cache/"* ]]
     [[ "$target" != "$ROOT/"* ]]
@@ -246,7 +247,7 @@ list_server_tools() {
     "$ROOT/plugins/development-system/scripts/install-development-system-binaries.sh" --from-source
 
   [ "$status" -ne 0 ]
-  [ -x "$data_home/ai-plugins/development-system/$version/$host/tiber" ]
+  [ ! -e "$data_home/ai-plugins/development-system/$version/$host/tiber" ]
   [ -x "$data_home/ai-plugins/development-system/$version/$host/development-discipline-mcp" ]
 }
 
@@ -320,13 +321,13 @@ list_server_tools() {
     XDG_DATA_HOME="$TMPROOT/missing-xdg-data" \
     HOME="$TMPROOT/home" \
     bash -c '"$1" --help >"$2" 2>"$3"' _ \
-    "$ROOT/plugins/development-system/bin/tiber" \
+    "$ROOT/plugins/tiber/bin/tiber" \
     "$stdout_file" \
     "$stderr_file"
 
   [ "$status" -ne 0 ]
   [ ! -s "$stdout_file" ]
-  [[ "$(<"$stderr_file")" == *"development_system.binary_repair_failed"* ]]
+  [[ "$(<"$stderr_file")" == *"tiber.binary_repair_failed"* ]]
 }
 
 @test "installed launchers start both MCPs without invoking Cargo" {
@@ -344,7 +345,7 @@ list_server_tools() {
   [[ "$output" != *"cargo-must-not-run"* ]]
 
   run env PATH="$fake_bin:$PATH" \
-    "$ROOT/plugins/development-system/bin/tiber" --help
+    "$ROOT/plugins/tiber/bin/tiber" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Repository-local task board"* ]]
   [[ "$output" != *"cargo-must-not-run"* ]]
@@ -354,8 +355,8 @@ list_server_tools() {
   local repo="$TMPROOT/signed-repo"
   local data="$TMPROOT/plugin-data"
   local version
-  version="$(jq -r .version "$ROOT/plugins/development-system/plugin.json")"
-  mkdir -p "$repo" "$data/ai-plugins/development-system/$version"
+  version="$(jq -r .version "$ROOT/plugins/tiber/plugin.json")"
+  mkdir -p "$repo" "$data/ai-plugins/tiber/$version"
   git init --bare -q "$TMPROOT/origin.git"
   git init -q "$repo"
   git -C "$repo" config user.name 'Portable MCP Test'
@@ -369,17 +370,17 @@ list_server_tools() {
   git -C "$repo" config gpg.format ssh
   git -C "$repo" config commit.gpgsign true
   git -C "$repo" config user.signingkey "$TMPROOT/key.pub"
-  (cd "$repo" && SSH_AUTH_SOCK="$TMPROOT/agent.sock" "$ROOT/plugins/development-system/bin/tiber" init)
+  (cd "$repo" && SSH_AUTH_SOCK="$TMPROOT/agent.sock" "$ROOT/plugins/tiber/bin/tiber" init)
   local before
   before="$(git -C "$repo" rev-parse refs/remotes/origin/tiber)"
-  ln -s "$XDG_DATA_HOME/ai-plugins/development-system/$version/linux-x86_64" \
-    "$data/ai-plugins/development-system/$version/linux-x86_64"
+  ln -s "$XDG_DATA_HOME/ai-plugins/tiber/$version/linux-x86_64" \
+    "$data/ai-plugins/tiber/$version/linux-x86_64"
   printf '%s\n' "$TMPROOT/agent.sock" >"$data/signing-agent-socket"
 
   local request
   request="$(jq -nc --arg cwd "file://$repo" '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"tiber.create",arguments:{title:"Portable signed task"},_meta:{"codex/sandbox-state-meta":{sandboxCwd:$cwd}}}}')"
   run bash -c 'cd "$1"; printf "%s\n" "$2" | env -u SSH_AUTH_SOCK PLUGIN_ROOT="$1" PLUGIN_DATA="$3" "$1/bin/tiber" mcp stdio' _ \
-    "$ROOT/plugins/development-system" "$request" "$data"
+    "$ROOT/plugins/tiber" "$request" "$data"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'portable-signed-task'* ]]
@@ -395,7 +396,7 @@ list_server_tools() {
     >"$TMPROOT/home/.codex/plugins/cache/ai-plugins/development-system/0.0.0/bin/tiber"
   chmod +x "$TMPROOT/home/.codex/plugins/cache/ai-plugins/development-system/0.0.0/bin/tiber"
 
-  run initialize_server "$ROOT/plugins/development-system/bin/tiber" mcp stdio
+  run initialize_server "$ROOT/plugins/tiber/bin/tiber" mcp stdio
 
   [ "$status" -eq 0 ]
   [[ "$output" == *'"name":"tiber"'* ]]
@@ -407,7 +408,8 @@ list_server_tools() {
   local discipline_path
 
   source "$ROOT/plugins/development-system/lib/installed-binary.sh"
-  tiber_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" tiber)"
+  source "$ROOT/plugins/tiber/lib/installed-binary.sh"
+  tiber_path="$(tiber_installed_binary_path "$ROOT/plugins/tiber" tiber)"
   discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
 
   run initialize_server "$discipline_path" --service plugin-advisory
@@ -429,7 +431,8 @@ list_server_tools() {
   git -C "$project" init --quiet
   printf 'ci:\n    true\n' >"$project/justfile"
   source "$ROOT/plugins/development-system/lib/installed-binary.sh"
-  tiber_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" tiber)"
+  source "$ROOT/plugins/tiber/lib/installed-binary.sh"
+  tiber_path="$(tiber_installed_binary_path "$ROOT/plugins/tiber" tiber)"
   discipline_path="$(development_system_installed_binary_path "$ROOT/plugins/development-system" development-discipline-mcp)"
   local proposal='schema_version = 3
 [scopes.source]

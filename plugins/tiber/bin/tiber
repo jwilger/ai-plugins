@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+plugin_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+source "$plugin_root/lib/installed-binary.sh"
+export TIBER_LAUNCHER_PATH="$plugin_root/bin/tiber"
+tiber_exec_installed_binary "$plugin_root" tiber "$@"

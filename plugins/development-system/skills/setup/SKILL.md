@@ -18,33 +18,25 @@ pre-commit and pre-push selections. Apply only the identical approved proposal
 and options with its `preview_identity`; repository changes, any changed setup
 option, or changed detected conflicts require a fresh preview and approval.
 
-Every setup or reconfiguration response must cover all four installed-user
-outcomes below: version-matched automatic binary repair, agent-authored, project-specific
-schema-validated configuration, separately selected and installed Lefthook
-pre-commit/pre-push jobs, and startup verification of both versioned MCP
-executables. Do not abbreviate this sequence merely because the plugin was
-already installed or upgraded.
+Every setup or reconfiguration response must cover version-matched binary
+repair, agent-authored project configuration, separately selected Lefthook
+pre-commit/pre-push jobs, and startup verification of the required MCP servers.
+Development System owns `development-discipline`; the independently installed
+Tiber plugin owns `tiber`. Default marketplace installation installs both.
 
-When reporting the binary step, explicitly state both supported paths:
-SessionStart compares the atomic marker and both binaries to the plugin manifest
-version, then Linux x86_64 downloads and SHA-256-verifies that exact release
-without Cargo, while hosts lacking a release automatically fall back to locked
-Cargo builds. Saying only “run the installer” or “version-matched repair” is
-incomplete.
-
-1. Resolve the installed Development System plugin root relative to this skill,
-   then run `scripts/install-development-system-binaries.sh --auto` from that
-   root. The installed `SessionStart` hook performs the same check on every
-   session: both executables and their atomic installation marker must match the
-   plugin manifest version. Missing or stale installations are repaired. Linux
-   x86_64 downloads the exact-version GitHub Release bundle, verifies its
-   SHA-256 checksum and archive layout, and atomically installs `tiber` and
-   `development-discipline-mcp` without Cargo or Nix. A host without a prebuilt
-   release automatically performs both locked Cargo builds and therefore needs
-   a working Cargo environment. Do not defer either path to the user. If
-   download, verification, extraction, or source compilation fails, stop with
-   the installer's diagnostic; do not configure a repository whose MCPs cannot
-   start.
+1. Resolve the installed Development System plugin root relative to this skill
+   and run `scripts/install-development-system-binaries.sh --auto`. Its
+   SessionStart hook checks only `development-discipline-mcp` and its atomic
+   version marker. Linux x86_64 downloads and SHA-256-verifies the exact release
+   without Cargo; unsupported hosts use locked Cargo builds. An isolated
+   installed plugin obtains a checksum-verified exact-release source bundle
+   containing all transitive Rust sources rather than depending on a companion
+   cache. If Tiber integration is enabled, require the installed `tiber@ai-plugins`
+   companion, resolve its root through its installed skill, and run its
+   `scripts/install-tiber-binaries.sh --auto`. Tiber's launcher performs its own
+   version check and repair. Do not defer repair to the user or configure a
+   repository whose required MCPs cannot start. A missing companion must produce
+   installation guidance; disabling integration does not bypass recovery holds.
 2. From the primary checkout, call the plugin-provided Development Discipline
    MCP `setup.preview` without a proposal to obtain repository evidence, the
    current configuration, command suggestions, and the complete structural
