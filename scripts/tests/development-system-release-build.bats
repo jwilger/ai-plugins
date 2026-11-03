@@ -99,12 +99,12 @@ setup() {
   mkdir -p "$TMPROOT/source-check"
   tar -xzf "$source_archive" -C "$TMPROOT/source-check"
   local closure_root="$TMPROOT/source-check/development-system-v${version}-source"
-  cargo metadata --offline --locked --no-deps --format-version 1 \
+  cargo metadata --locked --no-deps --format-version 1 \
     --manifest-path "$closure_root/plugins/development-system/components/development-discipline/rust/Cargo.toml" >"$TMPROOT/discipline-metadata.json"
-  cargo metadata --offline --locked --no-deps --format-version 1 \
+  cargo metadata --locked --no-deps --format-version 1 \
     --manifest-path "$closure_root/plugins/tiber/rust/Cargo.toml" >"$TMPROOT/tiber-metadata.json"
   CARGO_TARGET_DIR="$ROOT/plugins/development-system/components/development-discipline/rust/target" \
-    cargo check --offline --locked --bin development-discipline-mcp \
+    cargo check --locked --bin development-discipline-mcp \
     --manifest-path "$closure_root/plugins/development-system/components/development-discipline/rust/Cargo.toml" \
     >"$TMPROOT/source-compile.log" 2>&1
 

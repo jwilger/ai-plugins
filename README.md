@@ -8,17 +8,18 @@ screenshots and pointer tasks. Codex and Linux x86_64 are the required targets.
 
 | Plugin                                                                   | Harness | Description                                                                                  | Version |
 | ------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md)               | Codex   | Advisory repository setup, structured multi-agent review, and Git-backed issue tracking.     | 10.0.0  |
-| [tiber](plugins/tiber/README.md)                                         | Codex   | Independent Git-backed task board, CLI, MCP server, and dashboard.                           | 1.0.0   |
+| [development-system](plugins/development-system/README.md)               | Codex   | Advisory repository setup, structured multi-agent review, and delivery workflow.             | 10.0.1  |
+| [tiber](plugins/tiber/README.md)                                         | Codex   | Independent Git-backed task board, CLI, MCP server, and dashboard.                           | 1.0.1   |
 | [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex   | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session. | 0.1.4   |
 
 ## Using the marketplace (Codex)
 
 Codex-facing marketplace metadata lives in
 [`.agents/plugins/marketplace.json`](.agents/plugins/marketplace.json), and each
-plugin has a portable root `plugin.json` manifest. `development-system` also
-provides both Rust MCP servers from its root `mcp.json`, so consuming projects
-do not need MCP registrations. Install or update from `main` with:
+plugin has a portable root `plugin.json` manifest and owns its root `mcp.json`.
+Development System registers Development Discipline; Tiber registers its own
+task server. Consuming projects do not need MCP registrations. The installer
+installs both plugins by default. Install or update from `main` with:
 
 ```shell
 curl -fsSL https://raw.githubusercontent.com/jwilger/ai-plugins/main/install.sh | sh
@@ -30,11 +31,13 @@ Use `sh install.sh --dry-run` to preview the commands.
 
 After installation, start a new thread and run the setup skill from the target
 repository's primary checkout.
-The installed `SessionStart` hook checks the MCP binary installation against
-the plugin version on every startup and repairs missing or stale binaries. Linux
-x86_64 downloads the checksum-verified release; hosts without a prebuilt
-release build both locked Cargo workspaces automatically. The setup skill
-performs the same check before configuring the repository. Setup also generates
+Development System's installed `SessionStart` hook checks and repairs its own
+Development Discipline binary. Tiber's launcher independently checks and repairs
+its task binary. Each plugin uses its own versioned binary cache. Linux x86_64
+downloads checksum-verified releases; hosts without a prebuilt release build the
+plugin's locked Cargo workspace from dependency-complete source. The setup
+skill checks Development Discipline and, when Tiber integration is enabled,
+requires the separately installed Tiber companion. Setup also generates
 and installs a stack-specific project Lefthook configuration with both
 pre-commit and pre-push jobs; installed workflow guidance relies on those Git
 hooks rather than duplicating their verification commands manually.

@@ -72,7 +72,7 @@ codex plugin list --json
 Verify the installed version is 7.0.0 or newer for protocol-v3 terminal review. Restart the harness and resume
 the work in a fresh thread with its original request, immutable baseline, and
 checkpoint ID. The startup hook repairs version-matched host binaries; verify
-both MCP servers use the new plugin root and call `workspace-reader.status`
+Development Discipline uses the new Development System plugin root and call `workspace-reader.status`
 through the connected Development Discipline MCP. Its final-review attestation
 must report `contract_version >= 3`, `minimum_clean_iterations: 1`,
 `scoped_coverage: true`, `explicit_policy_migration: true`, and

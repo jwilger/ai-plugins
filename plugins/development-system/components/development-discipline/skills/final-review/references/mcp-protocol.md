@@ -584,11 +584,13 @@ Marketplace installs require the current-host Development System executable.
 From the marketplace checkout, run `just install-development-system-binaries`
 (or `scripts/install-development-system-binaries.sh`). Linux x86_64 downloads
 the exact plugin-version GitHub Release and verifies its SHA-256 sidecar and
-fixed archive layout; hosts without a prebuilt release build both locked Cargo
-workspaces. The installed `SessionStart` hook verifies the installation marker
+fixed archive layout; hosts without a prebuilt release build the locked
+Development Discipline workspace from dependency-complete source. Tiber is
+installed and repaired independently by its companion plugin. The installed `SessionStart` hook verifies the installation marker
 against the plugin version and automatically repairs missing or stale binaries
-before normal MCP use. Direct MCP launchers resolve only those installed
-executables and never compile as a side effect of an individual invocation.
+before normal MCP use. The Development Discipline launcher repairs a missing or stale installation
+before invoking its executable, including source compilation on hosts without
+a prebuilt release.
 Incoming stdio requests and
 conditional-lens fanout are bounded so malformed or bursty callers cannot grow
 coordinator memory or review-agent count without limit. On any oversized stdio

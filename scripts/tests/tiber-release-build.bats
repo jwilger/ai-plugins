@@ -99,9 +99,9 @@ setup() {
   mkdir -p "$TMPROOT/source-check"
   tar -xzf "$source_archive" -C "$TMPROOT/source-check"
   local closure_root="$TMPROOT/source-check/tiber-v${version}-source"
-  cargo metadata --offline --locked --no-deps --format-version 1 \
+  cargo metadata --locked --no-deps --format-version 1 \
     --manifest-path "$closure_root/plugins/development-system/components/development-discipline/rust/Cargo.toml" >"$TMPROOT/discipline-metadata.json"
-  cargo metadata --offline --locked --no-deps --format-version 1 \
+  cargo metadata --locked --no-deps --format-version 1 \
     --manifest-path "$closure_root/plugins/tiber/rust/Cargo.toml" >"$TMPROOT/tiber-metadata.json"
  
   (cd "$output_dir" && sha256sum -c "$(basename "$archive").sha256")
