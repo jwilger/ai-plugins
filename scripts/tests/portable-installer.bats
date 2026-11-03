@@ -73,3 +73,20 @@ PYTEST
   [ "$status" -eq 0 ]
   cmp "$TMPROOT/before.toml" "$CODEX_HOME/config.toml"
 }
+
+@test "installer rejects missing tomllib before marketplace or plugin mutations" {
+  export REAL_PYTHON="$(command -v python3)"
+  cat >"$TMPROOT/bin/python3" <<'SH'
+#!/bin/sh
+case "$*" in
+  '-c import tomllib'|*configure-codex-mcp.py*) exit 1 ;;
+  *) exec "$REAL_PYTHON" "$@" ;;
+esac
+SH
+  chmod +x "$TMPROOT/bin/python3"
+  run env PATH="$TMPROOT/bin:$PATH" sh "$ROOT/install.sh" --with none
+  [ "$status" -ne 0 ]
+  [[ "$output" == *'Python 3.11 or later with tomllib is required'* ]]
+  [ ! -e "$CODEX_CALL_LOG" ]
+  [ ! -e "$CODEX_HOME/config.toml" ]
+}

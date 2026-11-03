@@ -24,7 +24,7 @@ This verified-release-and-cache approach follows a pattern used by [mcp-bin](htt
 
 ## Consequences
 
-Consuming repositories can use both MCPs after plugin installation without server setup. New versions require the matching release asset before Linux x86_64 startup, so release publication remains part of delivery. An available SSH agent is required for signed operations; the installer records its socket path when present. Portable manifests reduce future harness adaptation work without asserting untested support.
+Consuming repositories can use both MCPs after plugin installation without server setup. New versions require the matching release asset before Linux x86_64 startup, so release publication remains part of delivery. An available SSH agent is required for signed operations; the installer forwards SSH_AUTH_SOCK by variable name, and agent rotation requires a full Codex restart from the current agent environment. Portable manifests reduce future harness adaptation work without asserting untested support.
 
 ## Alternatives considered
 

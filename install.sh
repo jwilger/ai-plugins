@@ -24,7 +24,8 @@ while [ "$#" -gt 0 ]; do
 done
 
 command -v codex >/dev/null 2>&1 || { echo 'install: Codex CLI is required' >&2; exit 1; }
-command -v python3 >/dev/null 2>&1 || { echo 'install: Python 3 is required for Codex inventory' >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo 'install: Python 3.11 or later with tomllib is required' >&2; exit 1; }
+python3 -c 'import tomllib' >/dev/null 2>&1 || { echo 'install: Python 3.11 or later with tomllib is required; select a supported python3 on PATH and rerun' >&2; exit 1; }
 marketplaces="$(codex plugin marketplace list --json)"
 plugins="$(codex plugin list --json)"
 marketplace_state="$(printf '%s' "$marketplaces" | python3 -c '

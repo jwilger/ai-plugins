@@ -446,13 +446,15 @@ the active call's local `sandboxCwd`, so the authoritative board belongs to the
 caller's repository rather than the plugin cache. A later call from another
 workspace replaces the process-local repository selection.
 
-Codex loads Tiber from the plugin-root `mcp.json`. Codex filters the MCP
-process environment, so the bundled launcher reads a user-owned absolute
-socket path from `$PLUGIN_DATA/signing-agent-socket`. Outside a portable harness it uses
-`$XDG_CONFIG_HOME/ai-plugins/tiber/` (or `~/.config`). The root
-installer records the current valid `SSH_AUTH_SOCK`; update this plugin-owned
-file if the agent socket moves.
-Never pass the signing socket to a project-controlled executable.
+Codex discovers Tiber through the plugin-root `mcp.json`. Because Codex filters
+`SSH_AUTH_SOCK`, the marketplace installer configures the shared user-level
+transport described under [SSH authentication and existing installations](#ssh-authentication-and-existing-installations).
+It forwards the current parent agent by variable name to the trusted installed
+launcher. After agent rotation, fully restart Codex from the updated agent shell;
+restarting MCP alone cannot refresh Codex's environment. Saved
+`signing-agent-socket` files remain legacy compatibility only and are ignored
+by the repaired current-session transport. Never pass the agent socket to a
+project-controlled executable.
 
 The manifest's `./bin/tiber` command is resolved only against the installed
 plugin root, never the caller checkout. Reinstall or upgrade the plugin if Codex
