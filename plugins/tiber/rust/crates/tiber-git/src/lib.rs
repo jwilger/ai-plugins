@@ -1878,6 +1878,9 @@ fn select_ci_recovery_action_fact(
     intent: &SelectCiRecoveryActionIntent,
     context: &CiOwnerDecisionContext,
     classification: &Option<CiRecoveryClassification>,
+    failed_sha: &Option<String>,
+    action_kind: &Option<CiRecoveryActionKind>,
+    failed_unchanged_rerun: &bool,
 ) -> CiRecoveryActionChosenEvent {
     debug_assert_eq!(
         context.incident_id.as_deref(),
@@ -1888,6 +1891,13 @@ fn select_ci_recovery_action_fact(
     debug_assert!(context.lease_expires_at > intent.observed_at);
     debug_assert!(!context.resolved);
     debug_assert!(classification.is_some());
+    debug_assert!(!failed_unchanged_rerun || failed_sha.is_some());
+    debug_assert!(!failed_unchanged_rerun || *action_kind != Some(CiRecoveryActionKind::Rerun));
+    debug_assert!(
+        *classification != Some(CiRecoveryClassification::Unrelated)
+            || intent.action.kind != CiRecoveryActionKind::Repair
+            || *failed_unchanged_rerun
+    );
     CiRecoveryActionChosenEvent {
         stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
         epoch: intent.expected_epoch,
@@ -1896,7 +1906,7 @@ fn select_ci_recovery_action_fact(
     }
 }
 mapping! { SelectCiRecoveryActionToFact:
-    (SelectCiRecoveryAction.stream, SelectCiRecoveryAction.intent, CiOwnerDecisionOutput.context, SelectCiRecoveryActionState.classification) => TiberEvent.CiRecoveryActionChosen
+    (SelectCiRecoveryAction.stream, SelectCiRecoveryAction.intent, CiOwnerDecisionOutput.context, SelectCiRecoveryActionState.classification, SelectCiRecoveryActionState.failed_sha, SelectCiRecoveryActionState.action_kind, SelectCiRecoveryActionState.failed_unchanged_rerun) => TiberEvent.CiRecoveryActionChosen
     using select_ci_recovery_action_fact;
 }
 #[derive(ModelState)]
@@ -1913,6 +1923,12 @@ struct SelectCiRecoveryActionState {
     classification: Option<CiRecoveryClassification>,
     #[model(default)]
     resolved: bool,
+    #[model(default)]
+    failed_sha: Option<String>,
+    #[model(default)]
+    action_kind: Option<CiRecoveryActionKind>,
+    #[model(default)]
+    failed_unchanged_rerun: bool,
 }
 mapping! {
     SelectCiRecoveryActionStateToOwnerContext:
@@ -1931,6 +1947,9 @@ impl ModelCommandLogic for SelectCiRecoveryAction {
                 state.epoch = 1;
                 state.lease_expires_at = p.lease_expires_at;
                 state.classification = None;
+                state.failed_sha = Some(p.trigger.failed_sha.clone());
+                state.action_kind = None;
+                state.failed_unchanged_rerun = false;
                 state.resolved = false;
             }
             TiberEvent::CiRecoveryTransferred(p) => {
@@ -1949,6 +1968,22 @@ impl ModelCommandLogic for SelectCiRecoveryAction {
             TiberEvent::CiRecoveryDiagnosed(p) => {
                 state.classification = Some(p.diagnosis.classification.into())
             }
+            TiberEvent::CiRecoveryActionChosen(p) => {
+                state.action_kind = Some(p.action.kind.into());
+                if state.action_kind == Some(CiRecoveryActionKind::Rerun) {
+                    state.failed_unchanged_rerun = false;
+                }
+            }
+            TiberEvent::CiRecoveryReplacementRecorded(p) => {
+                if p.replacement.status == tiber_core::events::CiRecoveryReplacementStatus::Failed {
+                    if state.action_kind == Some(CiRecoveryActionKind::Rerun)
+                        && state.failed_sha.as_deref() == Some(p.replacement.sha.as_str())
+                    {
+                        state.failed_unchanged_rerun = true;
+                    }
+                    state.action_kind = None;
+                }
+            }
             TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
             TiberEvent::LegacyRecoveryStatePublished(p) => {
                 let legacy = CiRecoveryState::from_snapshot(&p.state);
@@ -1957,6 +1992,10 @@ impl ModelCommandLogic for SelectCiRecoveryAction {
                 state.epoch = legacy.epoch;
                 state.lease_expires_at = legacy.lease_expires_at;
                 state.classification = legacy.diagnosis.map(|d| d.classification);
+                state.failed_sha = Some(legacy.trigger.failed_sha);
+                state.action_kind = legacy.next_action.map(|a| a.kind);
+                // A legacy snapshot cannot prove the action preceding a failed run.
+                state.failed_unchanged_rerun = false;
                 state.resolved = legacy.state == CiRecoveryPhase::Resolved;
             }
             _ => {}
@@ -1995,7 +2034,9 @@ impl ModelCommandLogic for SelectCiRecoveryAction {
                 CiRecoveryClassification::Unrelated | CiRecoveryClassification::Transient,
                 CiRecoveryActionKind::Rerun
             )
-        );
+        ) || (classification == CiRecoveryClassification::Unrelated
+            && self.intent.action.kind == CiRecoveryActionKind::Repair
+            && state.failed_unchanged_rerun);
         if !allowed {
             return Err("ci_recovery_action_conflicts_diagnosis".into());
         }
@@ -2006,7 +2047,7 @@ impl ModelCommandLogic for SelectCiRecoveryAction {
             .build();
         Ok(ModeledEvents::one(
             TiberEvent::model_variant_cirecoveryactionchosen(SelectCiRecoveryActionToFact::apply(
-                (self, self, decision.as_ref(), state),
+                (self, self, decision.as_ref(), state, state, state, state),
             )),
         ))
     }
@@ -2041,6 +2082,7 @@ fn record_ci_recovery_replacement_fact(
     context: &CiOwnerDecisionContext,
     action: &Option<CiRecoveryAction>,
     failed_sha: &Option<String>,
+    classification: &Option<CiRecoveryClassification>,
 ) -> CiRecoveryReplacementRecordedEvent {
     debug_assert_eq!(
         context.incident_id.as_deref(),
@@ -2057,6 +2099,13 @@ fn record_ci_recovery_replacement_fact(
             .is_some_and(|action| action.kind != CiRecoveryActionKind::Rerun)
             || failed_sha.as_deref() == Some(intent.replacement.sha.as_str())
     );
+    debug_assert!(
+        *classification != Some(CiRecoveryClassification::Unrelated)
+            || action
+                .as_ref()
+                .is_none_or(|action| action.kind != CiRecoveryActionKind::Repair)
+            || failed_sha.as_deref() != Some(intent.replacement.sha.as_str())
+    );
     CiRecoveryReplacementRecordedEvent {
         stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
         epoch: intent.expected_epoch,
@@ -2065,7 +2114,7 @@ fn record_ci_recovery_replacement_fact(
     }
 }
 mapping! { RecordCiRecoveryReplacementToFact:
-    (RecordCiRecoveryReplacement.stream, RecordCiRecoveryReplacement.intent, CiOwnerDecisionOutput.context, RecordCiRecoveryReplacementState.action, RecordCiRecoveryReplacementState.failed_sha) => TiberEvent.CiRecoveryReplacementRecorded
+    (RecordCiRecoveryReplacement.stream, RecordCiRecoveryReplacement.intent, CiOwnerDecisionOutput.context, RecordCiRecoveryReplacementState.action, RecordCiRecoveryReplacementState.failed_sha, RecordCiRecoveryReplacementState.classification) => TiberEvent.CiRecoveryReplacementRecorded
     using record_ci_recovery_replacement_fact;
 }
 #[derive(ModelState)]
@@ -2084,6 +2133,8 @@ struct RecordCiRecoveryReplacementState {
     failed_sha: Option<String>,
     #[model(default)]
     resolved: bool,
+    #[model(default)]
+    classification: Option<CiRecoveryClassification>,
 }
 mapping! {
     RecordCiRecoveryReplacementStateToOwnerContext:
@@ -2103,6 +2154,7 @@ impl ModelCommandLogic for RecordCiRecoveryReplacement {
                 state.lease_expires_at = p.lease_expires_at;
                 state.failed_sha = Some(p.trigger.failed_sha.clone());
                 state.action = None;
+                state.classification = None;
                 state.resolved = false;
             }
             TiberEvent::CiRecoveryTransferred(p) => {
@@ -2118,6 +2170,9 @@ impl ModelCommandLogic for RecordCiRecoveryReplacement {
             TiberEvent::CiRecoveryHeartbeatRecorded(p) => {
                 state.lease_expires_at = p.lease_expires_at
             }
+            TiberEvent::CiRecoveryDiagnosed(p) => {
+                state.classification = Some(p.diagnosis.classification.into())
+            }
             TiberEvent::CiRecoveryActionChosen(p) => state.action = Some(p.action.clone().into()),
             TiberEvent::CiRecoveryReplacementRecorded(p) => {
                 if p.replacement.status == tiber_core::events::CiRecoveryReplacementStatus::Failed {
@@ -2132,6 +2187,7 @@ impl ModelCommandLogic for RecordCiRecoveryReplacement {
                 state.epoch = legacy.epoch;
                 state.lease_expires_at = legacy.lease_expires_at;
                 state.action = legacy.next_action;
+                state.classification = legacy.diagnosis.map(|d| d.classification);
                 state.failed_sha = Some(legacy.trigger.failed_sha);
                 state.resolved = legacy.state == CiRecoveryPhase::Resolved;
             }
@@ -2167,6 +2223,12 @@ impl ModelCommandLogic for RecordCiRecoveryReplacement {
         {
             return Err("ci_recovery_rerun_sha_mismatch".into());
         }
+        if state.classification == Some(CiRecoveryClassification::Unrelated)
+            && action.kind == CiRecoveryActionKind::Repair
+            && state.failed_sha.as_deref() == Some(&self.intent.replacement.sha)
+        {
+            return Err("ci_recovery_repair_sha_unchanged".into());
+        }
         let decision = CiOwnerDecisionOutput::model_builder()
             .context(RecordCiRecoveryReplacementStateToOwnerContext::apply((
                 state, state, state, state, state,
@@ -2178,6 +2240,7 @@ impl ModelCommandLogic for RecordCiRecoveryReplacement {
                     self,
                     self,
                     decision.as_ref(),
+                    state,
                     state,
                     state,
                 )),
@@ -2796,8 +2859,14 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
             state.replacement = Some(replacement);
             if failed {
                 state.state = CiRecoveryPhase::Diagnosing;
-                state.failure_record = None;
-                state.diagnosis = None;
+                // A confirmed unrelated failure keeps its original causal diagnosis
+                // while a separately scoped repair is selected and verified.
+                if !state.diagnosis.as_ref().is_some_and(|diagnosis| {
+                    diagnosis.classification == CiRecoveryClassification::Unrelated
+                }) {
+                    state.failure_record = None;
+                    state.diagnosis = None;
+                }
                 state.next_action = None;
             } else {
                 state.state = CiRecoveryPhase::WaitingCi;

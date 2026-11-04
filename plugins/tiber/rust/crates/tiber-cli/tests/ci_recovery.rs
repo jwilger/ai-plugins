@@ -1328,3 +1328,211 @@ done
     fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))
         .expect("make pre-receive barrier executable");
 }
+
+#[test]
+fn unrelated_failure_allows_separate_repair_only_after_failed_unchanged_rerun() {
+    separate_repair_after_failed_rerun("unrelated");
+}
+
+#[test]
+fn transient_failure_does_not_allow_separate_repair_after_failed_rerun() {
+    separate_repair_after_failed_rerun("transient");
+}
+
+fn separate_repair_after_failed_rerun(classification: &str) {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let owner = TempRepo::initialized();
+    owner.git(["remote", "add", "origin", origin.path().to_str().unwrap()]);
+    owner.git(["push", "origin", "main"]);
+    let run = |args: &[&str], host: &str, now: &str| {
+        owner.tiber_with_env(
+            args.iter().copied(),
+            [
+                ("TIBER_CLAIM_HOST", host),
+                ("TIBER_CLAIM_SESSION", "owner-session"),
+                ("TIBER_CI_RECOVERY_TEST_NOW", now),
+            ],
+        )
+    };
+    let ok = |args: &[&str]| assert_success(run(args, "owner-host", "1000"));
+    let rejected = |args: &[&str], host: &str, now: &str, expected: &str| {
+        let output = run(args, host, now);
+        assert!(!output.status.success(), "expected {expected}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    ok(&[
+        "ci-recovery",
+        "claim",
+        "--run-id",
+        "separate-repair",
+        "--run-url",
+        "https://forge.example.invalid/runs/separate-repair",
+        "--failed-sha",
+        "old-sha",
+        "--workflow",
+        "CI",
+        "--ref",
+        "refs/heads/main",
+    ]);
+    ok(&[
+        "ci-recovery",
+        "diagnose",
+        "--incident-id",
+        "ci-separate-repair",
+        "--epoch",
+        "1",
+        "--job",
+        "audit",
+        "--step",
+        "dependency audit",
+        "--log-evidence",
+        "pre-existing vulnerable dependency",
+        "--cause",
+        "dependency already vulnerable before the pushed change",
+        "--classification",
+        classification,
+    ]);
+    let repair = [
+        "ci-recovery",
+        "choose-action",
+        "--incident-id",
+        "ci-separate-repair",
+        "--epoch",
+        "1",
+        "--kind",
+        "repair",
+        "--description",
+        "separate dependency upgrade scope after confirmation",
+    ];
+    rejected(
+        &repair,
+        "owner-host",
+        "1000",
+        "ci_recovery_action_conflicts_diagnosis",
+    );
+    ok(&[
+        "ci-recovery",
+        "choose-action",
+        "--incident-id",
+        "ci-separate-repair",
+        "--epoch",
+        "1",
+        "--kind",
+        "rerun",
+        "--description",
+        "confirm unchanged revision",
+    ]);
+    let mut replacement = [
+        "ci-recovery",
+        "record-replacement",
+        "--incident-id",
+        "ci-separate-repair",
+        "--epoch",
+        "1",
+        "--run-id",
+        "confirmation",
+        "--run-url",
+        "https://forge.example.invalid/runs/confirmation",
+        "--sha",
+        "wrong-sha",
+        "--status",
+        "failed",
+    ];
+    rejected(
+        &replacement,
+        "owner-host",
+        "1000",
+        "ci_recovery_rerun_sha_mismatch",
+    );
+    rejected(
+        &repair,
+        "owner-host",
+        "1000",
+        "ci_recovery_action_conflicts_diagnosis",
+    );
+    replacement[11] = "old-sha";
+    replacement[13] = "running";
+    ok(&replacement);
+    rejected(
+        &repair,
+        "owner-host",
+        "1000",
+        "ci_recovery_action_conflicts_diagnosis",
+    );
+    replacement[13] = "failed";
+    ok(&replacement);
+    rejected(&repair, "other-host", "1000", "ci_recovery_not_owner");
+    rejected(&repair, "owner-host", "100000", "ci_recovery_lease_expired");
+    let mut stale = repair;
+    stale[5] = "0";
+    rejected(&stale, "owner-host", "1000", "ci_recovery_stale_epoch");
+    if classification == "transient" {
+        rejected(
+            &repair,
+            "owner-host",
+            "1000",
+            "ci_recovery_action_conflicts_diagnosis",
+        );
+        return;
+    }
+    ok(&repair);
+    let status = run(&["ci-recovery", "status"], "owner-host", "1000");
+    assert_success_ref(&status);
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["incident_id"], "ci-separate-repair");
+    assert_eq!(status["epoch"], 1);
+    assert_eq!(status["owner"]["host"], "owner-host");
+    assert_eq!(status["diagnosis"]["classification"], "unrelated");
+    assert_eq!(
+        status["diagnosis"]["cause"],
+        "dependency already vulnerable before the pushed change"
+    );
+    assert_eq!(status["next_action"]["kind"], "repair");
+    assert_eq!(status["hold_released"], false);
+    replacement[7] = "repaired";
+    replacement[9] = "https://forge.example.invalid/runs/repaired";
+    replacement[13] = "running";
+    rejected(
+        &replacement,
+        "owner-host",
+        "1000",
+        "ci_recovery_repair_sha_unchanged",
+    );
+    replacement[11] = "new-sha";
+    ok(&replacement);
+    let mut resolve = [
+        "ci-recovery",
+        "resolve",
+        "--incident-id",
+        "ci-separate-repair",
+        "--replacement-run-id",
+        "repaired",
+        "--replacement-run-url",
+        "https://forge.example.invalid/runs/repaired",
+        "--sha",
+        "old-sha",
+        "--terminal-status",
+        "success",
+    ];
+    rejected(
+        &resolve,
+        "owner-host",
+        "1000",
+        "ci_recovery_release_proof_mismatch",
+    );
+    resolve[9] = "new-sha";
+    resolve[11] = "failure";
+    rejected(
+        &resolve,
+        "owner-host",
+        "1000",
+        "ci_recovery_terminal_success_required",
+    );
+    resolve[11] = "success";
+    ok(&resolve);
+}
