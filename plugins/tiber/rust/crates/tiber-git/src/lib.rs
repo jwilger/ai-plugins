@@ -911,6 +911,9 @@ impl ModelCommandLogic for TransferCiRecovery {
                     }
                 }
             }
+            TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
+                state.lease_expires_at = payload.lease_expires_at;
+            }
             TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
@@ -1090,6 +1093,9 @@ impl ModelCommandLogic for TakeOverCiRecovery {
                         state.participants.push(participant);
                     }
                 }
+            }
+            TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
+                state.lease_expires_at = payload.lease_expires_at;
             }
             TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
@@ -1311,6 +1317,9 @@ impl ModelCommandLogic for AssignCiRecoveryWork {
             }
             TiberEvent::CiRecoveryAssigned(_) => {
                 state.assignment_count = state.assignment_count.saturating_add(1);
+            }
+            TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
+                state.lease_expires_at = payload.lease_expires_at;
             }
             TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
@@ -12298,6 +12307,308 @@ mod lock_tests {
             })] if CiRecoveryParticipant::from(owner.clone()) == successor
                 && CiRecoveryParticipant::from(participant.clone()) == successor
         ));
+    }
+
+    fn recovery_command_events<C>(
+        command: &eventcore::model::ModeledCommand<C>,
+        history: &[TiberEvent],
+    ) -> Result<Vec<TiberEvent>, eventcore::CommandError>
+    where
+        C: ModelCommandLogic<Event = TiberEvent>,
+        Modeled<C::State>: Default,
+    {
+        let folded = history.iter().fold(Default::default(), |state, event| {
+            eventcore::CommandLogic::apply(command, state, event)
+        });
+        eventcore::CommandLogic::handle(command, folded).map(Into::into)
+    }
+
+    fn renewed_lease_history() -> (CiRecoveryState, CiRecoveryParticipant, Vec<TiberEvent>) {
+        let mut state = recovery_state_for_event_test();
+        state.lease_expires_at = 100;
+        let helper = CiRecoveryParticipant {
+            host: "helper".into(),
+            session: "session-2".into(),
+        };
+        let stream = stream_id(CI_RECOVERY_STREAM).expect("recovery stream");
+        let history = vec![
+            claimed_event(stream.clone(), &state),
+            TiberEvent::CiRecoveryJoined(CiRecoveryJoinedEvent {
+                stream_id: stream.clone(),
+                trigger: None,
+                participant: Some(helper.clone().into()),
+            }),
+            TiberEvent::CiRecoveryHeartbeatRecorded(CiRecoveryHeartbeatRecordedEvent {
+                stream_id: stream,
+                epoch: state.epoch,
+                owner: state.owner.clone().into(),
+                lease_expires_at: 200,
+            }),
+        ];
+        (state, helper, history)
+    }
+
+    fn assignment_command(
+        state: &CiRecoveryState,
+        assignee: CiRecoveryParticipant,
+        observed_at: u64,
+    ) -> eventcore::model::ModeledCommand<AssignCiRecoveryWork> {
+        let request = AssignCiRecoveryWorkRequest::model_builder()
+            .stream(CiRecoveryStream(
+                stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+            ))
+            .intent(AssignCiRecoveryWorkIntent {
+                incident_id: state.incident_id.clone(),
+                expected_epoch: state.epoch,
+                caller: state.owner.clone(),
+                assignment: CiRecoveryAssignment {
+                    id: "a1".into(),
+                    owner_epoch: state.epoch,
+                    assignee,
+                    capabilities: vec!["inspect".into()],
+                    scope: "failed job".into(),
+                    report: None,
+                },
+                observed_at,
+            })
+            .build();
+        AssignCiRecoveryWork::model_builder()
+            .stream(AssignCiRecoveryWorkRequestToStream::apply(request.as_ref()))
+            .intent(AssignCiRecoveryWorkRequestToIntent::apply(request.as_ref()))
+            .build()
+    }
+
+    #[test]
+    fn renewed_lease_allows_assignment_until_the_heartbeat_expiry() {
+        let (state, helper, history) = renewed_lease_history();
+        for observed_at in [100, 101, 199] {
+            let command = assignment_command(&state, helper.clone(), observed_at);
+            let emitted = recovery_command_events(&command, &history)
+                .expect("owner can assign throughout the renewed lease");
+            assert!(matches!(
+                emitted.as_slice(),
+                [TiberEvent::CiRecoveryAssigned(CiRecoveryAssignedEvent { assignment, .. })]
+                    if assignment.owner_epoch == 1
+                        && CiRecoveryParticipant::from(assignment.assignee.clone()) == helper
+            ));
+        }
+        let expired = assignment_command(&state, helper, 200);
+        let error = recovery_command_events(&expired, &history).expect_err("expiry is inclusive");
+        assert!(error.to_string().contains("ci_recovery_lease_expired"));
+    }
+
+    #[test]
+    fn renewed_lease_allows_transfer_until_the_heartbeat_expiry() {
+        let (state, helper, history) = renewed_lease_history();
+        for observed_at in [100, 101, 199] {
+            let command = transfer_command(&state, helper.clone(), observed_at);
+            let emitted = recovery_command_events(&command, &history)
+                .expect("owner can transfer throughout the renewed lease");
+            assert!(matches!(
+                emitted.as_slice(),
+                [TiberEvent::CiRecoveryTransferred(CiRecoveryTransferredEvent {
+                    owner, epoch: 2, lease_expires_at, ..
+                })] if CiRecoveryParticipant::from(owner.clone()) == helper
+                    && *lease_expires_at == observed_at + CI_RECOVERY_LEASE_SECONDS
+            ));
+        }
+        let expired = transfer_command(&state, helper, 200);
+        let error = recovery_command_events(&expired, &history).expect_err("expiry is inclusive");
+        assert!(error.to_string().contains("ci_recovery_lease_expired"));
+    }
+
+    #[test]
+    fn renewed_lease_prevents_takeover_until_the_heartbeat_expiry() {
+        let (state, helper, history) = renewed_lease_history();
+        for observed_at in [100, 101, 199] {
+            let command = takeover_command(&state, helper.clone(), observed_at);
+            let error = recovery_command_events(&command, &history)
+                .expect_err("renewed owner keeps exclusive authority until expiry");
+            assert!(error.to_string().contains("ci_recovery_lease_active"));
+        }
+        let expired = takeover_command(&state, helper.clone(), 200);
+        let emitted = recovery_command_events(&expired, &history)
+            .expect("successor can take over exactly at renewed expiry");
+        assert!(matches!(
+            emitted.as_slice(),
+            [TiberEvent::CiRecoveryTakenOver(CiRecoveryTakenOverEvent {
+                owner, epoch: 2, lease_expires_at, ..
+            })] if CiRecoveryParticipant::from(owner.clone()) == helper
+                && *lease_expires_at == 200 + CI_RECOVERY_LEASE_SECONDS
+        ));
+    }
+
+    fn execute_recovery_command<C>(
+        root: &Path,
+        command: eventcore::model::ModeledCommand<C>,
+    ) -> Result<eventcore::ExecutionResponse, eventcore::CommandError>
+    where
+        C: ModelCommandLogic<Event = TiberEvent>,
+    {
+        let store = GitEventStore::open(root).expect("open recovery event store");
+        run_async(eventcore::execute(store, command, RetryPolicy::new()))
+    }
+
+    #[test]
+    fn renewed_lease_commands_replay_persisted_heartbeats_through_eventcore() {
+        for operation in ["assignment", "transfer", "takeover"] {
+            let directory = tempfile::TempDir::new().expect("temporary event repository");
+            let root = directory.path();
+            for args in [
+                vec!["init", "-q"],
+                vec!["config", "user.name", "Tiber Test"],
+                vec!["config", "user.email", "tiber@example.invalid"],
+                vec!["config", "commit.gpgsign", "false"],
+            ] {
+                let output = Command::new("git")
+                    .args(args)
+                    .current_dir(root)
+                    .output()
+                    .expect("configure temporary event repository");
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            let (state, helper, _) = renewed_lease_history();
+            execute_recovery_command(root, claim_command(&state)).expect("persist claim");
+            for (observed_at, lease_expires_at) in [(50, 150), (125, 200)] {
+                execute_renew_ci_recovery_lease(
+                    root,
+                    RenewCiRecoveryLeaseIntent {
+                        incident_id: state.incident_id.clone(),
+                        expected_epoch: state.epoch,
+                        owner: state.owner.clone(),
+                        observed_at,
+                        lease_expires_at,
+                    },
+                )
+                .expect("persist valid heartbeat before current expiry");
+            }
+            let before = load_tiber_projection(root)
+                .expect("replay heartbeats")
+                .ci_recovery
+                .expect("active incident");
+            assert_eq!(before.lease_expires_at, 200);
+            assert_eq!(before.owner, state.owner);
+            assert_eq!(before.epoch, 1);
+            match operation {
+                "assignment" => {
+                    let expired = assignment_command(&state, state.owner.clone(), 200);
+                    let error = execute_recovery_command(root, expired).expect_err("expired owner");
+                    assert!(error.to_string().contains("ci_recovery_lease_expired"));
+                    let valid = assignment_command(&state, state.owner.clone(), 199);
+                    execute_recovery_command(root, valid).expect("renewed owner can assign");
+                    let after = load_tiber_projection(root)
+                        .expect("replay assignment")
+                        .ci_recovery
+                        .expect("active incident");
+                    assert_eq!(after.assignments.len(), 1);
+                    assert_eq!(after.assignments[0].owner_epoch, 1);
+                }
+                "transfer" => {
+                    let expired = transfer_command(&state, helper.clone(), 200);
+                    let error = execute_recovery_command(root, expired).expect_err("expired owner");
+                    assert!(error.to_string().contains("ci_recovery_lease_expired"));
+                    execute_recovery_command(root, transfer_command(&state, helper.clone(), 199))
+                        .expect("renewed owner can transfer");
+                }
+                "takeover" => {
+                    let active = takeover_command(&state, helper.clone(), 199);
+                    let error = execute_recovery_command(root, active).expect_err("active owner");
+                    assert!(error.to_string().contains("ci_recovery_lease_active"));
+                    execute_recovery_command(root, takeover_command(&state, helper.clone(), 200))
+                        .expect("takeover at latest heartbeat expiry");
+                }
+                _ => unreachable!(),
+            }
+            if operation != "assignment" {
+                let after = load_tiber_projection(root)
+                    .expect("replay new owner")
+                    .ci_recovery
+                    .expect("active incident");
+                assert_eq!(after.owner, helper);
+                assert_eq!(after.epoch, 2);
+                let stale = assignment_command(&state, state.owner.clone(), 201);
+                let error =
+                    execute_recovery_command(root, stale).expect_err("prior epoch rejected");
+                assert!(error.to_string().contains("ci_recovery_stale_epoch"));
+                let mut old_owner = state.clone();
+                old_owner.epoch = 2;
+                let stale = assignment_command(&old_owner, state.owner.clone(), 201);
+                let error =
+                    execute_recovery_command(root, stale).expect_err("prior owner rejected");
+                assert!(error.to_string().contains("ci_recovery_not_owner"));
+            }
+        }
+    }
+
+    #[test]
+    fn renewed_lease_preserves_incident_epoch_owner_and_resolution_guards() {
+        let (state, helper, history) = renewed_lease_history();
+        for guard in ["incident", "epoch", "owner", "resolved"] {
+            let mut request_state = state.clone();
+            let mut events = history.clone();
+            let expected_error = match guard {
+                "incident" => {
+                    request_state.incident_id = "ci-other".into();
+                    "ci_recovery_incident_mismatch"
+                }
+                "epoch" => {
+                    request_state.epoch = 0;
+                    "ci_recovery_stale_epoch"
+                }
+                "owner" => {
+                    request_state.owner = helper.clone();
+                    "ci_recovery_not_owner"
+                }
+                "resolved" => {
+                    events.push(TiberEvent::CiRecoveryResolved(CiRecoveryResolvedEvent {
+                        stream_id: stream_id(CI_RECOVERY_STREAM).expect("recovery stream"),
+                        participant: state.owner.clone().into(),
+                        proof: CiRecoveryReleaseProof {
+                            replacement_run_id: "124".into(),
+                            replacement_run_url: "https://example.invalid/runs/124".into(),
+                            sha: "fedcba".into(),
+                            terminal_status: "success".into(),
+                        }
+                        .into(),
+                    }));
+                    "ci_recovery_incident_resolved"
+                }
+                _ => unreachable!(),
+            };
+            let assignment = assignment_command(&request_state, helper.clone(), 101);
+            let error = recovery_command_events(&assignment, &events).expect_err(guard);
+            assert!(
+                error.to_string().contains(expected_error),
+                "{guard}: {error}"
+            );
+            let transfer = transfer_command(&request_state, helper.clone(), 101);
+            let error = recovery_command_events(&transfer, &events).expect_err(guard);
+            assert!(
+                error.to_string().contains(expected_error),
+                "{guard}: {error}"
+            );
+
+            let successor = if guard == "owner" {
+                state.owner.clone()
+            } else {
+                helper.clone()
+            };
+            let takeover = takeover_command(&request_state, successor, 200);
+            let error = recovery_command_events(&takeover, &events).expect_err(guard);
+            let takeover_error = if guard == "owner" {
+                "ci_recovery_already_owner"
+            } else {
+                expected_error
+            };
+            assert!(
+                error.to_string().contains(takeover_error),
+                "{guard}: {error}"
+            );
+        }
     }
 
     #[test]
