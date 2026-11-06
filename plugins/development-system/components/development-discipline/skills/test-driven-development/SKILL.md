@@ -203,9 +203,12 @@ When full review requires a code or guidance edit, first confirm that the most
 recently completed in-scope CI has no unresolved failed job, classify whether
 RED applies and use it when required, then repeat the immediate focused test,
 lightweight review, signed commit through the pre-commit hook, and exact
-verification. In direct-to-trunk mode, keep the repair commit local and renew
-affected full review through its diff-bound delta/reset protocol before the
-already-authorized push. In PR/MR mode, first return any ready request to draft
+verification. In direct-to-trunk mode, obtain proportional independent increment
+review and publish the verified repair with the already-authorized normal push.
+Then renew affected cumulative final review against the delivered repair through
+its diff-bound delta/reset protocol, preserving valid unaffected evidence under
+the recorded protocol. Final acceptance requires terminal-success CI on that
+exact reviewed SHA. In PR/MR mode, first return any ready request to draft
 and confirm the transition succeeded, even when auto-merge is already off.
 Only then disable auto-merge and confirm it is off; do not push if either
 safeguard fails. After pushing the source repair, renew affected full review
