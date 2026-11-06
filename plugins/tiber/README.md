@@ -461,7 +461,7 @@ and added response fields. Null lease guidance indicates unavailable observation
 not permission to act. Epoch fencing, normal publication, and exact successful
 replacement-CI proof as the sole hold release are unchanged.
 
-To activate, update the marketplace and installed Tiber plugin to 1.3.0, then
+To activate, update the marketplace and installed Tiber plugin to the current release, then
 restart its MCP server and reload the updated tasks skill. Claim/join the
 existing incident; an upgrade does not migrate or impersonate an old owner.
 A live old owner may transfer explicitly, otherwise use the reported retry time
