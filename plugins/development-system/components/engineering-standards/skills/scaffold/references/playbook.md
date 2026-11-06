@@ -282,3 +282,8 @@ version bump, changelog, and publish after delivery) where releases apply, using
 whatever tooling the forge/registry supports — keep provider, registry, and
 service names out of the requirements; they are deployment details, not
 standards.
+
+The generated commit guidance applies the same extremely frequent small coherent
+commit cadence in every delivery mode: push to configured trunk in direct-to-trunk
+mode, push to the selected branch in PR/MR mode, and retain commits locally in
+local-only mode. Explicit no-commit instructions take precedence.

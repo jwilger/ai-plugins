@@ -37,7 +37,12 @@ Tiber plugin owns `tiber`. Default marketplace installation installs both.
    version check and repair. Do not defer repair to the user or configure a
    repository whose required MCPs cannot start. A missing companion must produce
    installation guidance; disabling integration does not bypass recovery holds.
-2. From the primary checkout, call the plugin-provided Development Discipline
+2. Establish extremely frequent small coherent gated commits for every delivery
+   mode. Direct-to-trunk pushes target origin’s configured trunk; PR/MR pushes
+   target the selected branch; local-only commits remain local. Honor explicit
+   no-commit restrictions. Propagate this distinction into generated project
+   guidance so local-only and PR projects inherit the commit cadence too.
+   From the primary checkout, call the plugin-provided Development Discipline
    MCP `setup.preview` without a proposal to obtain repository evidence, the
    current configuration, command suggestions, and the complete structural
    schema. Read the actual manifests, command definitions, CI, architecture and

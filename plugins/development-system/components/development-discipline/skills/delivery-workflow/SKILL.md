@@ -1,6 +1,6 @@
 ---
 name: delivery-workflow
-description: Use when choosing whether and how verified work should be committed, pushed, reviewed, and delivered under a repository's local workflow policy; local-only mode does not authorize a commit unless the user or repository requires one.
+description: Use when choosing whether and how verified work should be committed, pushed, reviewed, and delivered under a repository's local workflow policy; frequent small commits apply in every mode, while local-only commits remain local.
 ---
 
 # Delivery workflow
@@ -57,7 +57,7 @@ practices as recommendations, not findings of noncompliance.
 
 ### Direct-to-trunk
 
-Publish small, coherent passing increments extremely frequently; do not wait for a feature, vertical slice, or final MVP to be complete. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
+Commit small, coherent passing increments extremely frequently in every delivery mode; do not wait for a feature, vertical slice, or final MVP to be complete. Direct-to-trunk pushes go to origin’s configured trunk; PR/MR pushes go to the selected branch; local-only commits stay local. An explicit no-commit instruction takes precedence and uses the reviewed snapshot route. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
 
 In direct-to-trunk mode, use one checkout on the configured trunk branch and push directly to origin’s trunk. Do not create a branch, linked worktree, or parallel source checkout unless the user explicitly authorizes a different approach. Serialize mutable work in that checkout, including CI repair; read-only reviewers may inspect it. Use affected independent review for each increment rather than accumulating a completed local batch for one eventual publication review. Keep the immutable task-start baseline for final acceptance while recording each increment’s reviewed scope and exact identity separately.
 
@@ -89,7 +89,7 @@ for an older SHA as readiness evidence for a newer checkpoint.
 
 ### PR/MR
 
-Publish small, coherent passing increments extremely frequently; do not wait for a feature, vertical slice, or final MVP to be complete. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
+Commit small, coherent passing increments extremely frequently in every delivery mode; do not wait for a feature, vertical slice, or final MVP to be complete. Direct-to-trunk pushes go to origin’s configured trunk; PR/MR pushes go to the selected branch; local-only commits stay local. An explicit no-commit instruction takes precedence and uses the reviewed snapshot route. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
 
 In direct-to-trunk mode, use one checkout on the configured trunk branch and push directly to origin’s trunk. Do not create a branch, linked worktree, or parallel source checkout unless the user explicitly authorizes a different approach. Serialize mutable work in that checkout, including CI repair; read-only reviewers may inspect it. Use affected independent review for each increment rather than accumulating a completed local batch for one eventual publication review. Keep the immutable task-start baseline for final acceptance while recording each increment’s reviewed scope and exact identity separately.
 
@@ -100,10 +100,11 @@ review, approval and merge state to the exact current head revision.
 
 ### Local-only
 
-Keep all work local and do not push, open a PR/MR, or merge. Commit only when
-requested or required by the applicable repository policy, and only with commit
-authority. That route uses the normal commit hook and exact signed commit.
-Otherwise use the authorized exact no-commit snapshot route with fresh,
+Keep all work local and do not push, open a PR/MR, or merge. Apply the same
+frequent small, coherent commit cadence with the normal commit hook and exact
+signed commit. Local-only restricts remote delivery; it does not defer commits
+until feature completion. When the user explicitly prohibits commits or
+repository policy withholds commit authority, use the exact no-commit snapshot route with fresh,
 proportionate local checks and review; never fabricate a commit-hook receipt or
 manually duplicate hook-owned checks around an authorized commit. An explicit
 committed-evidence policy, including Tiber's opt-in minimum-clean-reviews policy,

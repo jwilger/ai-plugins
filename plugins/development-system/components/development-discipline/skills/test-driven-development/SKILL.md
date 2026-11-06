@@ -146,8 +146,8 @@ At `passing-awaiting-gates-or-review`, stop all implementation and test editing:
    `rationale-commit-messages` and create the signed commit. That Git operation
    must trigger Lefthook's repository fast pre-commit gate; never run the same
    gate separately first. Record the hook receipt, exact OID, and transition to
-   `committed` together. Local-only uses this route when a commit is requested
-   or required and authorized; otherwise use the exact no-commit snapshot route
+   `committed` together. Local-only uses the same frequent commit route unless an explicit
+   no-commit restriction applies; that restriction uses the exact snapshot route
    with fresh proportionate checks, never a fabricated commit-hook receipt.
    An explicit committed-evidence policy still requires a commit tree and blocks
    completion when commit authority is withheld.
@@ -210,9 +210,9 @@ and confirm the transition succeeded, even when auto-merge is already off.
 Only then disable auto-merge and confirm it is off; do not push if either
 safeguard fails. After pushing the source repair, renew affected full review
 before restoring ready status, auto-merge, or merge-queue eligibility.
-Local-only uses a signed local commit only when
-required and authorized, otherwise the exact no-commit snapshot, and performs
-no remote mutation. Remote readiness still waits for terminal CI success on
+Local-only uses the same frequent signed local commit cadence and performs
+no remote mutation. An explicit no-commit restriction uses the exact reviewed
+no-commit snapshot instead. Remote readiness still waits for terminal CI success on
 the exact final-reviewed SHA.
 
 ## Lightweight Review
@@ -272,7 +272,7 @@ preempts the next cycle.
 
 ## Publication boundary
 
-Publish small, coherent passing increments extremely frequently; do not wait for a feature, vertical slice, or final MVP to be complete. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
+Commit small, coherent passing increments extremely frequently in every delivery mode; do not wait for a feature, vertical slice, or final MVP to be complete. Direct-to-trunk pushes go to origin’s configured trunk; PR/MR pushes go to the selected branch; local-only commits stay local. An explicit no-commit instruction takes precedence and uses the reviewed snapshot route. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
 
 In direct-to-trunk mode, use one checkout on the configured trunk branch and push directly to origin’s trunk. Do not create a branch, linked worktree, or parallel source checkout unless the user explicitly authorizes a different approach. Serialize mutable work in that checkout, including CI repair; read-only reviewers may inspect it. Use affected independent review for each increment rather than accumulating a completed local batch for one eventual publication review. Keep the immutable task-start baseline for final acceptance while recording each increment’s reviewed scope and exact identity separately.
 

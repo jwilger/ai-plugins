@@ -361,7 +361,7 @@ lightweight review and delivery checkpoint. Generated output and mechanically
 required metadata may accompany only the causal source snapshot that produces
 or requires them. Never batch already-passing unrelated work for convenience.
 
-Publish small, coherent passing increments extremely frequently; do not wait for a feature, vertical slice, or final MVP to be complete. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
+Commit small, coherent passing increments extremely frequently in every delivery mode; do not wait for a feature, vertical slice, or final MVP to be complete. Direct-to-trunk pushes go to origin’s configured trunk; PR/MR pushes go to the selected branch; local-only commits stay local. An explicit no-commit instruction takes precedence and uses the reviewed snapshot route. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
 
 In direct-to-trunk mode, use one checkout on the configured trunk branch and push directly to origin’s trunk. Do not create a branch, linked worktree, or parallel source checkout unless the user explicitly authorizes a different approach. Serialize mutable work in that checkout, including CI repair; read-only reviewers may inspect it. Use affected independent review for each increment rather than accumulating a completed local batch for one eventual publication review. Keep the immutable task-start baseline for final acceptance while recording each increment’s reviewed scope and exact identity separately.
 
@@ -370,8 +370,8 @@ In PR/MR mode, authorized branch pushes and draft creation may precede full loca
 Any terminal-review finding remediation must leave review and complete the
 normal immediate-test and lightweight-review checkpoint. Then use a
 signed additive commit plus exact verification, renewed affected review before
-trunk push (or PR readiness), and authorized push for remote modes, or a signed local commit only when required/authorized and otherwise a
-new exact no-commit snapshot for local-only. Submit the diff-bound independent
+trunk push (or PR readiness), and authorized push for remote modes, or the same frequent signed local commits for local-only. An explicit
+no-commit restriction instead uses a new exact reviewed snapshot. Submit the diff-bound independent
 delta assessment and obtain fresh affected-behavior/dependency review under v3,
 preserving proven peer receipts and every recorded responsibility and sample
 floor. An ordinary delta cannot omit an obligation or lower its sample count.
