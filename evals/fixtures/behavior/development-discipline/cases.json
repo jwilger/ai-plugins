@@ -2945,5 +2945,29 @@
     "minPassRate": 0.66,
     "semanticRubric": "Pass if it rejects unauthorized branch/worktree/parallel checkout creation, serializes mutations in the one configured trunk checkout, claims/respects Tiber incident ownership and pauses unrelated edits during the hold, preserves WIP with the exact stash protocol, permits read-only independent reviewers, and resumes WIP only after recovery success and verified restoration. Fail if isolation heuristics override explicit ownership or if multiple writers continue concurrently. It must preserve independent review, signed gated commits and exact-SHA CI without interpreting single checkout as permission to omit them.",
     "hardAssertions": []
+  },
+  {
+    "case_id": "development-discipline-increment-review-before-final-acceptance",
+    "behavior": "Publish independently reviewed increments before distinct cumulative final acceptance and reconcile legacy publication receipts safely",
+    "prompt": "Use development-system checkpoint operations for a direct-to-trunk ticket with two coherent increments and unfinished feature acceptance criteria. The first commit has passed exact verification. Give the operation/action sequence to publish it after independent increment review, observe exact-SHA CI, continue and publish the second increment, and finally accept the whole feature against its original task baseline. Also explain how to resume a persisted pre-upgrade committed/push checkpoint or a pending-CI checkpoint whose unscoped terminal_review_receipt only meant publication review. Explain whether that old receipt or new increment review can certify final completion. Name the identity fields bound by the increment review receipt and the disposition of the old terminal receipt during reconciliation.",
+    "tags": [
+      "development-discipline",
+      "delivery",
+      "checkpoint",
+      "increment-review",
+      "legacy-migration"
+    ],
+    "plugins": ["development-system"],
+    "skills": ["delivery", "development-workflow"],
+    "coverage": {
+      "kinds": ["core-behavior", "scope-boundary", "adversarial-safety"]
+    },
+    "valueGate": {
+      "mode": "standard",
+      "baselineLiftThreshold": 0.1
+    },
+    "minPassRate": 0.66,
+    "semanticRubric": "Pass only if publication uses increment-review-pass with exact source/HEAD and immutable task-baseline binding before push-readback, then registers/observes exact-SHA CI, while retaining original baseline and append-only CI history. After CI, terminal-review is pending final acceptance, not automatic feature completion; begin-edit may continue unfinished work and clears candidate review credits. The second increment needs fresh review and verification. Scope-complete final independent review and required CI for the delivered final SHA precede terminal-review-pass and complete; the new terminal receipt explicitly records scope final-acceptance. For legacy committed/push records, renew publication review explicitly using increment-review-pass before publication, with the typed operation clearing the ambiguous old terminal receipt (never manual checkpoint rewriting). Accept semantically equivalent identity-binding language; exact prose is not required. A legacy unscoped publication receipt with pending CI cannot earn final completion on CI success; it must reach separate final acceptance. Fail if unfinished acceptance criteria prohibit independently coherent increment publication, terminal-review-pass is used as the pre-push increment authorization, CI alone marks the feature complete, old terminal evidence silently becomes final acceptance, review is reusable after a new edit, or the ticket-start baseline advances per increment. Preserve configured signing, pre-commit gates, the explicit origin/configured-trunk destination and remote/ref binding.",
+    "hardAssertions": []
   }
 ]

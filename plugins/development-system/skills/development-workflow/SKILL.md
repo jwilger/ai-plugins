@@ -176,13 +176,19 @@ uses `failure_kind:"lightweight-review"`. These are truthful failed gate
 receipts, not claims that the preceding focused test failed.
 `gates` has these required fields (legacy records may omit terminal review):
 `{"lightweight_review_receipt":string|null,"fast_gate_receipt":string|null,"exact_identity_verification_receipt":{"receipt_ref":string,"outcome":"pass"|"fail"}|null}`.
-`gates.terminal_review_receipt`, when present, is
+`gates.increment_review_receipt` and `gates.terminal_review_receipt`, when present, each use
 `{"receipt_ref":string,"head_oid":string,"baseline_oid":string,"source_sha256":string}`.
-It binds independent review of the declared candidate scope to the exact local source and baseline; missing
-legacy evidence earns no pre-push review credit. `begin-edit` clears it.
-`terminal-review-pass` on a trunk local commit currently records review of the
-declared publication increment and permits `push`; it is not final feature acceptance; successful
-post-push CI completes that unchanged reviewed candidate.
+`increment-review-pass` records independent review of the declared publication increment,
+bound to the exact verified source and immutable task baseline, and permits trunk `push`.
+It does not certify final acceptance. Missing legacy evidence earns no publication credit;
+a legacy committed `terminal-review` checkpoint must explicitly use `increment-review-pass`.
+The final receipt additionally carries `scope:"final-acceptance"`; legacy unscoped receipts
+never earn new final acceptance credit. Legacy ready-to-push records explicitly renew
+increment review before publication.
+`terminal-review-pass` records scope-complete final acceptance only after delivery and required
+exact-SHA CI success. Successful CI after increment publication leads to `terminal-review`,
+or use `begin-edit` to continue the next increment. `begin-edit` clears both review receipts
+while preserving the original task baseline and CI history for cumulative final review.
 `delivery` is either `null` or exactly
 `{"mode":"local-only"|"direct-to-trunk"|"pull-request","commit_oid":string|null,"pushed_oid":string|null,"local_snapshot":string|null}`.
 `ci` is exactly
@@ -311,7 +317,7 @@ the helper cannot attest that a caller's supplied failure report is truthful.
   sets `next_action` to `repair-exact-identity-verification`, prohibits delivery,
   and permits only the causal repair action followed by
   another exact verification. Push or local completion requires a successful
-  exact-identity verification receipt; then use `terminal-review` for direct-to-trunk, `push` for a draft PR
+  exact-identity verification receipt; then use `increment-review` for direct-to-trunk, `push` for a draft PR
   branch, or `record-local-delivery` for local-only. A verified local
   committed checkpoint may use `begin-edit` to continue the next increment as the exact `next_action`. CI for this
   new commit may still have no runs before remote delivery.
@@ -330,8 +336,8 @@ the helper cannot attest that a caller's supplied failure report is truthful.
   at least one CI run for the exact pushed OID. Use `monitor-exact-sha-ci` while
   all runs are queued/running without terminal success, `enter-ci-recovery` as
   the sole action when an exact-SHA run fails and no replacement has reached
-  terminal success, and `complete` after the named terminal success when current pre-push review
-  is retained, otherwise `terminal-review`,
+  terminal success, and `terminal-review` after the named terminal success. Increment publication
+  review never implies feature completion. Use `complete` only with retained final acceptance,
   which must be the final append-ordered CI observation. Retained CI history
   may contain earlier failures. Local-only
   requires no remote run and uses `terminal-review`. A remote push must trigger

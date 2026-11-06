@@ -20,9 +20,11 @@
   .snapshot.head_oid == $current_head and .snapshot.tracked_sha256 == $current_tracked and .snapshot.untracked_sha256 == $current_untracked and
   (.state | IN("awaiting-causal-edit", "failing", "passing-awaiting-gates-or-review", "committed", "pushed-or-delivery-mode-equivalent")) and
   (.test == null or (.test | exact_keys(["command", "receipt_ref", "outcome", "failure_kind"]) and (.command | nonblank) and (.receipt_ref | nonblank) and (.outcome | IN("pass", "fail")) and (.failure_kind | string_or_null))) and
-  (.gates | (del(.terminal_review_receipt) | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"])) and
+  (.gates | (del(.terminal_review_receipt, .increment_review_receipt) | exact_keys(["lightweight_review_receipt", "fast_gate_receipt", "exact_identity_verification_receipt"])) and
     (.terminal_review_receipt == null or
-      (.terminal_review_receipt | exact_keys(["receipt_ref", "head_oid", "baseline_oid", "source_sha256"]) and (.receipt_ref | nonblank) and (.source_sha256 | sha256) and .head_oid == $record.snapshot.head_oid and .baseline_oid == $record.baseline_oid)) and
+      (.terminal_review_receipt | (del(.scope) | exact_keys(["receipt_ref", "head_oid", "baseline_oid", "source_sha256"])) and (.scope == null or .scope == "final-acceptance") and (.receipt_ref | nonblank) and (.source_sha256 | sha256) and .head_oid == $record.snapshot.head_oid and .baseline_oid == $record.baseline_oid)) and
+    (.increment_review_receipt == null or
+      (.increment_review_receipt | exact_keys(["receipt_ref", "head_oid", "baseline_oid", "source_sha256"]) and (.receipt_ref | nonblank) and (.source_sha256 | sha256) and .head_oid == $record.snapshot.head_oid and .baseline_oid == $record.baseline_oid)) and
     (.lightweight_review_receipt | nonblank_or_null) and (.fast_gate_receipt | nonblank_or_null) and
     (.exact_identity_verification_receipt == null or
       (.exact_identity_verification_receipt | exact_keys(["receipt_ref", "outcome"]) and
@@ -64,7 +66,7 @@
       (.gates.exact_identity_verification_receipt.outcome == "pass" and
        (if .delivery.mode == "local-only" then .next_action == "record-local-delivery"
         elif .delivery.mode == "direct-to-trunk" then
-          (.next_action == "terminal-review" or (.next_action == "push" and .gates.terminal_review_receipt != null))
+          ((.next_action | IN("increment-review", "terminal-review")) or (.next_action == "push" and (.gates.increment_review_receipt != null or .gates.terminal_review_receipt != null)))
         else .next_action == "push" end)) or
       (.gates.exact_identity_verification_receipt.outcome == "fail" and .next_action == "repair-exact-identity-verification"))
    elif .state == "pushed-or-delivery-mode-equivalent" and .generation == 0 then

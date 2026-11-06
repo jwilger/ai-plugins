@@ -94,19 +94,27 @@ if ! tail -c +15 "$candidate" | jq -e --argjson generation "$expected_generation
 fi
 proposed_baseline=$(tail -c +15 "$candidate" | jq -er '.baseline_oid')
 
+# Legacy predecessors remain readable, but a new completion requires explicit final scope.
+if ! tail -c +15 "$candidate" | jq -e '.next_action != "complete" or .gates.terminal_review_receipt.scope == "final-acceptance"' >/dev/null; then
+  echo "completion requires explicitly scoped final acceptance" >&2
+  exit 3
+fi
+
 # Only the typed operation retains review evidence and derives its source binding.
 # Compatibility records may preserve or invalidate that credit, never mint it.
 if ! $operation_mode; then
-  proposed_review=$(tail -c +15 "$candidate" | jq -c '.gates.terminal_review_receipt // null')
-  current_review=null
-  if [[ -e $target ]]; then
-    current_review=$(tail -c +15 "$target" | jq -c '.gates.terminal_review_receipt // null')
-  fi
-  jq -en --argjson proposed "$proposed_review" --argjson current "$current_review" \
-    '$proposed == null or $proposed == $current' >/dev/null || {
-      echo "terminal review credit requires the typed terminal-review-pass operation" >&2
-      exit 3
-    }
+  for review_field in terminal_review_receipt increment_review_receipt; do
+    proposed_review=$(tail -c +15 "$candidate" | jq -c --arg field "$review_field" '.gates[$field] // null')
+    current_review=null
+    if [[ -e $target ]]; then
+      current_review=$(tail -c +15 "$target" | jq -c --arg field "$review_field" '.gates[$field] // null')
+    fi
+    jq -en --argjson proposed "$proposed_review" --argjson current "$current_review" \
+      '$proposed == null or $proposed == $current' >/dev/null || {
+        echo "$review_field credit requires its typed review-pass operation" >&2
+        exit 3
+      }
+  done
 fi
 
 if [[ -e $target ]]; then
@@ -152,7 +160,7 @@ if [[ -e $target ]]; then
        (($proposed.ci.recoveries // [])[0:(($current.ci.recoveries // []) | length)] == ($current.ci.recoveries // [])) then true
     elif $proposed.state == "awaiting-causal-edit" then
       ($current.state | IN("committed", "pushed-or-delivery-mode-equivalent")) and
-      ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "terminal-review", "push", "complete")) and
+      ($current.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "terminal-review", "increment-review", "push", "complete")) and
       $current.gates.exact_identity_verification_receipt.outcome == "pass" and
       $proposed.snapshot == $current.snapshot and
       $proposed.ci.runs == $current.ci.runs
@@ -186,13 +194,9 @@ if [[ -e $target ]]; then
         $proposed.delivery.mode == "local-only" and $proposed.next_action == "terminal-review"))
     elif $current.next_action == "verify-exact-commit" then
       $proposed.state == "committed" and
-      ($proposed.next_action | IN("repair-exact-identity-verification", "push", "terminal-review", "record-local-delivery"))
+      ($proposed.next_action | IN("repair-exact-identity-verification", "push", "terminal-review", "increment-review", "record-local-delivery"))
     elif $current.next_action == "repair-exact-identity-verification" then
       $proposed.state == "committed" and $proposed.next_action == "verify-exact-commit"
-    elif $current.next_action == "push" then
-      gate_failure("terminal-review") or
-      ($proposed.state == "pushed-or-delivery-mode-equivalent" and
-      $proposed.next_action == "register-exact-sha-ci-monitor")
     elif $current.next_action == "record-local-delivery" then
       $proposed.state == "pushed-or-delivery-mode-equivalent" and
       $proposed.delivery.mode == "local-only" and $proposed.next_action == "terminal-review"
@@ -200,11 +204,27 @@ if [[ -e $target ]]; then
       (($proposed.state == "pushed-or-delivery-mode-equivalent" and
         ($proposed.next_action | IN("register-exact-sha-ci-monitor", "monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review", "complete")) and
         ($proposed.next_action != "complete" or
-         ($current.gates.terminal_review_receipt != null and
+         ($current.gates.terminal_review_receipt.scope == "final-acceptance" and
           $proposed.gates.terminal_review_receipt == $current.gates.terminal_review_receipt and
           ($proposed | del(.generation, .predecessor_sha256, .next_action, .ci)) ==
           ($current | del(.generation, .predecessor_sha256, .next_action, .ci))))) or
        remediation_result)
+    elif $current.state == "committed" and
+         ($current.next_action | IN("increment-review", "terminal-review", "push")) and
+         $proposed.next_action == "push" then
+      $proposed.gates.increment_review_receipt != null and
+      $proposed.gates.terminal_review_receipt == null and
+      ($proposed | del(.generation, .predecessor_sha256, .next_action, .gates.increment_review_receipt, .gates.terminal_review_receipt)) ==
+      ($current | del(.generation, .predecessor_sha256, .next_action, .gates.increment_review_receipt, .gates.terminal_review_receipt))
+    elif $current.next_action == "increment-review" then gate_failure("terminal-review")
+    elif $current.next_action == "push" then
+      gate_failure("terminal-review") or
+      ($proposed.state == "pushed-or-delivery-mode-equivalent" and
+      (if $current.delivery.mode == "direct-to-trunk" then
+        $current.gates.increment_review_receipt != null and
+        $proposed.gates.increment_review_receipt == $current.gates.increment_review_receipt
+       else true end) and
+      $proposed.next_action == "register-exact-sha-ci-monitor")
     elif $current.next_action == "terminal-review" then
       gate_failure("terminal-review") or
       (($proposed.next_action | IN("monitor-exact-sha-ci", "enter-ci-recovery", "terminal-review")) and

@@ -601,7 +601,7 @@ SHIM
   remote_commit_mode=direct-to-trunk
   remote_committed
   [ "$(jq -r '.delivery.mode' <<<"$record")" = direct-to-trunk ]
-  [ "$(jq -r '.next_action' <<<"$record")" = terminal-review ]
+  [ "$(jq -r '.next_action' <<<"$record")" = increment-review ]
 }
 
 @test "delivery mode rebind cannot cross local and remote gate families" {
@@ -1449,34 +1449,37 @@ compatibility_stale_ci_success() {
   compatibility_stale_ci_success failure
 }
 
-@test "trunk local checkpoints can accumulate but push requires current full review" {
+@test "trunk local checkpoints can accumulate but push requires current increment review" {
   remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
-  [ "$(jq -r '.next_action' <<<"$record")" = terminal-review ]
+  [ "$(jq -r '.next_action' <<<"$record")" = increment-review ]
   invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
   [ "$status" -ne 0 ]
   invoke begin-edit "$(evidence_fields '{"causal_edit":"next local increment"}')"
   accepted
   [ "$(jq -r '.state' <<<"$record")" = awaiting-causal-edit ]
-  [ "$(jq -r '.gates.terminal_review_receipt' <<<"$record")" = null ]
+  [ "$(jq -r '.gates.increment_review_receipt' <<<"$record")" = null ]
 }
 
-@test "trunk full review persists before push and unchanged exact SHA CI completes it" {
+@test "trunk increment review permits push but CI still requires final acceptance" {
   remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
-  invoke terminal-review-pass "$(evidence_fields)"
+  invoke increment-review-pass "$(evidence_fields)"
   accepted
   [ "$(jq -r '.next_action' <<<"$record")" = push ]
-  [ "$(jq -r '.gates.terminal_review_receipt.head_oid' <<<"$record")" = "$(git -C "$repo" rev-parse HEAD)" ]
+  [ "$(jq -r '.gates.increment_review_receipt.head_oid' <<<"$record")" = "$(git -C "$repo" rev-parse HEAD)" ]
   git -C "$repo" push -q origin HEAD:refs/heads/main
   invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
   accepted
   invoke ci-register "$(ci_fields reviewed-trunk success)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = terminal-review ]
+  invoke terminal-review-pass "$(evidence_fields)"
   accepted
   [ "$(jq -r '.next_action' <<<"$record")" = complete ]
 }
 
 @test "source drift after trunk review blocks push readback and a new edit clears review" {
   remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
-  invoke terminal-review-pass "$(evidence_fields)"
+  invoke increment-review-pass "$(evidence_fields)"
   accepted
   printf 'drift\n' >>"$repo/source"
   invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
@@ -1484,7 +1487,7 @@ compatibility_stale_ci_success() {
   git -C "$repo" restore source
   invoke begin-edit "$(evidence_fields '{"causal_edit":"renew review for next change"}')"
   accepted
-  [ "$(jq -r '.gates.terminal_review_receipt' <<<"$record")" = null ]
+  [ "$(jq -r '.gates.increment_review_receipt' <<<"$record")" = null ]
 }
 
 compatibility_forged_review() {
@@ -1509,4 +1512,105 @@ compatibility_forged_review() {
 
 @test "compatibility cannot mint local completion review credit" {
   compatibility_forged_review local-only
+}
+
+@test "two trunk increments publish before final acceptance with immutable task baseline" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  task_baseline=$(jq -r '.baseline_oid' <<<"$record")
+  for increment in first second; do
+    invoke terminal-review-pass "$(evidence_fields)"
+    [ "$status" -ne 0 ]
+    invoke increment-review-pass "$(evidence_fields)"
+    accepted
+    git -C "$repo" push -q origin HEAD:refs/heads/main
+    invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+    accepted
+    invoke ci-register "$(ci_fields "$increment" success)"
+    accepted
+    [ "$(jq -r '.next_action' <<<"$record")" = terminal-review ]
+    [ "$(jq -r '.gates.terminal_review_receipt' <<<"$record")" = null ]
+    [ "$(jq -r '.baseline_oid' <<<"$record")" = "$task_baseline" ]
+    if [ "$increment" = first ]; then
+      invoke begin-edit "$(evidence_fields '{"causal_edit":"implement second increment"}')"
+      accepted
+      [ "$(jq -r '.gates.increment_review_receipt' <<<"$record")" = null ]
+      printf 'next implementation\n' >>"$repo/source"
+      invoke edit-pass "$(evidence_fields)"
+      accepted
+      invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+      accepted
+      git -C "$repo" add source
+      git -C "$repo" commit -m 'second increment' >"$evidence" 2>&1
+      invoke commit-success "$(evidence_fields '{"mode":"direct-to-trunk"}')"
+      accepted
+      invoke exact-verify-pass "$(evidence_fields)"
+      accepted
+      invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+      [ "$status" -ne 0 ]
+    fi
+  done
+  invoke terminal-review-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = complete ]
+}
+
+@test "compatibility cannot mint typed increment review credit" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  generation=$(jq '.generation+1' <<<"$record")
+  predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  { printf 'checkpoint-v1 '; jq -c --argjson gen "$generation" --arg pred "$predecessor" --arg receipt "$evidence" '.generation=$gen | .predecessor_sha256=$pred | .next_action="push" | .gates.increment_review_receipt={receipt_ref:$receipt,head_oid:.snapshot.head_oid,baseline_oid:.baseline_oid,source_sha256:("0" * 64)}' <<<"$record"; } >"$records/forged-increment.json"
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" "$5"' _ "$repo" "$ROOT/plugins/development-system/scripts/write-local-checkpoint.sh" "$generation" "$predecessor" "$records/forged-increment.json"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target" | cut -d ' ' -f 1)" = "$predecessor" ]
+}
+
+# Model persisted pre-split records: their terminal receipt meant publication review.
+legacy_publication_receipt() {
+  record=$(jq '.gates.terminal_review_receipt = .gates.increment_review_receipt | del(.gates.increment_review_receipt)' <<<"$record")
+  { printf 'checkpoint-v1 '; jq -c . <<<"$record"; } >"$target"
+}
+
+@test "legacy ready to push review reconciles unchanged source without final credit" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  invoke increment-review-pass "$(evidence_fields)"
+  accepted
+  legacy_publication_receipt
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  [ "$status" -ne 0 ]
+  invoke increment-review-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = push ]
+  [ "$(jq -r '.gates.terminal_review_receipt' <<<"$record")" = null ]
+}
+
+@test "legacy publication receipt with pending CI cannot earn final acceptance" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  invoke increment-review-pass "$(evidence_fields)"
+  accepted
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  accepted
+  invoke ci-register "$(ci_fields legacy running)"
+  accepted
+  legacy_publication_receipt
+  invoke ci-observe "$(ci_fields legacy success)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = terminal-review ]
+  invoke terminal-review-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = complete ]
+  [ "$(jq -r '.gates.terminal_review_receipt.scope' <<<"$record")" = final-acceptance ]
+}
+
+@test "compatibility legacy trunk push cannot bypass increment reconciliation" {
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  invoke increment-review-pass "$(evidence_fields)"
+  accepted
+  legacy_publication_receipt
+  generation=$(jq '.generation+1' <<<"$record")
+  predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  { printf 'checkpoint-v1 '; jq -c --argjson gen "$generation" --arg pred "$predecessor" '.generation=$gen | .predecessor_sha256=$pred | .state="pushed-or-delivery-mode-equivalent" | .delivery.pushed_oid=.snapshot.head_oid | .next_action="register-exact-sha-ci-monitor"' <<<"$record"; } >"$records/legacy-push.json"
+  run bash -c 'cd "$1" && exec "$2" task "$3" "$4" "$5"' _ "$repo" "$ROOT/plugins/development-system/scripts/write-local-checkpoint.sh" "$generation" "$predecessor" "$records/legacy-push.json"
+  [ "$status" -ne 0 ]
+  [ "$(sha256sum "$target" | cut -d ' ' -f 1)" = "$predecessor" ]
 }

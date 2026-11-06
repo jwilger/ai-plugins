@@ -314,7 +314,12 @@ function requiresCommittedGitlinks(operation, previous, ciStatus) {
   // recordable. Only successful CI may advance committed readiness.
   if (["ci-register", "ci-observe"].includes(operation))
     return ciStatus === "success";
-  if (!["begin-edit", "terminal-review-pass"].includes(operation)) return false;
+  if (
+    !["begin-edit", "increment-review-pass", "terminal-review-pass"].includes(
+      operation,
+    )
+  )
+    return false;
   const delivery = previous?.delivery;
   return Boolean(
     delivery?.commit_oid ||
@@ -534,6 +539,7 @@ const specs = {
     "classification",
     "rationale",
   ],
+  "increment-review-pass": evidenceKeys,
   "terminal-review-pass": evidenceKeys,
   "terminal-review-remediation": [...evidenceKeys, "causal_repair"],
 };
@@ -716,12 +722,15 @@ function prepare(operationId, operation, inputFile) {
         "register-exact-sha-ci-monitor",
         "monitor-exact-sha-ci",
         "terminal-review",
+        "increment-review",
         "push",
         "complete",
       );
       requireSnapshot();
       requireThat(
-        ["committed", "pushed-or-delivery-mode-equivalent"].includes(record.state) &&
+        ["committed", "pushed-or-delivery-mode-equivalent"].includes(
+          record.state,
+        ) &&
           record.gates.exact_identity_verification_receipt?.outcome ===
             "pass" &&
           current.context?.source_sha256 === source &&
@@ -853,7 +862,7 @@ function prepare(operationId, operation, inputFile) {
           : mode === "local-only"
             ? "record-local-delivery"
             : mode === "direct-to-trunk"
-              ? "terminal-review"
+              ? "increment-review"
               : "push";
       break;
     case "exact-verify-retry":
@@ -887,6 +896,7 @@ function prepare(operationId, operation, inputFile) {
       }
       record.delivery.commit_oid = identity.head_oid;
       delete record.gates.terminal_review_receipt;
+      delete record.gates.increment_review_receipt;
       record.gates.exact_identity_verification_receipt = null;
       record.next_action = "verify-exact-commit";
       break;
@@ -922,10 +932,12 @@ function prepare(operationId, operation, inputFile) {
       requireSnapshot();
       requireThat(
         mode !== "direct-to-trunk" ||
-          (record.gates.terminal_review_receipt?.head_oid === identity.head_oid &&
-           record.gates.terminal_review_receipt?.source_sha256 === source &&
-           record.gates.terminal_review_receipt?.baseline_oid === record.baseline_oid),
-        "trunk push requires current pre-push multi-lens review evidence",
+          (record.gates.increment_review_receipt?.head_oid ===
+            identity.head_oid &&
+            record.gates.increment_review_receipt?.source_sha256 === source &&
+            record.gates.increment_review_receipt?.baseline_oid ===
+              record.baseline_oid),
+        "trunk push requires current independent increment review evidence",
       );
       verifyRemote(input.remote, input.ref, identity.head_oid);
       record.state = "pushed-or-delivery-mode-equivalent";
@@ -1000,7 +1012,9 @@ function prepare(operationId, operation, inputFile) {
         record.next_action = failed
           ? "enter-ci-recovery"
           : input.status === "success"
-            ? (record.gates.terminal_review_receipt ? "complete" : "terminal-review")
+            ? record.gates.terminal_review_receipt?.scope === "final-acceptance"
+              ? "complete"
+              : "terminal-review"
             : "monitor-exact-sha-ci";
       }
       break;
@@ -1096,20 +1110,42 @@ function prepare(operationId, operation, inputFile) {
       delete record.ci.interrupted_action;
       failGate("ci");
       break;
-    case "terminal-review-pass":
-      requireAction("terminal-review");
+    case "increment-review-pass":
+      // A legacy committed terminal-review checkpoint can migrate explicitly.
+      requireAction("increment-review", "terminal-review", "push");
       requireSnapshot();
-      record.gates.terminal_review_receipt = {
+      requireThat(
+        record.state === "committed" && mode === "direct-to-trunk",
+        "increment review requires a verified trunk publication candidate",
+      );
+      delete record.gates.terminal_review_receipt;
+      record.gates.increment_review_receipt = {
         receipt_ref: evidence,
         head_oid: identity.head_oid,
         baseline_oid: record.baseline_oid,
         source_sha256: source,
       };
-      record.next_action = record.state === "committed" && mode === "direct-to-trunk"
-        ? "push" : "complete";
+      record.next_action = "push";
+      break;
+    case "terminal-review-pass":
+      requireAction("terminal-review");
+      requireSnapshot();
+      requireThat(
+        record.state === "pushed-or-delivery-mode-equivalent",
+        "final acceptance requires delivered source; use increment-review-pass before trunk publication",
+      );
+      record.gates.terminal_review_receipt = {
+        scope: "final-acceptance",
+        receipt_ref: evidence,
+        head_oid: identity.head_oid,
+        baseline_oid: record.baseline_oid,
+        source_sha256: source,
+      };
+      record.next_action = "complete";
       break;
     case "terminal-review-remediation":
       requireAction(
+        "increment-review",
         "push",
         "register-exact-sha-ci-monitor",
         "monitor-exact-sha-ci",
