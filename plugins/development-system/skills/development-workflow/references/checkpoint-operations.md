@@ -96,9 +96,11 @@ the caller, not independently attested by a log path. Retain actual evidence
 and reconcile it before calling. A CI `success` observation must represent the
 authoritative terminal required-build result for that exact SHA, not one green
 job or a queued retry. Earlier failed attempts remain in the append-only
-history. A clean terminal review precedes trunk push; remote completion requires
-exact-SHA terminal CI success after push. Source-changing remediation requires fresh focused testing, review,
-hook/fast gate, exact verification, delivery, CI, and terminal review.
+history. Proportional independent increment review precedes each trunk push.
+Remote completion requires separate cumulative final acceptance and exact-SHA
+terminal CI success after publication. Source-changing remediation requires
+fresh focused testing, affected independent increment review, hook/fast gate,
+exact verification, delivery, CI, and renewed affected final review.
 
 The public operations preserve the `checkpoint-v1` record fields and add the
 `awaiting-causal-edit` state for a new increment without invented test outcomes.
