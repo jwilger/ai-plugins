@@ -59,6 +59,19 @@ Tiber plugin owns `tiber`. Default marketplace installation installs both.
    when detection does not recognize the stack. Distinguish quick pre-commit
    checks from pre-push checks with the user.
 
+   Establish delivery cadence explicitly. For direct-to-trunk, agree on one
+   checkout on the configured trunk branch, local signed commits and direct
+   pushes to origin's trunk, extremely frequent small coherent increments,
+   configured pre-commit checks for every commit, proportional independent
+   publication review, and exact-SHA CI. Do not require completion of a feature
+   or vertical slice before publication. Establish regular usable-slice and
+   final-MVP acceptance separately; supporting commits do not earn user-value
+   credit. Explain CI failure preemption, identifiable WIP stashes preserving
+   index and untracked files, conflict-safe restoration, and explicit handling
+   of unpublished commits. Propagate these choices into generated AGENTS.md
+   and project workflow rules using the scaffold guidance. Preserve intentional
+   PR/MR and local-only choices; never silently convert their delivery mode.
+
    Customize include/exclude globs to actual or agreed planned paths and
    filetypes: account for monorepos, root files, colocated tests, multiple
    languages, scripts, fixtures and generated outputs. Avoid broad `src/**` or

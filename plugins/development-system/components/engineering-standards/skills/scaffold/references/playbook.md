@@ -97,7 +97,8 @@ surface only:
   UI as a user would.
 
 Rules: never import internal modules or assert on source text; assert observable
-behavior. Get one scenario or vertical slice green with all gates passing, then
+behavior. Publish small coherent passing supporting increments with the configured
+commit, review and CI gates while working toward a scenario or vertical slice; then
 preserve it at the repository's selected commit cadence. For multi-target or
 cross-target behavior, use a scenario outline / parametrized examples so parity
 is verified per slice.
@@ -195,6 +196,20 @@ Introduce decisions sequentially: one new ADR, its substantive cumulative
 architecture update, verification, independent review, then its commit. Each
 intermediate architecture stands alone and contains only decisions introduced
 so far. Do not write all ADRs first and manufacture incremental history later.
+
+**Generated delivery guidance** — resolve the chosen delivery mode before
+writing AGENTS.md and docs/rules/workflow-and-commits.md. For direct-to-trunk,
+generate an explicit single-checkout ownership rule: stay on configured trunk,
+commit locally and push directly to origin's trunk; no branch, worktree or
+parallel source checkout without explicit user authorization. Require extremely
+frequent coherent passing increments, pre-commit checks on every commit,
+signing and exact verification, proportional independent publication review,
+and exact-SHA CI. Separate increment publication from usable-slice, feature,
+and final-MVP acceptance; report supporting commits as progress only. Generate
+CI recovery instructions that preserve staged, unstaged and untracked WIP in
+an identifiable stash, account for unpublished commits, restore with conflict
+recovery information, and resume only after terminal-success repair CI.
+Keep intentionally selected PR/MR and local-only guidance mode-specific.
 
 **Generated guardrail docs** — put engineering rules in `AGENTS.md` +
 `docs/rules/`, with links from `AGENTS.md`. Include only adopted requirements

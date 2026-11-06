@@ -9,12 +9,20 @@ For bootstrap, cache, secret, namespace, readiness, or teardown details, load
 the retained [worktree setup
 contract](../../components/worktrees/skills/setup/SKILL.md).
 
-Worktree support is always available. Read `[worktrees]` from
+First resolve the delivery mode and explicit checkout ownership instructions.
+For direct-to-trunk, use one checkout on the configured trunk branch. Do not
+create branches, worktrees, or parallel source checkouts without explicit user
+authorization, including when unrelated WIP or CI recovery needs preservation.
+Serialize mutable tasks; preserve WIP through the CI recovery stash protocol.
+The isolation guidance below applies to intentionally selected other modes or
+an explicitly authorized exception.
+
+Worktree support is available within that policy. Read `[worktrees]` from
 `.development-system.toml` for the configured root. Ignore any legacy
 `[features].worktrees` value.
 
 Questions and read-only investigation require no worktree. One mutable task may
-use its current checkout, including the primary checkout. Use a linked worktree
+use its current checkout, including the primary checkout. Outside the direct-to-trunk ownership rule above, use a linked worktree
 when the user explicitly requests one or when a separate mutable task overlaps
 across sessions or agents. Unrelated existing mutable changes count as
 overlapping work and must be preserved while the new task is isolated.
