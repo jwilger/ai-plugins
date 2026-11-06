@@ -957,7 +957,7 @@ fn ci_recovery_tools() -> Vec<Value> {
         ci_recovery_tool(
             "tiber.ci_recovery.status",
             "Read CI recovery status",
-            "Read the authoritative repository-wide CI recovery state.",
+            "Read authoritative CI recovery state and observed lease expiry, retry time, and takeover availability.",
             json!({}),
             vec![],
         ),
@@ -1036,7 +1036,7 @@ fn ci_recovery_tools() -> Vec<Value> {
         ci_recovery_tool(
             "tiber.ci_recovery.wait",
             "Wait for CI recovery event",
-            "Wait up to sixty seconds for an assignment, epoch change, or resolution.",
+            "Wait up to sixty seconds for lease expiry (takeover-available), an assignment, epoch change, or resolution. Expiry requires explicit fenced takeover.",
             json!({
                 "incident_id": { "type": "string" },
                 "epoch": { "type": "integer", "minimum": 0 },
@@ -1140,12 +1140,12 @@ fn ci_recovery_tool(
 }
 
 fn ci_recovery_output_schema(name: &str) -> Value {
-    let (properties, required) = match name {
+    let (mut properties, mut required) = match name {
         "tiber.ci_recovery.claim" => (
             json!({
                 "incident_id": { "type": "string" },
                 "state": { "type": "string" },
-                "role": { "type": "string", "enum": ["owner", "waiting"] },
+                "role": { "type": "string", "enum": ["owner", "waiting", "takeover-available"] },
                 "epoch": { "type": "integer", "minimum": 0 },
                 "lease_expires_at": { "type": "integer", "minimum": 0 }
             }),
@@ -1181,7 +1181,7 @@ fn ci_recovery_output_schema(name: &str) -> Value {
                 "incident_id": { "type": "string" },
                 "state": { "type": "string" },
                 "epoch": { "type": "integer", "minimum": 0 },
-                "wake_reason": { "type": "string", "enum": ["assignment", "epoch-changed", "resolved", "timeout"] },
+                "wake_reason": { "type": "string", "enum": ["assignment", "epoch-changed", "resolved", "timeout", "takeover-available"] },
                 "assignment_id": { "type": ["string", "null"] }
             }),
             json!([
@@ -1281,6 +1281,45 @@ fn ci_recovery_output_schema(name: &str) -> Value {
             ]),
         ),
     };
+    if matches!(
+        name,
+        "tiber.ci_recovery.claim"
+            | "tiber.ci_recovery.status"
+            | "tiber.ci_recovery.wait"
+            | "tiber.ci_recovery.diagnose"
+            | "tiber.ci_recovery.choose_action"
+            | "tiber.ci_recovery.record_replacement"
+            | "tiber.ci_recovery.resolve"
+    ) {
+        properties["lease"] = nullable_ci_recovery_object_schema(
+            json!({
+                "observed_at": { "type": "integer", "minimum": 0 },
+                "lease_expires_at": { "type": "integer", "minimum": 0 },
+                "lease_active": { "type": "boolean" },
+                "takeover_available": { "type": "boolean" },
+                "retry_at": { "type": ["integer", "null"], "minimum": 0 }
+            }),
+            json!([
+                "observed_at",
+                "lease_expires_at",
+                "lease_active",
+                "takeover_available",
+                "retry_at"
+            ]),
+        );
+        required
+            .as_array_mut()
+            .expect("required array")
+            .push(json!("lease"));
+    }
+    if name == "tiber.ci_recovery.claim" {
+        properties["participant"] = ci_recovery_participant_output_schema();
+        properties["logical_session"] = json!({ "type": ["string", "null"], "description": "Task label only; never ownership authority. participant.session identifies this MCP incarnation." });
+        required
+            .as_array_mut()
+            .expect("required array")
+            .extend([json!("participant"), json!("logical_session")]);
+    }
     json!({
         "type": "object",
         "properties": properties,

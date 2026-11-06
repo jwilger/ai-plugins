@@ -730,7 +730,11 @@ fn ci_recovery_hold_releases_only_after_exact_terminal_success_proof() {
         serde_json::from_slice(&failed_replacement_claim.stdout)
             .expect("failed replacement claim returns JSON");
     assert_eq!(failed_replacement_claim["incident_id"], "ci-996");
-    assert_eq!(failed_replacement_claim["role"], "waiting");
+    assert_eq!(failed_replacement_claim["role"], "takeover-available");
+    assert_eq!(
+        failed_replacement_claim["lease"]["takeover_available"],
+        true
+    );
     let status = observer.tiber(["ci-recovery", "status"]);
     assert_success_ref(&status);
     let status: serde_json::Value =
@@ -1535,4 +1539,61 @@ fn separate_repair_after_failed_rerun(classification: &str) {
     );
     resolve[11] = "success";
     ok(&resolve);
+}
+
+#[test]
+fn recovery_wait_wakes_at_expiry_without_an_event() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let repo = TempRepo::initialized();
+    repo.git(["remote", "add", "origin", origin.path().to_str().unwrap()]);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let claim_time = (now - 3597).to_string();
+    assert_success(repo.tiber_with_env(
+        [
+            "ci-recovery",
+            "claim",
+            "--run-id",
+            "expiry",
+            "--run-url",
+            "https://ci.example.test/expiry",
+            "--failed-sha",
+            "deadbeef",
+            "--workflow",
+            "CI",
+            "--ref",
+            "refs/heads/main",
+        ],
+        [
+            ("TIBER_CLAIM_HOST", "host"),
+            ("TIBER_CLAIM_SESSION", "owner"),
+            ("TIBER_CI_RECOVERY_TEST_NOW", claim_time.as_str()),
+        ],
+    ));
+    let started = std::time::Instant::now();
+    let output = repo.tiber_with_env(
+        [
+            "ci-recovery",
+            "wait",
+            "--incident-id",
+            "ci-expiry",
+            "--epoch",
+            "1",
+            "--timeout-seconds",
+            "10",
+        ],
+        [
+            ("TIBER_CLAIM_HOST", "host"),
+            ("TIBER_CLAIM_SESSION", "owner"),
+        ],
+    );
+    assert_success_ref(&output);
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["wake_reason"], "takeover-available");
+    assert_eq!(result["lease"]["takeover_available"], true);
+    assert!(started.elapsed() < Duration::from_secs(6));
+    assert_eq!(result["epoch"], 1);
 }

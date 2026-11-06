@@ -8310,7 +8310,9 @@ impl GitRepository {
             }
             if let Some(mut state) = active_state {
                 if state.state != CiRecoveryPhase::Resolved {
-                    let role = if state.owner == participant {
+                    let role = if state.lease_expires_at <= claim_time {
+                        CiRecoveryRole::TakeoverAvailable
+                    } else if state.owner == participant {
                         CiRecoveryRole::Owner
                     } else {
                         CiRecoveryRole::Waiting
@@ -8347,11 +8349,19 @@ impl GitRepository {
                         changed = true;
                     }
                     if !changed {
-                        return Ok(CiRecoveryClaim::from_state(state, role));
+                        return Ok(CiRecoveryClaim::from_state(
+                            state,
+                            role,
+                            participant.clone(),
+                        ));
                     }
                     match execute_join_ci_recovery(&self.root, join_intent) {
                         Ok(()) => {
-                            return Ok(CiRecoveryClaim::from_state(state, role));
+                            return Ok(CiRecoveryClaim::from_state(
+                                state,
+                                role,
+                                participant.clone(),
+                            ));
                         }
                         Err(error)
                             if is_retryable_push_failure(&error) && attempt < MAX_SYNC_ATTEMPTS =>
@@ -8389,7 +8399,11 @@ impl GitRepository {
             };
             match execute_claim_ci_recovery(&self.root, intent) {
                 Ok(()) => {
-                    return Ok(CiRecoveryClaim::from_state(state, CiRecoveryRole::Owner));
+                    return Ok(CiRecoveryClaim::from_state(
+                        state,
+                        CiRecoveryRole::Owner,
+                        participant.clone(),
+                    ));
                 }
                 Err(error)
                     if (is_retryable_push_failure(&error)
@@ -8679,6 +8693,13 @@ impl GitRepository {
             }
             if state.state == CiRecoveryPhase::Resolved {
                 return Ok(CiRecoveryWait::from_state(&state, "resolved", None));
+            }
+            if unix_timestamp()? >= state.lease_expires_at {
+                return Ok(CiRecoveryWait::from_state(
+                    &state,
+                    "takeover-available",
+                    None,
+                ));
             }
             if let Some(assignment) = state.assignments.iter().find(|assignment| {
                 assignment.owner_epoch == state.epoch && assignment.assignee == participant
@@ -9364,11 +9385,39 @@ pub struct CiRecoveryReleaseInput {
 #[serde(rename_all = "lowercase")]
 pub enum CiRecoveryRole {
     Owner,
+    #[serde(rename = "takeover-available")]
+    TakeoverAvailable,
     Waiting,
+}
+
+/// Clock-sampled guidance, never authority: takeover rechecks epoch and expiry atomically.
+#[derive(Clone, Debug, Serialize)]
+pub struct CiRecoveryLease {
+    pub observed_at: u64,
+    pub lease_expires_at: u64,
+    pub lease_active: bool,
+    pub takeover_available: bool,
+    pub retry_at: Option<u64>,
+}
+
+fn ci_recovery_lease(state: &CiRecoveryState) -> Option<CiRecoveryLease> {
+    let now = unix_timestamp().ok()?;
+    let unresolved = state.state != CiRecoveryPhase::Resolved;
+    let active = unresolved && now < state.lease_expires_at;
+    Some(CiRecoveryLease {
+        observed_at: now,
+        lease_expires_at: state.lease_expires_at,
+        lease_active: active,
+        takeover_available: unresolved && !active,
+        retry_at: active.then_some(state.lease_expires_at),
+    })
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CiRecoveryClaim {
+    pub lease: Option<CiRecoveryLease>,
+    pub participant: CiRecoveryParticipant,
+    pub logical_session: Option<String>,
     pub incident_id: String,
     pub state: String,
     pub role: CiRecoveryRole,
@@ -9400,6 +9449,7 @@ pub struct CiRecoveryAssignmentResult {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CiRecoveryStatus {
+    pub lease: Option<CiRecoveryLease>,
     pub schema_version: u32,
     pub incident_id: String,
     pub state: String,
@@ -9421,6 +9471,7 @@ pub struct CiRecoveryStatus {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct CiRecoveryWait {
+    pub lease: Option<CiRecoveryLease>,
     pub incident_id: String,
     pub state: String,
     pub epoch: u64,
@@ -9431,6 +9482,7 @@ pub struct CiRecoveryWait {
 impl CiRecoveryWait {
     fn timeout(incident_id: &str, epoch: u64) -> Self {
         Self {
+            lease: None,
             incident_id: incident_id.to_string(),
             state: "unknown".to_string(),
             epoch,
@@ -9445,6 +9497,7 @@ impl CiRecoveryWait {
         assignment_id: Option<String>,
     ) -> Self {
         Self {
+            lease: ci_recovery_lease(state),
             incident_id: state.incident_id.clone(),
             state: state.state.as_str().to_string(),
             epoch: state.epoch,
@@ -9457,6 +9510,7 @@ impl CiRecoveryWait {
 impl CiRecoveryStatus {
     fn from_state(state: &CiRecoveryState) -> Self {
         Self {
+            lease: ci_recovery_lease(state),
             schema_version: state.schema_version,
             incident_id: state.incident_id.clone(),
             state: state.state.as_str().to_string(),
@@ -9483,8 +9537,15 @@ impl CiRecoveryStatus {
 }
 
 impl CiRecoveryClaim {
-    fn from_state(state: CiRecoveryState, role: CiRecoveryRole) -> Self {
+    fn from_state(
+        state: CiRecoveryState,
+        role: CiRecoveryRole,
+        participant: CiRecoveryParticipant,
+    ) -> Self {
         Self {
+            lease: ci_recovery_lease(&state),
+            participant,
+            logical_session: ci_recovery_logical_session(),
             incident_id: state.incident_id,
             state: state.state.as_str().to_string(),
             role,
@@ -9525,24 +9586,25 @@ fn unix_timestamp() -> Result<u64, Error> {
         .map_err(|error| Error::Parse(format!("system_clock_before_epoch source={error}")))
 }
 
-fn ci_recovery_participant() -> Result<CiRecoveryParticipant, Error> {
-    let session = std::env::var("TIBER_CLAIM_SESSION")
+fn ci_recovery_logical_session() -> Option<String> {
+    std::env::var("TIBER_CLAIM_SESSION")
         .or_else(|_| std::env::var("CODEX_SESSION_ID"))
-        .or_else(|_| {
-            MCP_CI_RECOVERY_SESSION
-                .with(|slot| slot.borrow().clone().ok_or(std::env::VarError::NotPresent))
-        })
-        .map_err(|_| {
+        .ok()
+        .map(|session| frontmatter_scalar_value(&session))
+        .filter(|session| session != "unknown")
+}
+
+fn ci_recovery_participant() -> Result<CiRecoveryParticipant, Error> {
+    // MCP incarnation always wins over logical task labels. A restarted or parallel
+    // server must join and obtain a new fenced epoch, never impersonate a live owner.
+    let process_session = MCP_CI_RECOVERY_SESSION.with(|slot| slot.borrow().clone());
+    let session = process_session
+        .or_else(ci_recovery_logical_session)
+        .ok_or_else(|| {
             Error::Parse(
-                "ci_recovery_session_required env=TIBER_CLAIM_SESSION|CODEX_SESSION_ID".to_string(),
+                "ci_recovery_session_required env=TIBER_CLAIM_SESSION|CODEX_SESSION_ID".into(),
             )
         })?;
-    let session = frontmatter_scalar_value(&session);
-    if session == "unknown" {
-        return Err(Error::Parse(
-            "ci_recovery_session_required value=non-empty".to_string(),
-        ));
-    }
     Ok(CiRecoveryParticipant {
         host: claim_host(),
         session,

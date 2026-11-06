@@ -974,10 +974,10 @@ fn mcp_stdio_exposes_strict_structured_ci_recovery_tools() {
         false
     );
     assert_eq!(status["result"]["structuredContent"]["trigger_count"], 1);
-    assert_eq!(
-        status["result"]["structuredContent"]["owner"]["session"],
-        "mcp-session"
-    );
+    assert!(status["result"]["structuredContent"]["owner"]["session"]
+        .as_str()
+        .unwrap()
+        .starts_with("tiber-mcp-"));
     let status_tool = listed_tools
         .iter()
         .find(|tool| tool["name"] == "tiber.ci_recovery.status")
@@ -1141,4 +1141,145 @@ fn mcp_stdio_ignores_json_rpc_notifications() {
     tiber_mcp::run_stdio(std::io::BufReader::new(input), &mut output).expect("run stdio");
 
     assert_eq!(output, b"");
+}
+
+#[test]
+fn mcp_restart_and_shared_logical_sessions_require_fenced_handoff_or_takeover() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let repo = TempRepo::initialized();
+    repo.git(["remote", "add", "origin", origin.path().to_str().unwrap()]);
+    let spawn = |now: &str| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+            .args(["mcp", "stdio"])
+            .current_dir(repo.path())
+            .env("TIBER_CLAIM_HOST", "same-host")
+            .env("TIBER_CLAIM_SESSION", "same-logical-task")
+            .env("TIBER_CI_RECOVERY_TEST_NOW", now)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let input = child.stdin.take().unwrap();
+        let output = BufReader::new(child.stdout.take().unwrap());
+        (child, input, output)
+    };
+    fn call(
+        input: &mut impl Write,
+        output: &mut impl BufRead,
+        name: &str,
+        arguments: serde_json::Value,
+    ) -> serde_json::Value {
+        write_message(input, &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":format!("tiber.ci_recovery.{name}"),"arguments":arguments}}).to_string());
+        read_json_message(output)
+    }
+    let trigger = serde_json::json!({"run_id":"restart","run_url":"https://example.invalid/runs/restart","failed_sha":"abcdef0123456789","workflow":"CI","git_ref":"refs/heads/main"});
+    let (mut first, mut first_in, mut first_out) = spawn("1000");
+    let first_claim = call(&mut first_in, &mut first_out, "claim", trigger.clone());
+    let owner = &first_claim["result"]["structuredContent"];
+    assert_eq!(owner["role"], "owner");
+    assert_eq!(owner["logical_session"], "same-logical-task");
+    let (mut second, mut second_in, mut second_out) = spawn("1000");
+    let joined = call(&mut second_in, &mut second_out, "claim", trigger.clone());
+    let waiter = &joined["result"]["structuredContent"];
+    assert_eq!(waiter["role"], "waiting");
+    assert_ne!(owner["participant"], waiter["participant"]);
+    assert_eq!(waiter["lease"]["retry_at"], 4600);
+    let denied = call(
+        &mut second_in,
+        &mut second_out,
+        "assert_owner",
+        serde_json::json!({"incident_id":"ci-restart","epoch":1}),
+    );
+    assert!(denied["error"].is_object(), "{denied}");
+    let diagnosed = call(
+        &mut first_in,
+        &mut first_out,
+        "diagnose",
+        serde_json::json!({"incident_id":"ci-restart","epoch":1,"job":"tests","step":"unit","log_evidence":"assertion failed","cause":"regression","classification":"caused"}),
+    );
+    assert!(diagnosed.get("error").is_none(), "{diagnosed}");
+    let selected = call(
+        &mut first_in,
+        &mut first_out,
+        "choose_action",
+        serde_json::json!({"incident_id":"ci-restart","epoch":1,"kind":"repair","description":"fix regression"}),
+    );
+    assert!(selected.get("error").is_none(), "{selected}");
+    let handoff = call(
+        &mut first_in,
+        &mut first_out,
+        "transfer",
+        serde_json::json!({"incident_id":"ci-restart","epoch":1,"to_host":waiter["participant"]["host"],"to_session":waiter["participant"]["session"]}),
+    );
+    assert_eq!(handoff["result"]["structuredContent"]["epoch"], 2);
+    let stale = call(
+        &mut first_in,
+        &mut first_out,
+        "assert_owner",
+        serde_json::json!({"incident_id":"ci-restart","epoch":2}),
+    );
+    assert!(stale.get("error").is_some(), "{stale}");
+    drop(first_in);
+    assert!(first.wait().unwrap().success());
+    drop(second_in);
+    assert!(second.wait().unwrap().success());
+
+    let (mut restarted, mut input, mut output) = spawn("4599");
+    let joined = call(&mut input, &mut output, "claim", trigger.clone());
+    assert_eq!(joined["result"]["structuredContent"]["role"], "waiting");
+    assert_eq!(
+        joined["result"]["structuredContent"]["lease"]["retry_at"],
+        4600
+    );
+    let early = call(
+        &mut input,
+        &mut output,
+        "takeover",
+        serde_json::json!({"incident_id":"ci-restart","epoch":2}),
+    );
+    assert!(early["error"].is_object(), "{early}");
+    drop(input);
+    assert!(restarted.wait().unwrap().success());
+
+    let (mut replacement, mut input, mut output) = spawn("4600");
+    let joined = call(&mut input, &mut output, "claim", trigger);
+    assert_eq!(
+        joined["result"]["structuredContent"]["role"],
+        "takeover-available"
+    );
+    let wake = call(
+        &mut input,
+        &mut output,
+        "wait",
+        serde_json::json!({"incident_id":"ci-restart","epoch":2,"timeout_seconds":10}),
+    );
+    assert_eq!(
+        wake["result"]["structuredContent"]["wake_reason"],
+        "takeover-available"
+    );
+    let taken = call(
+        &mut input,
+        &mut output,
+        "takeover",
+        serde_json::json!({"incident_id":"ci-restart","epoch":2}),
+    );
+    assert_eq!(taken["result"]["structuredContent"]["epoch"], 3);
+    let status = call(&mut input, &mut output, "status", serde_json::json!({}));
+    let status = &status["result"]["structuredContent"];
+    let before = &selected["result"]["structuredContent"];
+    for field in [
+        "failure_record",
+        "diagnosis",
+        "next_action",
+        "trigger",
+        "triggers",
+    ] {
+        assert_eq!(status[field], before[field], "preserve {field}");
+    }
+    assert_eq!(status["hold_released"], false);
+    assert!(status["release_proof"].is_null());
+    drop(input);
+    assert!(replacement.wait().unwrap().success());
 }

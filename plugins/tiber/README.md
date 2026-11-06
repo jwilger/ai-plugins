@@ -441,6 +441,33 @@ Its typed EventCore facts are stored on the shared Git-backed Tiber authority.
 Development Discipline reads Tiber's unresolved hold only to gate delivery; it
 does not keep a second incident, lease, assignment, receipt, or CI state ref.
 
+As of 1.3.0, each MCP server has its own participant identity even when harness
+session environment variables match. `logical_session` is a task label, never
+shared process authority. Claim returns the current `participant` so a live
+owner can transfer to a joined replacement using `to_host` and `to_session`.
+If that owner has disappeared, the replacement retains the hold until the
+original sixty-minute lease expires; `lease.retry_at` gives the Unix retry time.
+Claim, status, and wait return `lease` with observation/expiry timestamps and
+`takeover_available`. A wait spanning expiry wakes with `takeover-available`.
+Explicit takeover with the current epoch, followed by ownership assertion,
+is required before resuming the existing diagnosis and repair. A competing
+winner requires re-reading status. No local PID check bypasses the lease.
+
+The stored incident schema and evidence remain compatible. CLI callers retain
+their explicit session identity; MCP callers must use the returned process
+participant for handoff rather than treating the harness session as authority.
+Clients must accept the new claim role and wait wake reason `takeover-available`
+and added response fields. Null lease guidance indicates unavailable observation,
+not permission to act. Epoch fencing, normal publication, and exact successful
+replacement-CI proof as the sole hold release are unchanged.
+
+To activate, update the marketplace and installed Tiber plugin to 1.3.0, then
+restart its MCP server and reload the updated tasks skill. Claim/join the
+existing incident; an upgrade does not migrate or impersonate an old owner.
+A live old owner may transfer explicitly, otherwise use the reported retry time
+and fenced takeover. Rebuilding a checkout alone does not update an already
+running installed server.
+
 ## Stdio MCP
 
 Tiber exposes the same task operations over stdio MCP:

@@ -191,6 +191,37 @@ Use Tiber's semantic `tiber.ci_recovery.*` operations for pushed-CI recovery.
 Development Discipline reads the resulting unresolved hold when deciding
 whether delivery may proceed; it does not maintain a parallel incident.
 
+On MCP restart, claim or join the existing incident again. `logical_session`
+labels the task; `participant.host` and `participant.session` identify this MCP
+process for authority and explicit handoff. Even two servers with the same
+`TIBER_CLAIM_SESSION` or `CODEX_SESSION_ID` have different process participants.
+Never copy the vanished owner's session, infer cross-host death from a missing
+local PID, shorten the lease, or restart the incident to recover authority.
+
+Inspect `role`, `epoch`, and the structured `lease` in claim/status/wait:
+
+- With an active lease, a waiting participant may request that the still-live
+  owner call `tiber.ci_recovery.transfer` with the current incident/epoch and the
+  joined recipient's exact `participant.host`/`participant.session` as `to_host`
+  and `to_session`. The recipient must confirm the returned epoch and assert
+  ownership before acting. A vanished owner cannot perform this handoff.
+- Otherwise retain the hold and report `lease.retry_at` (Unix seconds). Wait in
+  bounded intervals; the default lease remains sixty minutes. Expiry returns
+  `role: takeover-available` or `wake_reason: takeover-available`; it does not
+  grant authority. When `lease.takeover_available` is true, read current status,
+  explicitly call `tiber.ci_recovery.takeover` with its incident and epoch, then
+  confirm the new epoch and call `tiber.ci_recovery.assert_owner` before recovery
+  work. If another participant wins, re-read and join/wait for that owner.
+- On `epoch-changed`, re-read status and assert current authority; do not reuse
+  an old epoch or assignment. Unknown/null lease guidance grants no authority:
+  restore authoritative status/clock access rather than guessing expiry.
+
+Resume the recorded diagnosis and selected action from status after handoff or
+takeover; preserve history and evidence. Lease expiry, restart, transfer, and
+successful takeover never release the repository hold. Only exact terminal
+success proof for the recorded replacement CI run releases it. Failed mandatory
+coordination calls remain hard stops; restore shared coordination before work.
+
 ## Commands
 
 ```shell
