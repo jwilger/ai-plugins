@@ -615,3 +615,9 @@ candidate revision; queued/running is not terminal evidence, and any completed
 failed required job activates a repository-wide hold. Use Tiber's single
 CI-recovery owner and record SHA, run, checks, and terminal status. Development
 Discipline reads that Tiber hold when gating delivery; it does not own one.
+
+For direct-to-trunk CI failure with WIP, use the [trunk recovery protocol](../../components/development-discipline/skills/ci-failure-follow-up/references/trunk-wip-recovery.md).
+Keep one serialized trunk checkout, retain the exact stash OID and recovery
+record, account for unpublished commits separately, and verify staged/untracked
+restoration before dropping the matching stash. Conflict resolution renews
+focused tests and affected review; it does not earn automatic passing credit.

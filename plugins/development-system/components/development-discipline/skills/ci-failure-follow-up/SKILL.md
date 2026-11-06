@@ -15,6 +15,16 @@ on the authoritative `origin/tiber` branch, never through local notes or a
 second workflow store. If that remote state is unavailable, fail closed and
 take no recovery action.
 
+## Preserve WIP in the trunk checkout
+
+In direct-to-trunk mode, follow the [trunk WIP recovery protocol](references/trunk-wip-recovery.md)
+before changing the checkout for recovery. Use one checkout on configured trunk;
+serialize mutations. Preserve staged, unstaged and untracked WIP in an exact
+identifiable stash, inspect unpublished commits separately, and retain the stash
+through verified index-preserving restoration. Restoration conflicts or an
+interruption preserve recovery evidence rather than authorizing cleanup or a
+new checkout. Only the incident owner may perform these recovery mutations.
+
 ## Claim the Repository-Wide Incident
 
 Every agent that detects a terminal failed pushed-CI run claims it before

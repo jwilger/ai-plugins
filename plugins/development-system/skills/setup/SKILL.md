@@ -148,3 +148,9 @@ absolute paths, `..`, `.git`, workflow/enforcement state, generated policy, and
 symlink escapes. Runner actions are named direct argv arrays with typed
 parameters, output scopes, network policy, and environment allowlist—never
 shell entrypoints, arbitrary suffixes, `git`, `gh`, or `glab`.
+
+When generating trunk CI-recovery guidance, carry forward the [trunk WIP
+recovery protocol](../../components/development-discipline/skills/ci-failure-follow-up/references/trunk-wip-recovery.md):
+exact stash identity, staged/unstaged/untracked preservation, separate unpublished
+commit handling, index-preserving restoration, conflict retention and verified
+drop. A generic instruction to “stash and pop” does not establish these guarantees.

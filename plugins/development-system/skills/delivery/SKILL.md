@@ -102,3 +102,8 @@ PR readiness remain blocked, but it cannot be called terminal delivery or readin
 
 Always state each protected action explicitly: never infer permission to
 force-push, merge, or delete remote state.
+
+When trunk CI failure interrupts WIP, load the [trunk recovery protocol](../../components/development-discipline/skills/ci-failure-follow-up/references/trunk-wip-recovery.md)
+for exact stash identity, unpublished commit handling, index-preserving
+restoration, conflicts and interruption recovery. Keep the single checkout and
+incident-owner boundaries while preserving WIP.

@@ -287,3 +287,12 @@ The generated commit guidance applies the same extremely frequent small coherent
 commit cadence in every delivery mode: push to configured trunk in direct-to-trunk
 mode, push to the selected branch in PR/MR mode, and retain commits locally in
 local-only mode. Explicit no-commit instructions take precedence.
+
+Generated trunk CI-recovery instructions must preserve the full staged/unstaged/
+untracked inventory and exact identifiable stash OID, inspect unpublished commits
+separately, retain recovery metadata across interruption, and apply the stash
+with index restoration. Keep the stash until restoration is verified; preserve
+conflicts for deliberate resolution and renewed testing/review. Never silently
+publish unrelated commits, clear all stashes, or use another checkout to bypass
+the configured ownership policy. Use the retained ci-failure-follow-up trunk WIP
+recovery protocol as the source contract.
