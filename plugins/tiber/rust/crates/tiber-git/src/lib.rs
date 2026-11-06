@@ -1126,9 +1126,6 @@ impl ModelCommandLogic for TakeOverCiRecovery {
         if state.epoch != self.intent.expected_epoch {
             return Err("ci_recovery_stale_epoch".into());
         }
-        if state.owner.as_ref() == Some(&self.intent.successor) {
-            return Err("ci_recovery_already_owner".into());
-        }
         if state.lease_expires_at > self.intent.observed_at {
             return Err("ci_recovery_lease_active".into());
         }
@@ -12607,6 +12604,24 @@ mod lock_tests {
     }
 
     #[test]
+    fn expired_incumbent_can_explicitly_reacquire_with_a_new_epoch() {
+        let (state, _, history) = renewed_lease_history();
+        let active = takeover_command(&state, state.owner.clone(), 199);
+        let error = recovery_command_events(&active, &history).expect_err("lease still active");
+        assert!(error.to_string().contains("ci_recovery_lease_active"));
+        let expired = takeover_command(&state, state.owner.clone(), 200);
+        let events = recovery_command_events(&expired, &history).expect("explicit expiry takeover");
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], TiberEvent::CiRecoveryTakenOver(event) if event.epoch == 2));
+        let mut updated_history = history;
+        updated_history.extend(events);
+        let stale = takeover_command(&state, state.owner.clone(), 201);
+        let error =
+            recovery_command_events(&stale, &updated_history).expect_err("old epoch fenced");
+        assert!(error.to_string().contains("ci_recovery_stale_epoch"));
+    }
+
+    #[test]
     fn renewed_lease_preserves_incident_epoch_owner_and_resolution_guards() {
         let (state, helper, history) = renewed_lease_history();
         for guard in ["incident", "epoch", "owner", "resolved"] {
@@ -12654,20 +12669,16 @@ mod lock_tests {
                 "{guard}: {error}"
             );
 
-            let successor = if guard == "owner" {
-                state.owner.clone()
-            } else {
-                helper.clone()
-            };
+            // Takeover after expiry requires no incumbent authority; the dedicated
+            // reacquisition regression covers a successor equal to the old owner.
+            if guard == "owner" {
+                continue;
+            }
+            let successor = helper.clone();
             let takeover = takeover_command(&request_state, successor, 200);
             let error = recovery_command_events(&takeover, &events).expect_err(guard);
-            let takeover_error = if guard == "owner" {
-                "ci_recovery_already_owner"
-            } else {
-                expected_error
-            };
             assert!(
-                error.to_string().contains(takeover_error),
+                error.to_string().contains(expected_error),
                 "{guard}: {error}"
             );
         }

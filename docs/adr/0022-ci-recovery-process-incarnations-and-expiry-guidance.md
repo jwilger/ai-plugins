@@ -20,6 +20,9 @@ availability. A bounded wait wakes at expiry without a new event. Expiry is only
 guidance: successors explicitly take over at the observed epoch and assert the
 new authority. Competing claims and takeovers retain normal EventCore publication
 and epoch checks. CLI session identity remains explicit for existing callers.
+An expired incumbent may also explicitly take over at the current epoch; this
+advances the epoch and fences its previous authority exactly as successor takeover
+does. An active lease never permits takeover, including by the incumbent.
 
 ## Consequences
 
