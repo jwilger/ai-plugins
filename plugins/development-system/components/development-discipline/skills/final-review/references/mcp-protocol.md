@@ -105,6 +105,15 @@ Commit small, coherent passing increments extremely frequently in every delivery
 
 In direct-to-trunk mode, use one checkout on the configured trunk branch and push directly to origin’s trunk. Do not create a branch, linked worktree, or parallel source checkout unless the user explicitly authorizes a different approach. Serialize mutable work in that checkout, including CI repair; read-only reviewers may inspect it. Use affected independent review for each increment rather than accumulating a completed local batch for one eventual publication review. Keep the immutable task-start baseline for final acceptance while recording each increment’s reviewed scope and exact identity separately.
 
+For direct-to-trunk final acceptance, publish the final verified increment after
+its independent increment review before starting cumulative final review. A
+still-local checkpoint takes that publication route first; full feature acceptance
+never blocks incremental publication. Review the delivered final identity against
+the immutable ticket-start baseline. Required CI may run alongside independent
+final review; completion requires both clean final review and terminal-success CI
+for that exact SHA. Local-only final review uses the recorded local identity
+without publication; PR/MR branch publication may precede final readiness review.
+
 In PR/MR mode, authorized branch pushes and draft creation may precede full local review. Before updating any ready PR/MR, first return it to draft and confirm success, then disable auto-merge and confirm it is off. Stop if either safeguard fails. Current local multi-lens review is required before restoring readiness, enabling auto-merge, or entering the merge queue. Local-only work remains local and uses the authorized commit or no-commit evidence route. In all modes, source, dependency, baseline, scope, or conflict-resolution changes invalidate affected evidence; metadata-only changes require exact identity verification. Required remote CI follows push, and a failure preempts unrelated work through CI recovery. Neither passing CI nor forge approval substitutes for required independent review.
 
 Any changed reviewed path, content, mode, untracked content, pinned baseline,

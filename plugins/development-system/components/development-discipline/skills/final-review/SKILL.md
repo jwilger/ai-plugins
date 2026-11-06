@@ -49,7 +49,15 @@ or claiming a change is ready.
 ## Delivered-checkpoint terminal boundary
 
 Final review starts only after every planned implementation increment and every
-local acceptance criterion has a verified local checkpoint.
+local acceptance criterion has a verified checkpoint. In direct-to-trunk mode,
+publish each increment after its proportional independent increment review;
+final acceptance reviews the already-published final identity against the immutable
+ticket-start baseline. A still-local trunk checkpoint must take the increment
+publication route first, even when it is the last planned increment. Required CI
+may run alongside independent final review, but final acceptance credit requires
+terminal-success CI for that exact delivered SHA. Local-only final review uses
+the recorded local identity without publication. PR/MR final review may precede
+readiness after authorized branch publication.
 
 Commit small, coherent passing increments extremely frequently in every delivery mode; do not wait for a feature, vertical slice, or final MVP to be complete. Direct-to-trunk pushes go to origin’s configured trunk; PR/MR pushes go to the selected branch; local-only commits stay local. An explicit no-commit instruction takes precedence and uses the reviewed snapshot route. Each commit runs the configured pre-commit checks at minimum, preserves signing and exact source/message/signature verification, and receives proportional independent review before trunk publication. Review the actual increment and its affected dependencies; unfinished acceptance criteria for later increments are not publication blockers unless the current increment breaks an existing contract. Keep required CI gates and record the exact pushed SHA. Supporting commits are progress toward a slice, not delivered user value. Continue completing usable vertical slices regularly and perform scope-complete final review and acceptance before claiming feature or MVP completion.
 
