@@ -305,6 +305,7 @@ function requiresCommittedGitlinks(operation, previous, ciStatus) {
       "commit-success",
       "exact-verify-pass",
       "exact-verify-retry",
+      "increment-review-metadata-failure",
       "local-delivery",
       "push-readback",
     ].includes(operation)
@@ -540,6 +541,16 @@ const specs = {
     "rationale",
   ],
   "increment-review-pass": evidenceKeys,
+  "increment-review-metadata-failure": [
+    ...evidenceKeys,
+    "review_kind",
+    "original_oid",
+    "replacement_oid",
+    "tree_oid",
+    "parent_oid",
+    "remote",
+    "ref",
+  ],
   "terminal-review-pass": evidenceKeys,
   "terminal-review-remediation": [...evidenceKeys, "causal_repair"],
 };
@@ -609,6 +620,7 @@ function prepare(operationId, operation, inputFile) {
   const identity = snapshot(root);
   const source = sourceIdentity(root);
   let evidence = null;
+  let evidenceBytes = null;
   if (keys.includes("receipt_file")) {
     const receiptFile = fs.realpathSync(input.receipt_file);
     requireThat(
@@ -621,6 +633,7 @@ function prepare(operationId, operation, inputFile) {
     );
     const bytes = fs.readFileSync(receiptFile);
     requireThat(bytes.length > 0, "evidence must be nonempty");
+    evidenceBytes = bytes;
     evidence = `${receiptFile} sha256=${digest(bytes)}`;
   }
   const gates = {
@@ -641,6 +654,7 @@ function prepare(operationId, operation, inputFile) {
         next_action: null,
       };
   const action = current?.record.next_action;
+  let metadataRecovery;
   const requireAction = (...actions) =>
     requireThat(
       actions.includes(action),
@@ -1110,6 +1124,132 @@ function prepare(operationId, operation, inputFile) {
       delete record.ci.interrupted_action;
       failGate("ci");
       break;
+    case "increment-review-metadata-failure": {
+      requireAction("increment-review");
+      requireThat(
+        record.state === "committed" &&
+          mode === "direct-to-trunk" &&
+          record.delivery.pushed_oid === null &&
+          record.gates.exact_identity_verification_receipt?.outcome === "pass",
+        "metadata recovery requires an unpublished verified trunk candidate",
+      );
+      requireThat(
+        input.original_oid === record.snapshot.head_oid &&
+          input.original_oid === record.delivery.commit_oid &&
+          input.replacement_oid === identity.head_oid,
+        "metadata recovery original/replacement identity mismatch",
+      );
+      requireThat(
+        identity.tracked_sha256 === emptyHash &&
+          identity.untracked_sha256 === emptyHash &&
+          current.context?.source_sha256 === source,
+        "metadata recovery changed source; recovery hold",
+      );
+      requireThat(
+        git(
+          "diff-index",
+          "--cached",
+          "--raw",
+          "--ignore-submodules=none",
+          "HEAD",
+          "--",
+        ).length === 0,
+        "metadata recovery requires a clean index",
+      );
+      for (const oid of [input.original_oid, input.replacement_oid]) {
+        requireThat(
+          /^[0-9a-f]{40}([0-9a-f]{24})?$/u.test(input.parent_oid) &&
+            gitText("rev-parse", `${oid}^{tree}`) === input.tree_oid &&
+            gitText(
+              "-c",
+              "log.showSignature=false",
+              "show",
+              "-s",
+              "--format=%P",
+              oid,
+            ) === input.parent_oid,
+          "metadata recovery must preserve the exact tree and single parent",
+        );
+      }
+      const review = JSON.parse(evidenceBytes.toString("utf8"));
+      requireThat(
+        input.review_kind === "independent-publication" &&
+          review.verdict === "NEEDS_CHANGES" &&
+          review.candidate === input.original_oid &&
+          Array.isArray(review.findings) &&
+          review.findings.length > 0 &&
+          review.findings.every(
+            (finding) =>
+              finding?.scope === "commit metadata" && nonblank(finding.title),
+          ),
+        "metadata recovery requires a failed independent metadata review of the original candidate",
+      );
+      requireThat(
+        !record.ci.runs.some((run) =>
+          [input.original_oid, input.replacement_oid].includes(run.commit_oid),
+        ),
+        "metadata recovery candidate has retained publication CI history",
+      );
+      // Older typed receipts did not retain remote authority. Bind this narrow
+      // recovery to the currently configured trunk upstream, never a caller's
+      // arbitrary clean remote. Read the actual push destination, not a cache.
+      const branch = gitText("symbolic-ref", "HEAD");
+      const upstream = gitText(
+        "for-each-ref",
+        "--format=%(upstream:remotename)%00%(upstream:remoteref)",
+        branch,
+      );
+      requireThat(
+        branch === input.ref &&
+          input.remote !== "." &&
+          upstream === `${input.remote}\0${input.ref}`,
+        "metadata recovery requires the configured trunk upstream",
+      );
+      const pushUrls = gitText(
+        "remote",
+        "get-url",
+        "--push",
+        "--all",
+        input.remote,
+      ).split("\n");
+      requireThat(
+        pushUrls.length === 1,
+        "metadata recovery requires one push destination",
+      );
+      // Do not expose credentials in Git diagnostics or retained receipts.
+      if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(pushUrls[0])) {
+        const url = new URL(pushUrls[0]);
+        requireThat(
+          !url.password &&
+            !url.search &&
+            !url.hash &&
+            (url.protocol === "ssh:" || !url.username),
+          "metadata recovery push URL must not embed credentials",
+        );
+      }
+      verifyRemote(pushUrls[0], input.ref, input.parent_oid);
+      metadataRecovery = {
+        original_oid: input.original_oid,
+        replacement_oid: input.replacement_oid,
+        tree_oid: input.tree_oid,
+        parent_oid: input.parent_oid,
+        remote: input.remote,
+        ref: input.ref,
+        push_url_sha256: digest(pushUrls[0]),
+        observed_remote_oid: input.parent_oid,
+        review_kind: input.review_kind,
+      };
+      record.delivery.commit_oid = identity.head_oid;
+      delete record.gates.terminal_review_receipt;
+      delete record.gates.increment_review_receipt;
+      record.gates.exact_identity_verification_receipt = {
+        receipt_ref: evidence,
+        outcome: "fail",
+      };
+      record.ci.terminal_success_run_id = null;
+      record.next_action = "repair-exact-identity-verification";
+      break;
+    }
     case "increment-review-pass":
       // A legacy committed terminal-review checkpoint can migrate explicitly.
       requireAction("increment-review", "terminal-review", "push");
@@ -1168,6 +1308,7 @@ function prepare(operationId, operation, inputFile) {
     source_sha256: source,
     delivery_mode: mode,
     evidence_ref: evidence,
+    ...(metadataRecovery ? { metadata_recovery: metadataRecovery } : {}),
   };
 }
 

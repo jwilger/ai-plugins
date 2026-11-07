@@ -8,7 +8,7 @@ screenshots and pointer tasks. Codex and Linux x86_64 are the required targets.
 
 | Plugin                                                                   | Harness | Description                                                                                  | Version |
 | ------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------- | ------- |
-| [development-system](plugins/development-system/README.md)               | Codex   | Advisory repository setup, structured multi-agent review, and delivery workflow.             | 10.3.4  |
+| [development-system](plugins/development-system/README.md)               | Codex   | Advisory repository setup, structured multi-agent review, and delivery workflow.             | 10.3.5  |
 | [tiber](plugins/tiber/README.md)                                         | Codex   | Independent Git-backed task board, CLI, MCP server, and dashboard.                           | 1.3.2   |
 | [hyprland-computer-control](plugins/hyprland-computer-control/README.md) | Codex   | Guarded screenshots and pointer actions for an authorized local Hyprland on Wayland session. | 0.1.4   |
 

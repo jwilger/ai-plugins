@@ -138,7 +138,7 @@ if [[ -e $target ]]; then
       echo "checkpoint CI diagnosis history does not preserve predecessor" >&2
       exit 3
     }
-  jq -en --argjson current "$current_record" --argjson proposed "$proposed_record" '
+  jq -en --argjson current "$current_record" --argjson proposed "$proposed_record" --arg operation "${operation:-}" --argjson typed "$operation_mode" '
     def passing($action):
       $proposed.state == "passing-awaiting-gates-or-review" and
       $proposed.next_action == $action;
@@ -216,7 +216,22 @@ if [[ -e $target ]]; then
       $proposed.gates.terminal_review_receipt == null and
       ($proposed | del(.generation, .predecessor_sha256, .next_action, .gates.increment_review_receipt, .gates.terminal_review_receipt)) ==
       ($current | del(.generation, .predecessor_sha256, .next_action, .gates.increment_review_receipt, .gates.terminal_review_receipt))
-    elif $current.next_action == "increment-review" then gate_failure("terminal-review")
+    elif $current.next_action == "increment-review" then
+      gate_failure("terminal-review") or
+      ($typed and $operation == "increment-review-metadata-failure" and
+       $proposed.next_action == "repair-exact-identity-verification" and
+       $proposed.gates.exact_identity_verification_receipt.outcome == "fail" and
+       $proposed.gates.increment_review_receipt == null and
+       $proposed.gates.terminal_review_receipt == null and
+       $proposed.ci.terminal_success_run_id == null and
+       ($proposed | del(.generation, .predecessor_sha256, .snapshot.head_oid,
+         .next_action, .delivery.commit_oid, .gates.exact_identity_verification_receipt,
+         .gates.increment_review_receipt, .gates.terminal_review_receipt,
+         .ci.terminal_success_run_id)) ==
+       ($current | del(.generation, .predecessor_sha256, .snapshot.head_oid,
+         .next_action, .delivery.commit_oid, .gates.exact_identity_verification_receipt,
+         .gates.increment_review_receipt, .gates.terminal_review_receipt,
+         .ci.terminal_success_run_id)))
     elif $current.next_action == "push" then
       gate_failure("terminal-review") or
       ($proposed.state == "pushed-or-delivery-mode-equivalent" and

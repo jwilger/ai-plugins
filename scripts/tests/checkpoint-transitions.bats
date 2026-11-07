@@ -272,6 +272,244 @@ remote_committed() {
   accepted
 }
 
+metadata_candidate() {
+  git -C "$repo" branch -M main
+  remote_initialize_mode=direct-to-trunk remote_commit_mode=direct-to-trunk remote_committed
+  git -C "$repo" branch --set-upstream-to=origin/main main >/dev/null
+  metadata_identity
+}
+
+metadata_identity() {
+  original=$(git -C "$repo" rev-parse HEAD)
+  candidate_tree=$(git -C "$repo" rev-parse HEAD^{tree})
+  candidate_parent=$(git -C "$repo" rev-parse HEAD^)
+  review="$records/independent-review.json"
+  jq -cn --arg candidate "$original" '{verdict:"NEEDS_CHANGES",candidate:$candidate,findings:[{scope:"commit metadata",title:"Conventional subject required"}]}' >"$review"
+}
+
+metadata_fields() {
+  jq -cn --arg receipt "$review" --arg original "$original" --arg replacement "$(git -C "$repo" rev-parse HEAD)" \
+    --arg tree "$candidate_tree" --arg parent "$candidate_parent" \
+    '{command:"independent publication review",receipt_file:$receipt,review_kind:"independent-publication",original_oid:$original,replacement_oid:$replacement,tree_oid:$tree,parent_oid:$parent,remote:"origin",ref:"refs/heads/main"}'
+}
+
+@test "metadata review failure reconciles a sibling amendment and requires fresh exact verification and review" {
+  metadata_candidate
+  before=$record
+  git -C "$repo" commit --amend -qm 'docs: corrected metadata'
+  replacement=$(git -C "$repo" rev-parse HEAD)
+  invoke increment-review-metadata-failure "$(metadata_fields)" metadata-failure
+  accepted
+  cp "$records/request.json" "$records/recovery-request.json"
+  recovery_output=$output
+  [ "$(jq -r '.next_action' <<<"$record")" = repair-exact-identity-verification ]
+  [ "$(jq -r '.delivery.commit_oid' <<<"$record")" = "$replacement" ]
+  [ "$(jq -r '.gates.exact_identity_verification_receipt.outcome' <<<"$record")" = fail ]
+  [ "$(jq -r '.gates.increment_review_receipt // .gates.terminal_review_receipt' <<<"$record")" = null ]
+  [ "$(jq -c '[.baseline_oid,.test,.gates.lightweight_review_receipt,.gates.fast_gate_receipt,.ci]' <<<"$record")" = "$(jq -c '[.baseline_oid,.test,.gates.lightweight_review_receipt,.gates.fast_gate_receipt,.ci]' <<<"$before")" ]
+  [ "$(jq -r '.metadata_recovery.original_oid' <<<"$output")" = "$original" ]
+  [ "$(jq -r '.metadata_recovery.observed_remote_oid' <<<"$output")" = "$candidate_parent" ]
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  [ "$status" -ne 0 ]
+  invoke exact-verify-pass "$(evidence_fields)"
+  [ "$status" -ne 0 ]
+  invoke exact-verify-retry "$(evidence_fields)"
+  accepted
+  invoke increment-review-pass "$(evidence_fields)"
+  [ "$status" -ne 0 ]
+  invoke exact-verify-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = increment-review ]
+  invoke increment-review-pass "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.next_action' <<<"$record")" = push ]
+  latest=$(sha256sum "$target")
+  run bash -c 'cd "$1" && exec "$2" task metadata-failure increment-review-metadata-failure "$3"' _ "$repo" "$transition" "$records/recovery-request.json"
+  [ "$status" -eq 0 ]
+  [ "$(jq -cS . <<<"$output")" = "$(jq -cS . <<<"$recovery_output")" ]
+  [ "$(sha256sum "$target")" = "$latest" ]
+}
+
+@test "metadata review failure supports original HEAD then normal amendment and preserves earlier CI history" {
+  metadata_candidate
+  invoke increment-review-pass "$(evidence_fields)"
+  accepted
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke push-readback '{"remote":"origin","ref":"refs/heads/main"}'
+  accepted
+  invoke ci-register "$(ci_fields old-run running)"
+  accepted
+  invoke begin-edit "$(evidence_fields '{"causal_edit":"next fixture increment"}')"
+  accepted
+  printf 'next increment\n' >>"$repo/source"
+  invoke edit-pass "$(evidence_fields)"
+  accepted
+  invoke lightweight-review-pass "$(evidence_fields '{"route":"commit"}')"
+  accepted
+  git -C "$repo" commit -qam 'second increment'
+  invoke commit-success "$(evidence_fields '{"mode":"direct-to-trunk"}')"
+  accepted
+  invoke exact-verify-pass "$(evidence_fields)"
+  accepted
+  metadata_identity
+  before=$record
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  accepted
+  [ "$(jq -c '.ci.runs' <<<"$record")" = "$(jq -c '.ci.runs' <<<"$before")" ]
+  [ "$(jq -r '.baseline_oid' <<<"$record")" = "$baseline" ]
+  git -C "$repo" commit --amend -qm 'docs: actual repair'
+  invoke exact-verify-retry "$(evidence_fields)"
+  accepted
+  [ "$(jq -r '.delivery.commit_oid' <<<"$record")" = "$(git -C "$repo" rev-parse HEAD)" ]
+  [ "$(jq -r '.next_action' <<<"$record")" = verify-exact-commit ]
+}
+
+@test "metadata review failure rejects dirty source index untracked files and changed tree or parent" {
+  metadata_candidate
+  before=$(sha256sum "$target")
+  printf 'dirty\n' >>"$repo/source"
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"changed source"* ]]
+  git -C "$repo" add source
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"changed source"* ]]
+  git -C "$repo" restore --source=HEAD --staged --worktree source
+  printf 'untracked\n' >"$repo/extra"
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"changed source"* ]]
+  rm "$repo/extra"
+  printf 'changed committed source\n' >>"$repo/source"
+  git -C "$repo" commit -qam 'changed source'
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"changed source"* ]]
+  git -C "$repo" restore --source="$original" --staged --worktree source
+  git -C "$repo" commit -qm 'restored source but changed parent'
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"tree and single parent"* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "metadata review failure rejects index-only changes concealed by restored worktree bytes" {
+  metadata_candidate
+  before=$(sha256sum "$target")
+  before_receipts=$(sha256sum "$target.operations/"*.json)
+  printf 'staged source change\n' >>"$repo/source"
+  git -C "$repo" add source
+  git -C "$repo" restore --source=HEAD --worktree source
+  run git -C "$repo" diff --exit-code HEAD --
+  [ "$status" -eq 0 ]
+  run git -C "$repo" diff --cached --quiet HEAD --
+  [ "$status" -eq 1 ]
+  invoke increment-review-metadata-failure "$(metadata_fields)" index-only
+  [ "$status" -ne 0 ]; [[ "$output" == *"clean index"* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+  [ "$(sha256sum "$target.operations/"*.json)" = "$before_receipts" ]
+  [ ! -e "$target.operations/index-only.json" ]
+}
+
+@test "metadata review failure rejects clean-filter hidden source changes" {
+  printf 'source filter=normalize\n' >"$repo/.gitattributes"
+  git -C "$repo" config filter.normalize.clean "sed 's/hidden/implementation/'"
+  git -C "$repo" add .gitattributes
+  git -C "$repo" commit -qm 'test filter configuration'
+  metadata_candidate
+  printf 'remote hidden\n' >"$repo/source"
+  run git -C "$repo" diff --exit-code
+  [ "$status" -eq 0 ]
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"changed source"* ]]
+}
+
+@test "metadata review failure rejects published candidates descendants and wrong upstream authority" {
+  metadata_candidate
+  before=$(sha256sum "$target")
+  git -C "$repo" push -q origin HEAD:refs/heads/main
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"authoritative remote ref"* ]]
+  descendant=$(printf 'published descendant\n' | git -C "$repo" commit-tree "$candidate_tree" -p "$original")
+  git -C "$repo" push -q origin "$descendant":refs/heads/main
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"authoritative remote ref"* ]]
+  git -C "$repo" remote add alternate "$remote"
+  invoke increment-review-metadata-failure "$(metadata_fields | jq '.remote="alternate"')"
+  [ "$status" -ne 0 ]; [[ "$output" == *"configured trunk upstream"* ]]
+  invoke increment-review-metadata-failure "$(metadata_fields | jq '.ref="refs/heads/other"')"
+  [ "$status" -ne 0 ]; [[ "$output" == *"configured trunk upstream"* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "metadata review failure rejects wrong identities review evidence and stale requests without mutation" {
+  metadata_candidate
+  before=$(sha256sum "$target")
+  for field in original_oid replacement_oid tree_oid parent_oid; do
+    invalid_oid=$baseline
+    if [ "$field" = parent_oid ]; then
+      invalid_oid=$original
+    fi
+    invoke increment-review-metadata-failure "$(metadata_fields | jq --arg field "$field" --arg oid "$invalid_oid" '.[$field]=$oid')"
+    [ "$status" -ne 0 ]
+  done
+  cp "$review" "$records/good-review.json"
+  for edit in '.verdict="PASS"' '.candidate="stale"' '.findings=[]' '.findings[0].scope="source"'; do
+    jq "$edit" "$records/good-review.json" >"$review"
+    invoke increment-review-metadata-failure "$(metadata_fields)"
+    [ "$status" -ne 0 ]; [[ "$output" == *"failed independent metadata review"* ]]
+  done
+  : >"$review"
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"nonempty"* ]]
+  rm "$review"
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]
+  cp "$records/good-review.json" "$review"
+  invoke increment-review-metadata-failure "$(metadata_fields | jq '.review_kind="self-review"')"
+  [ "$status" -ne 0 ]
+  jq '.expected_generation=0' "$records/request.json" >"$records/stale.json"
+  run bash -c 'cd "$1" && exec "$2" task stale increment-review-metadata-failure "$3"' _ "$repo" "$transition" "$records/stale.json"
+  [ "$status" -ne 0 ]; [[ "$output" == *"stale checkpoint"* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "metadata review failure reads the push destination and holds unavailable ambiguous or credentialed authority" {
+  metadata_candidate
+  before=$(sha256sum "$target")
+  published="$BATS_TEST_TMPDIR/published.git"
+  git init --bare -q "$published"
+  git -C "$repo" push -q "$published" HEAD:refs/heads/main
+  git -C "$repo" config remote.origin.pushurl "$published"
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"authoritative remote ref"* ]]
+  git -C "$repo" config --add remote.origin.pushurl "$remote"
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"one push destination"* ]]
+  git -C "$repo" config --unset-all remote.origin.pushurl
+  git -C "$repo" config remote.origin.pushurl "$BATS_TEST_TMPDIR/missing.git"
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]
+  git -C "$repo" config remote.origin.pushurl 'https://example.invalid/repo?token=test-secret'
+  invoke increment-review-metadata-failure "$(metadata_fields)"
+  [ "$status" -ne 0 ]; [[ "$output" == *"must not embed credentials"* ]]
+  [[ "$output" != *test-secret* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+}
+
+@test "metadata review failure cannot be minted by a compatibility record or replayed with changed input" {
+  metadata_candidate
+  before=$(sha256sum "$target")
+  predecessor=$(sha256sum "$target" | cut -d ' ' -f 1)
+  generation=$(jq '.generation + 1' <<<"$record")
+  printf 'checkpoint-v1 %s\n' "$(jq -c --arg predecessor "$predecessor" '.generation += 1 | .predecessor_sha256=$predecessor | .next_action="repair-exact-identity-verification" | .gates.exact_identity_verification_receipt={outcome:"fail",receipt_ref:"fabricated fixture evidence"}' <<<"$record")" >"$records/compatibility.txt"
+  run bash -c 'cd "$1" && operation=increment-review-metadata-failure "$2" task "$3" "$4" "$5"' _ "$repo" "$ROOT/plugins/development-system/scripts/write-local-checkpoint.sh" "$generation" "$predecessor" "$records/compatibility.txt"
+  [ "$status" -ne 0 ]; [[ "$output" == *"successor does not perform"* ]]
+  [ "$(sha256sum "$target")" = "$before" ]
+  invoke increment-review-metadata-failure "$(metadata_fields)" metadata-failure
+  accepted
+  latest=$(sha256sum "$target")
+  invoke increment-review-metadata-failure "$(metadata_fields | jq '.command="different review"')" metadata-failure
+  [ "$status" -ne 0 ]; [[ "$output" == *"operation id already used"* ]]
+  [ "$(sha256sum "$target")" = "$latest" ]
+}
+
 ci_fields() {
   evidence_fields "$(jq -cn --arg head "$(git -C "$repo" rev-parse HEAD)" --arg run "$1" --arg status "$2" '{provider:"fixture",run_id:$run,commit_oid:$head,status:$status}')"
 }
