@@ -606,10 +606,13 @@ before invoking its executable, including source compilation on hosts without
 a prebuilt release.
 Incoming stdio request and response frames are limited to 4 MiB; JSON escaping
 counts toward that transport limit. Conditional-lens fanout is bounded so malformed or bursty callers cannot grow
-coordinator memory or review-agent count without limit. On any oversized stdio
-frame, the server stops reading at the request byte limit, emits
+coordinator memory or review-agent count without limit. On an oversized incoming
+request, the server stops reading at the request byte limit, emits
 `request_too_large`, and terminates so the harness can restart it; the process is
-not reusable after that response.
+not reusable after that response. An oversized outgoing tool response instead
+returns `plan_response_too_large` or `mcp_response_too_large`; this does not undo
+an operation that already committed. Recover its durable session with
+`final_review.resume_latest` before deciding whether to retry the operation.
 
 ## Reopening completed scope
 
