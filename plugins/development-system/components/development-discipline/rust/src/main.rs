@@ -70,8 +70,8 @@ const MAX_REVIEW_ITERATIONS: u64 = 32;
 const DEFAULT_CONFIG_PATH: &str = ".development-discipline/final-review.toml";
 const REVIEW_SEVERITIES: [&str; 4] = ["CRITICAL", "MAJOR", "MINOR", "TRIVIAL"];
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
-const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
-const MAX_STATE_BYTES: usize = 1024 * 1024;
+const MAX_REQUEST_BYTES: usize = 4 * 1024 * 1024;
+const MAX_STATE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LENS_RESULTS_BYTES: usize = 256 * 1024;
 const MAX_VERIFIER_RESULT_BYTES: usize = 256 * 1024;
 const MAX_FINDINGS_PER_LENS: usize = 64;
@@ -26727,6 +26727,63 @@ mod tests {
         );
     }
 
+    // Synthetic, fully retained historic evidence exercises the state boundary;
+    // these fixture claims are never attestations about a real review.
+    fn capacity_history_state() -> Value {
+        let mut state = event_sourced_test_state(Path::new("."), "capacity-history");
+        state["iteration_index"] = json!(25);
+        let history: Vec<_> = (1..25).map(|iteration| {
+            let findings: Vec<_> = (0..64).map(|index| json!({
+                "id": format!("historic-{iteration}-{index}"),
+                "lens": "correctness-behavior", "severity": "MINOR",
+                "path": format!("src/module-{index}.rs"),
+                "message": format!("Historical fixture observation {iteration}/{index}: {}", "retained evidence ".repeat(40))
+            })).collect();
+            json!({"completed_iteration":iteration,"clean":false,"reset_reason":"Historic fixture findings",
+                "actionable_count":64,"routed_count":0,"already_tracked_count":0,
+                "defended_or_accepted_count":0,"out_of_scope_count":0,"malformed_count":0,"needs_human_decision_count":0,
+                "round_evidence":{"schema_version":1,"completed_lens_round":true,
+                    "expected_lenses":["correctness-behavior"],"completed_lenses":["correctness-behavior"],
+                    "scope":state["scope"],"scope_changed":false,"source_changed":false,
+                    "raw_findings":findings,"confirmed_findings":[],"duplicate_findings":[],
+                    "rejected_findings":[],"reopened_findings":[],"repair_verified_findings":[],"verifier_evidence":null}})
+        }).collect();
+        state["finding_history"] = json!(history);
+        state
+    }
+
+    #[test]
+    fn review_capacity_retains_complete_history_above_the_old_state_limit() {
+        let state = capacity_history_state();
+        let before = state["finding_history"].clone();
+        assert!(state.to_string().len() > 1024 * 1024);
+        assert!(state.to_string().len() < 2 * 1024 * 1024);
+        let advanced = execute_advance_fixture(&json!({"state":state,
+            "current_diff_hash":state["scope"]["diff_hash"],"lens_results":clean_lens_results_for(&state)}))
+            .expect("valid historic evidence above the old 1MiB ceiling must advance");
+        let advanced: Value = serde_json::from_str(&advanced).unwrap();
+        let after = advanced["state"]["finding_history"].as_array().unwrap();
+        assert_eq!(&after[..24], before.as_array().unwrap());
+        assert_eq!(after.len(), 25);
+        assert_eq!(
+            advanced["state"]["scope"]["baseline_commit"],
+            state["scope"]["baseline_commit"]
+        );
+        assert_eq!(advanced["state"]["lenses"], state["lenses"]);
+    }
+
+    #[test]
+    fn review_capacity_rejects_history_above_two_mib() {
+        let mut state = capacity_history_state();
+        let history = state["finding_history"].as_array_mut().unwrap();
+        history.extend(history.clone());
+        assert!(state.to_string().len() > 2 * 1024 * 1024);
+        let error = execute_advance_fixture(&json!({"state":state,
+            "current_diff_hash":state["scope"]["diff_hash"],"lens_results":clean_lens_results_for(&state)}))
+            .expect_err("oversized complete history must fail closed");
+        assert_eq!(error, "state_too_large max_bytes=2097152");
+    }
+
     #[test]
     fn stdio_rejects_an_oversized_request_and_terminates_the_process() {
         let oversized = format!(
@@ -26904,9 +26961,9 @@ mod tests {
         let changed_files = (0..18_000)
             .map(|index| {
                 let suffix = if index < MAX_PROMPT_CHANGED_FILES {
-                    "x".repeat(prompt_path_suffix_chars)
+                    '"'.to_string().repeat(prompt_path_suffix_chars)
                 } else {
-                    "x".repeat(24)
+                    "x".repeat(80)
                 };
                 format!("src/file-{index:05}-{suffix}.rs")
             })
@@ -26929,7 +26986,7 @@ mod tests {
 
     #[test]
     fn plan_rejects_an_amplified_response_above_the_transport_budget() {
-        let error = plan_result(&amplified_plan_arguments(2_300))
+        let error = plan_result(&amplified_plan_arguments(1_300))
             .expect_err("plan response must fit the transport budget");
 
         assert_eq!(
@@ -26949,12 +27006,8 @@ mod tests {
             .iter()
             .map(|lens| (lens.as_str(), "high"))
             .collect::<Vec<_>>();
-        let arguments = add_test_risk_assessment(
-            amplified_plan_arguments(1_500),
-            "high",
-            &selected,
-            json!([]),
-        );
+        let arguments =
+            add_test_risk_assessment(amplified_plan_arguments(800), "high", &selected, json!([]));
         let plan_text = plan_result(&arguments).expect("inner plan text remains within budget");
         let plan_size = plan_text.len();
         assert!(plan_size <= MAX_REQUEST_BYTES);

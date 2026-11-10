@@ -2515,3 +2515,134 @@ fn delta_artifact_interrupted_generation_retries_without_publishing_partial_byte
     );
     assert!(!candidate.exists());
 }
+
+// Only this isolated legacy fixture is synthesized. All transitions after import
+// use the same compiled public operation and Git event store as production.
+fn install_capacity_legacy_fixture(fixture: &Fixture, state: &Value) {
+    let reports = fixture
+        .state
+        .join("development-discipline/final-review-reports");
+    let binding = std::fs::read_dir(&reports)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let flat = reports
+        .join(binding.file_name().unwrap())
+        .with_extension("sqlite");
+    std::fs::copy(binding.join("report.sqlite"), &flat).unwrap();
+    let mut insert = Command::new("python3");
+    insert.args(["-c","import sqlite3,sys; c=sqlite3.connect(sys.argv[1]); c.execute('INSERT INTO final_review_session(session_id,state_json,updated_at,revision) VALUES(?,?,?,?)',('replay-persistence',sys.stdin.read(),1,1)); c.commit(); c.close()"]).arg(&flat).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let output = run(insert, state);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    std::fs::write(format!("{}.eventcore.lock", flat.display()), b"").unwrap();
+    git(
+        &fixture.root,
+        &[
+            "update-ref",
+            "-d",
+            "refs/tiber/plugin-advisory-final-review",
+        ],
+    );
+    std::fs::remove_dir_all(&binding).unwrap();
+    // Bootstrap only the supported legacy import. An invalid scope cannot earn
+    // iteration credit; this separates fixture migration from the measured call.
+    let imported = fixture.run(
+        "final_review.advance",
+        &json!({"state":state,"current_diff_hash":"","lens_results":[]}),
+    );
+    assert!(!imported.status.success());
+    assert!(fixture.authority().is_some());
+}
+
+#[test]
+fn large_history_survives_compiled_replay_and_rejects_oversize_without_credit() {
+    for oversized in [false, true] {
+        let fixture = Fixture::new();
+        let planned = fixture.call("final_review.plan", &fixture.plan_args());
+        let mut state = planned["state"].clone();
+        let rows = 24;
+        state["iteration_index"] = json!(rows + 1);
+        state["finding_history"] = json!((1..=rows).map(|iteration| {
+            let findings: Vec<_> = (0..64).map(|index| json!({"id":format!("historic-{iteration}-{index}"),
+                "lens":"correctness-behavior","severity":"MINOR","path":"source.txt",
+                "message":format!("Synthetic historic observation {iteration}/{index}: {}", "retained evidence ".repeat(if oversized { 80 } else { 40 }))})).collect();
+            json!({"completed_iteration":iteration,"clean":false,"reset_reason":"Synthetic historic findings",
+                "actionable_count":64,"routed_count":0,"already_tracked_count":0,
+                "defended_or_accepted_count":0,"out_of_scope_count":0,"malformed_count":0,"needs_human_decision_count":0,
+                "round_evidence":{"schema_version":1,"completed_lens_round":true,
+                    "expected_lenses":state["lenses"],"completed_lenses":state["lenses"],"scope":state["scope"],
+                    "scope_changed":false,"source_changed":false,"raw_findings":findings,
+                    "confirmed_findings":[],"duplicate_findings":[],"rejected_findings":[],
+                    "reopened_findings":[],"repair_verified_findings":[],"verifier_evidence":null}})
+        }).collect::<Vec<_>>());
+        let size = state.to_string().len();
+        assert!(size > 1024 * 1024);
+        assert_eq!(size > 2 * 1024 * 1024, oversized);
+        install_capacity_legacy_fixture(&fixture, &state);
+        let initial_reference = fixture.call(
+            "final_review.resume_latest",
+            &json!({"session_id":"replay-persistence","project_root":fixture.root}),
+        )["state_ref"]
+            .clone();
+        let before = fixture.authority();
+        let arguments = json!({"state":state,"lens_results":clean_results(&state),"current_diff_hash":"replay-fixture"});
+        let advanced = fixture.run("final_review.advance", &arguments);
+        if oversized {
+            assert!(!advanced.status.success());
+            assert!(String::from_utf8_lossy(&advanced.stdout)
+                .contains("state_too_large max_bytes=2097152"));
+            assert_eq!(
+                fixture.authority(),
+                before,
+                "oversize must not append or earn credit"
+            );
+            let resumed = fixture.call(
+                "final_review.resume_latest",
+                &json!({"session_id":"replay-persistence","project_root":fixture.root}),
+            );
+            assert_eq!(resumed["state_ref"], initial_reference);
+            continue;
+        }
+        let advanced = payload(advanced);
+        assert_eq!(
+            &advanced["state"]["finding_history"].as_array().unwrap()[..24],
+            state["finding_history"].as_array().unwrap()
+        );
+        assert_eq!(
+            advanced["state"]["scope"]["baseline_commit"],
+            state["scope"]["baseline_commit"]
+        );
+        let authority = fixture.authority();
+        assert!(authority.is_some());
+        let resumed = fixture.call(
+            "final_review.resume_latest",
+            &json!({"session_id":"replay-persistence","project_root":fixture.root}),
+        );
+        assert_eq!(resumed["state_ref"], advanced["state_ref"]);
+        let report = fixture.call(
+            "final_review.yield_report",
+            &json!({"state_ref":resumed["state_ref"]}),
+        );
+        assert_eq!(report["totals"]["raw_allegations"], 24 * 64);
+        fixture.call(
+            "final_review.pending_assignments",
+            &json!({"state_ref":resumed["state_ref"]}),
+        );
+        let stale = fixture.run("final_review.advance", &arguments);
+        assert!(
+            !stale.status.success(),
+            "old supplied state cannot advance twice"
+        );
+        assert_eq!(
+            fixture.authority(),
+            authority,
+            "stale duplicate must not append"
+        );
+    }
+}

@@ -374,7 +374,7 @@ fn validate(round: &RoundEvidence) -> Result<(), String> {
     }
     if let Some(attempts) = &round.review_attempts {
         // Native input admits at most 24 lenses. Reuse that hard boundary while
-        // preserving legacy rows with no ledger and the outer 1 MiB state limit.
+        // preserving legacy rows with no ledger and the outer 2 MiB state limit.
         if (attempts.is_empty()
             && !(round.batch_kind.as_deref() == Some("verifier-replacement")
                 && round.verifier_evidence.is_some()

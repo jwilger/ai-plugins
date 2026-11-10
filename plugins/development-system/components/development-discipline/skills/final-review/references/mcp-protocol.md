@@ -604,8 +604,8 @@ against the plugin version and automatically repairs missing or stale binaries
 before normal MCP use. The Development Discipline launcher repairs a missing or stale installation
 before invoking its executable, including source compilation on hosts without
 a prebuilt release.
-Incoming stdio requests and
-conditional-lens fanout are bounded so malformed or bursty callers cannot grow
+Incoming stdio request and response frames are limited to 4 MiB; JSON escaping
+counts toward that transport limit. Conditional-lens fanout is bounded so malformed or bursty callers cannot grow
 coordinator memory or review-agent count without limit. On any oversized stdio
 frame, the server stops reading at the request byte limit, emits
 `request_too_large`, and terminates so the harness can restart it; the process is
@@ -716,9 +716,12 @@ not the missing total. An empty retained array then cannot establish
 the native malformed disposition. Oversized or non-array whole batches remain
 unavailable when individual submitted reports cannot be recovered.
 
-The existing serialized-state size limit remains in force. Evidence-heavy
-sessions fail closed when that limit is exceeded; no evidence is silently
-invented or dropped to authorize completion.
+Serialized review state, including retained history and pending verifier
+continuations, is limited to 2 MiB. Evidence-heavy sessions fail closed when
+that limit is exceeded; no evidence is silently invented or dropped to authorize
+completion. The larger state and transport budgets do not change individual
+report limits, coverage requirements, freshness, provenance, baseline identity,
+or clean-sample floors.
 
 New delta artifacts use `git-snapshot-v2`: the captured project subtree produces
 both patch and inventory without expanding the declared file set into Git argv.
