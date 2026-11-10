@@ -379,6 +379,12 @@ tiber_projection_mapping!(
     ProjectCiRecoveryReplacement
 );
 tiber_projection_mapping!(
+    CiRecoveryHoldReleasedByPolicy,
+    CiRecoveryHoldReleasedByPolicyEvent,
+    project_ci_recovery_policy_release,
+    ProjectCiRecoveryPolicyRelease
+);
+tiber_projection_mapping!(
     CiRecoveryResolved,
     CiRecoveryResolvedEvent,
     project_ci_recovery_resolved,
@@ -438,6 +444,7 @@ fn projection_event(event: &TiberEvent) -> TiberEvent {
         TiberEvent::CiRecoveryActionChosen(_) => project!(ProjectCiRecoveryAction),
         TiberEvent::CiRecoveryReplacementRecorded(_) => project!(ProjectCiRecoveryReplacement),
         TiberEvent::CiRecoveryResolved(_) => project!(ProjectCiRecoveryResolved),
+        TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => project!(ProjectCiRecoveryPolicyRelease),
         TiberEvent::LegacyRecoveryStatePublished(_) => project!(ProjectLegacyRecoveryState),
     }
 }
@@ -553,10 +560,15 @@ impl ModelCommandLogic for ClaimCiRecovery {
         let mut state = state.into_inner();
         match event {
             TiberEvent::CiRecoveryClaimed(_) => state.active_incident = true,
-            TiberEvent::CiRecoveryResolved(_) => state.active_incident = false,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.active_incident = false
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
-                state.active_incident =
-                    payload.state.state != tiber_core::events::CiRecoveryPhase::Resolved;
+                state.active_incident = !matches!(
+                    payload.state.state,
+                    tiber_core::events::CiRecoveryPhase::Resolved
+                        | tiber_core::events::CiRecoveryPhase::PolicyReleased
+                );
             }
             _ => {}
         }
@@ -691,10 +703,12 @@ impl ModelCommandLogic for JoinCiRecovery {
                     == CiRecoveryReplacementStatus::Failed)
                     .then_some(replacement);
             }
-            TiberEvent::CiRecoveryResolved(_) => state.active_incident = false,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.active_incident = false
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
-                state.active_incident = legacy.state != CiRecoveryPhase::Resolved;
+                state.active_incident = !legacy.state.hold_released();
                 state.triggers = if legacy.triggers.is_empty() {
                     vec![legacy.trigger]
                 } else {
@@ -914,7 +928,9 @@ impl ModelCommandLogic for TransferCiRecovery {
             TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
                 state.lease_expires_at = payload.lease_expires_at;
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
                 state.incident_id = Some(legacy.incident_id);
@@ -922,7 +938,7 @@ impl ModelCommandLogic for TransferCiRecovery {
                 state.epoch = legacy.epoch;
                 state.lease_expires_at = legacy.lease_expires_at;
                 state.participants = legacy.participants;
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -1097,7 +1113,9 @@ impl ModelCommandLogic for TakeOverCiRecovery {
             TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
                 state.lease_expires_at = payload.lease_expires_at;
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
                 state.incident_id = Some(legacy.incident_id);
@@ -1105,7 +1123,7 @@ impl ModelCommandLogic for TakeOverCiRecovery {
                 state.epoch = legacy.epoch;
                 state.lease_expires_at = legacy.lease_expires_at;
                 state.participants = legacy.participants;
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -1318,7 +1336,9 @@ impl ModelCommandLogic for AssignCiRecoveryWork {
             TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
                 state.lease_expires_at = payload.lease_expires_at;
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
                 state.incident_id = Some(legacy.incident_id);
@@ -1327,7 +1347,7 @@ impl ModelCommandLogic for AssignCiRecoveryWork {
                 state.lease_expires_at = legacy.lease_expires_at;
                 state.participants = legacy.participants;
                 state.assignment_count = legacy.assignments.len();
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -1487,13 +1507,15 @@ impl ModelCommandLogic for ReportCiRecoveryWork {
                     assignment.report = Some(payload.report.clone().into());
                 }
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
                 state.incident_id = Some(legacy.incident_id);
                 state.epoch = legacy.epoch;
                 state.assignments = legacy.assignments;
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -1641,14 +1663,16 @@ impl ModelCommandLogic for RenewCiRecoveryLease {
             TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
                 state.lease_expires_at = payload.lease_expires_at;
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
                 state.incident_id = Some(legacy.incident_id);
                 state.owner = Some(legacy.owner);
                 state.epoch = legacy.epoch;
                 state.lease_expires_at = legacy.lease_expires_at;
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -1678,6 +1702,163 @@ impl ModelCommandLogic for RenewCiRecoveryLease {
         Ok(ModeledEvents::one(
             TiberEvent::model_variant_cirecoveryheartbeatrecorded(
                 RenewCiRecoveryLeaseToFact::apply((self, self, state, state, state, state, state)),
+            ),
+        ))
+    }
+}
+
+#[derive(Clone)]
+struct ReleaseCiRecoveryByPolicyIntent {
+    incident_id: String,
+    expected_epoch: u64,
+    owner: CiRecoveryParticipant,
+    observed_at: u64,
+    policy_ref: String,
+    rationale: String,
+}
+
+#[derive(ModelInput)]
+struct ReleaseCiRecoveryByPolicyRequest {
+    #[model(origin)]
+    stream: CiRecoveryStream,
+    #[model(origin)]
+    intent: ReleaseCiRecoveryByPolicyIntent,
+}
+
+#[derive(ModelCommand)]
+struct ReleaseCiRecoveryByPolicy {
+    #[stream]
+    stream: CiRecoveryStream,
+    intent: ReleaseCiRecoveryByPolicyIntent,
+}
+
+mapping! {
+    ReleaseCiRecoveryByPolicyRequestToStream:
+        ReleaseCiRecoveryByPolicyRequest.stream => ReleaseCiRecoveryByPolicy.stream
+        using clone;
+}
+
+mapping! {
+    ReleaseCiRecoveryByPolicyRequestToIntent:
+        ReleaseCiRecoveryByPolicyRequest.intent => ReleaseCiRecoveryByPolicy.intent
+        using clone;
+}
+
+fn release_ci_recovery_by_policy_fact(
+    stream: &CiRecoveryStream,
+    intent: &ReleaseCiRecoveryByPolicyIntent,
+    incident_id: &Option<String>,
+    owner: &Option<CiRecoveryParticipant>,
+    epoch: &u64,
+    lease_expires_at: &u64,
+    resolved: &bool,
+) -> CiRecoveryHoldReleasedByPolicyEvent {
+    debug_assert_eq!(incident_id.as_deref(), Some(intent.incident_id.as_str()));
+    debug_assert_eq!(owner.as_ref(), Some(&intent.owner));
+    debug_assert_eq!(*epoch, intent.expected_epoch);
+    debug_assert!(*lease_expires_at > intent.observed_at);
+    debug_assert!(!resolved);
+    CiRecoveryHoldReleasedByPolicyEvent {
+        incident_id: intent.incident_id.clone(),
+        release: CiRecoveryPolicyRelease {
+            policy_ref: intent.policy_ref.clone(),
+            rationale: intent.rationale.clone(),
+            actor: intent.owner.clone().into(),
+            released_at: intent.observed_at,
+        },
+        stream_id: eventcore::model::StreamIdentity::as_stream_id(stream).clone(),
+        epoch: intent.expected_epoch,
+    }
+}
+
+mapping! {
+    ReleaseCiRecoveryByPolicyToFact:
+        (ReleaseCiRecoveryByPolicy.stream, ReleaseCiRecoveryByPolicy.intent, ReleaseCiRecoveryByPolicyState.incident_id, ReleaseCiRecoveryByPolicyState.owner, ReleaseCiRecoveryByPolicyState.epoch, ReleaseCiRecoveryByPolicyState.lease_expires_at, ReleaseCiRecoveryByPolicyState.resolved) => TiberEvent.CiRecoveryHoldReleasedByPolicy
+        using release_ci_recovery_by_policy_fact;
+}
+
+#[derive(ModelState)]
+struct ReleaseCiRecoveryByPolicyState {
+    #[model(default)]
+    incident_id: Option<String>,
+    #[model(default)]
+    owner: Option<CiRecoveryParticipant>,
+    #[model(default)]
+    epoch: u64,
+    #[model(default)]
+    lease_expires_at: u64,
+    #[model(default)]
+    resolved: bool,
+}
+
+impl ModelCommandLogic for ReleaseCiRecoveryByPolicy {
+    type Event = TiberEvent;
+    type State = ReleaseCiRecoveryByPolicyState;
+
+    fn evolve(&self, state: Modeled<Self::State>, event: &Self::Event) -> Modeled<Self::State> {
+        let mut state = state.into_inner();
+        match event {
+            TiberEvent::CiRecoveryClaimed(payload) => {
+                state.incident_id = Some(payload.incident_id.clone());
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = 1;
+                state.lease_expires_at = payload.lease_expires_at;
+                state.resolved = false;
+            }
+            TiberEvent::CiRecoveryTransferred(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryTakenOver(payload) => {
+                state.owner = Some(payload.owner.clone().into());
+                state.epoch = payload.epoch;
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
+                state.lease_expires_at = payload.lease_expires_at;
+            }
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
+            TiberEvent::LegacyRecoveryStatePublished(payload) => {
+                let legacy = CiRecoveryState::from_snapshot(&payload.state);
+                state.incident_id = Some(legacy.incident_id);
+                state.owner = Some(legacy.owner);
+                state.epoch = legacy.epoch;
+                state.lease_expires_at = legacy.lease_expires_at;
+                state.resolved = legacy.state.hold_released();
+            }
+            _ => {}
+        }
+        Modeled::from_built(state)
+    }
+
+    fn decide(
+        &self,
+        state: Modeled<Self::State>,
+    ) -> Result<ModeledEvents<Self::Event>, eventcore::CommandError> {
+        let state = state.as_ref();
+        if state.resolved {
+            return Err("ci_recovery_hold_already_released".into());
+        }
+        if state.incident_id.as_deref() != Some(&self.intent.incident_id) {
+            return Err("ci_recovery_incident_mismatch".into());
+        }
+        if state.epoch != self.intent.expected_epoch {
+            return Err("ci_recovery_stale_epoch".into());
+        }
+        if state.owner.as_ref() != Some(&self.intent.owner) {
+            return Err("ci_recovery_not_owner".into());
+        }
+        if state.lease_expires_at <= self.intent.observed_at {
+            return Err("ci_recovery_lease_expired".into());
+        }
+        Ok(ModeledEvents::one(
+            TiberEvent::model_variant_cirecoveryholdreleasedbypolicy(
+                ReleaseCiRecoveryByPolicyToFact::apply((
+                    self, self, state, state, state, state, state,
+                )),
             ),
         ))
     }
@@ -1785,14 +1966,16 @@ impl ModelCommandLogic for RecordCiRecoveryDiagnosis {
             TiberEvent::CiRecoveryHeartbeatRecorded(payload) => {
                 state.lease_expires_at = payload.lease_expires_at
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(payload) => {
                 let legacy = CiRecoveryState::from_snapshot(&payload.state);
                 state.incident_id = Some(legacy.incident_id);
                 state.owner = Some(legacy.owner);
                 state.epoch = legacy.epoch;
                 state.lease_expires_at = legacy.lease_expires_at;
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -1990,7 +2173,9 @@ impl ModelCommandLogic for SelectCiRecoveryAction {
                     state.action_kind = None;
                 }
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(p) => {
                 let legacy = CiRecoveryState::from_snapshot(&p.state);
                 state.incident_id = Some(legacy.incident_id);
@@ -2002,7 +2187,7 @@ impl ModelCommandLogic for SelectCiRecoveryAction {
                 state.action_kind = legacy.next_action.map(|a| a.kind);
                 // A legacy snapshot cannot prove the action preceding a failed run.
                 state.failed_unchanged_rerun = false;
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         };
@@ -2185,7 +2370,9 @@ impl ModelCommandLogic for RecordCiRecoveryReplacement {
                     state.action = None;
                 }
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(p) => {
                 let legacy = CiRecoveryState::from_snapshot(&p.state);
                 state.incident_id = Some(legacy.incident_id);
@@ -2195,7 +2382,7 @@ impl ModelCommandLogic for RecordCiRecoveryReplacement {
                 state.action = legacy.next_action;
                 state.classification = legacy.diagnosis.map(|d| d.classification);
                 state.failed_sha = Some(legacy.trigger.failed_sha);
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -2353,13 +2540,15 @@ impl ModelCommandLogic for ResolveCiRecovery {
             TiberEvent::CiRecoveryReplacementRecorded(p) => {
                 state.replacement = Some(p.replacement.clone().into())
             }
-            TiberEvent::CiRecoveryResolved(_) => state.resolved = true,
+            TiberEvent::CiRecoveryResolved(_) | TiberEvent::CiRecoveryHoldReleasedByPolicy(_) => {
+                state.resolved = true
+            }
             TiberEvent::LegacyRecoveryStatePublished(p) => {
                 let legacy = CiRecoveryState::from_snapshot(&p.state);
                 state.incident_id = Some(legacy.incident_id);
                 state.participants = legacy.participants;
                 state.replacement = legacy.replacement;
-                state.resolved = legacy.state == CiRecoveryPhase::Resolved;
+                state.resolved = legacy.state.hold_released();
             }
             _ => {}
         }
@@ -2686,6 +2875,7 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
                 next_action: None,
                 replacement: None,
                 release_proof: None,
+                policy_release: None,
             });
         }
         TiberEvent::CiRecoveryJoined(CiRecoveryJoinedEvent {
@@ -2877,6 +3067,23 @@ fn apply_tiber_event(projection: &mut TiberProjection, event: &TiberEvent) -> Re
             } else {
                 state.state = CiRecoveryPhase::WaitingCi;
             }
+        }
+        TiberEvent::CiRecoveryHoldReleasedByPolicy(payload) => {
+            let state = projection.ci_recovery.as_mut().ok_or_else(|| {
+                Error::Parse("ci_recovery_policy_release_without_claim=true".into())
+            })?;
+            if state.incident_id != payload.incident_id
+                || state.epoch != payload.epoch
+                || state.owner != CiRecoveryParticipant::from(payload.release.actor.clone())
+                || state.state.hold_released()
+                || state.lease_expires_at <= payload.release.released_at
+            {
+                return Err(Error::Parse(
+                    "ci_recovery_policy_release_invalid=true".into(),
+                ));
+            }
+            state.policy_release = Some(payload.release.clone());
+            state.state = CiRecoveryPhase::PolicyReleased;
         }
         TiberEvent::CiRecoveryResolved(CiRecoveryResolvedEvent {
             participant, proof, ..
@@ -7835,6 +8042,35 @@ fn execute_renew_ci_recovery_lease(
     }
 }
 
+fn execute_release_ci_recovery_by_policy(
+    root: &Path,
+    intent: ReleaseCiRecoveryByPolicyIntent,
+) -> Result<(), Error> {
+    let request = ReleaseCiRecoveryByPolicyRequest::model_builder()
+        .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
+        .intent(intent)
+        .build();
+    let command = ReleaseCiRecoveryByPolicy::model_builder()
+        .stream(ReleaseCiRecoveryByPolicyRequestToStream::apply(
+            request.as_ref(),
+        ))
+        .intent(ReleaseCiRecoveryByPolicyRequestToIntent::apply(
+            request.as_ref(),
+        ))
+        .build();
+    let store = GitEventStore::open(root).map_err(event_store_error)?;
+    let outcome =
+        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    match outcome {
+        Ok(_) => Ok(()),
+        Err(eventcore::CommandError::ConcurrencyError(_))
+        | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
+            ..
+        })) => Err(Error::Parse("event_version_conflict=true".into())),
+        Err(error) => Err(eventcore_command_error(error)),
+    }
+}
+
 fn execute_record_ci_recovery_diagnosis(
     root: &Path,
     intent: RecordCiRecoveryDiagnosisIntent,
@@ -8088,7 +8324,7 @@ pub fn ci_recovery_status_at(root: impl Into<PathBuf>) -> Result<CiRecoveryStatu
 pub fn ci_recovery_hold_at(root: impl AsRef<Path>) -> Result<bool, Error> {
     Ok(load_tiber_projection(root.as_ref())?
         .ci_recovery
-        .is_some_and(|state| state.state != CiRecoveryPhase::Resolved))
+        .is_some_and(|state| !state.state.hold_released()))
 }
 
 pub fn assert_ci_recovery_owner(
@@ -8181,6 +8417,16 @@ pub fn resolve_ci_recovery(
 ) -> Result<CiRecoveryStatus, Error> {
     let repo = GitRepository::discover()?;
     repo.resolve_ci_recovery(incident_id, proof)
+}
+
+pub fn release_ci_recovery_by_policy(
+    incident_id: &str,
+    epoch: u64,
+    policy_ref: &str,
+    rationale: &str,
+) -> Result<CiRecoveryStatus, Error> {
+    let repo = GitRepository::discover()?;
+    repo.release_ci_recovery_by_policy(incident_id, epoch, policy_ref, rationale)
 }
 
 pub fn ci_recovery_status() -> Result<CiRecoveryStatus, Error> {
@@ -8306,7 +8552,7 @@ impl GitRepository {
                 ));
             }
             if let Some(mut state) = active_state {
-                if state.state != CiRecoveryPhase::Resolved {
+                if !state.state.hold_released() {
                     let role = if state.lease_expires_at <= claim_time {
                         CiRecoveryRole::TakeoverAvailable
                     } else if state.owner == participant {
@@ -8386,6 +8632,7 @@ impl GitRepository {
                 next_action: None,
                 replacement: None,
                 release_proof: None,
+                policy_release: None,
             };
             let intent = ClaimCiRecoveryIntent {
                 incident_id: state.incident_id.clone(),
@@ -8688,8 +8935,12 @@ impl GitRepository {
             if state.epoch != epoch {
                 return Ok(CiRecoveryWait::from_state(&state, "epoch-changed", None));
             }
-            if state.state == CiRecoveryPhase::Resolved {
-                return Ok(CiRecoveryWait::from_state(&state, "resolved", None));
+            if state.state.hold_released() {
+                return Ok(CiRecoveryWait::from_state(
+                    &state,
+                    state.state.as_str(),
+                    None,
+                ));
             }
             if unix_timestamp()? >= state.lease_expires_at {
                 return Ok(CiRecoveryWait::from_state(
@@ -8858,6 +9109,36 @@ impl GitRepository {
             .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))
     }
 
+    fn release_ci_recovery_by_policy(
+        &self,
+        incident_id: &str,
+        epoch: u64,
+        policy_ref: &str,
+        rationale: &str,
+    ) -> Result<CiRecoveryStatus, Error> {
+        let _lock = self.acquire_lock()?;
+        let owner = ci_recovery_participant()?;
+        let policy_ref = required_ci_recovery_text("policy_ref", policy_ref)?;
+        let rationale = required_ci_recovery_text("rationale", rationale)?;
+        execute_release_ci_recovery_by_policy(
+            &self.root,
+            ReleaseCiRecoveryByPolicyIntent {
+                incident_id: incident_id.to_string(),
+                expected_epoch: epoch,
+                owner,
+                observed_at: unix_timestamp()?,
+                policy_ref,
+                rationale,
+            },
+        )?;
+        load_tiber_projection(&self.root)?
+            .ci_recovery
+            .as_ref()
+            .filter(|state| state.incident_id == incident_id)
+            .map(CiRecoveryStatus::from_state)
+            .ok_or_else(|| Error::Parse("ci_recovery_incident_missing active=false".into()))
+    }
+
     fn ci_recovery_status(&self) -> Result<CiRecoveryStatus, Error> {
         let _lock = self.acquire_lock()?;
         let parent = self
@@ -8925,15 +9206,21 @@ enum CiRecoveryPhase {
     ActionSelected,
     WaitingCi,
     Resolved,
+    PolicyReleased,
 }
 
 impl CiRecoveryPhase {
+    fn hold_released(self) -> bool {
+        matches!(self, Self::Resolved | Self::PolicyReleased)
+    }
+
     fn as_str(self) -> &'static str {
         match self {
             Self::Diagnosing => "diagnosing",
             Self::ActionSelected => "action-selected",
             Self::WaitingCi => "waiting-ci",
             Self::Resolved => "resolved",
+            Self::PolicyReleased => "policy-released",
         }
     }
 }
@@ -9043,6 +9330,8 @@ struct CiRecoveryState {
     replacement: Option<CiRecoveryReplacement>,
     #[serde(default)]
     release_proof: Option<CiRecoveryReleaseProof>,
+    #[serde(default)]
+    policy_release: Option<CiRecoveryPolicyRelease>,
 }
 
 impl CiRecoveryState {
@@ -9065,6 +9354,7 @@ impl CiRecoveryState {
             next_action: self.next_action.clone().map(Into::into),
             replacement: self.replacement.clone().map(Into::into),
             release_proof: self.release_proof.clone().map(Into::into),
+            policy_release: self.policy_release.clone(),
         }
     }
 
@@ -9085,6 +9375,7 @@ impl CiRecoveryState {
             next_action: value.next_action.clone().map(Into::into),
             replacement: value.replacement.clone().map(Into::into),
             release_proof: value.release_proof.clone().map(Into::into),
+            policy_release: value.policy_release.clone(),
         }
     }
 }
@@ -9158,7 +9449,7 @@ macro_rules! ci_recovery_enum_conversion {
 ci_recovery_enum_conversion!(
     CiRecoveryPhase,
     tiber_core::events::CiRecoveryPhase,
-    { Diagnosing => Diagnosing, ActionSelected => ActionSelected, WaitingCi => WaitingCi, Resolved => Resolved }
+    { Diagnosing => Diagnosing, ActionSelected => ActionSelected, WaitingCi => WaitingCi, Resolved => Resolved, PolicyReleased => PolicyReleased }
 );
 ci_recovery_enum_conversion!(
     CiRecoveryClassification,
@@ -9399,7 +9690,7 @@ pub struct CiRecoveryLease {
 
 fn ci_recovery_lease(state: &CiRecoveryState) -> Option<CiRecoveryLease> {
     let now = unix_timestamp().ok()?;
-    let unresolved = state.state != CiRecoveryPhase::Resolved;
+    let unresolved = !state.state.hold_released();
     let active = unresolved && now < state.lease_expires_at;
     Some(CiRecoveryLease {
         observed_at: now,
@@ -9464,6 +9755,7 @@ pub struct CiRecoveryStatus {
     pub next_action: Option<CiRecoveryAction>,
     pub replacement: Option<CiRecoveryReplacement>,
     pub release_proof: Option<CiRecoveryReleaseProof>,
+    pub policy_release: Option<CiRecoveryPolicyRelease>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -9513,7 +9805,7 @@ impl CiRecoveryStatus {
             state: state.state.as_str().to_string(),
             epoch: state.epoch,
             lease_expires_at: state.lease_expires_at,
-            hold_released: state.state == CiRecoveryPhase::Resolved,
+            hold_released: state.state.hold_released(),
             trigger_count: if state.triggers.is_empty() {
                 1
             } else {
@@ -9529,6 +9821,7 @@ impl CiRecoveryStatus {
             next_action: state.next_action.clone(),
             replacement: state.replacement.clone(),
             release_proof: state.release_proof.clone(),
+            policy_release: state.policy_release.clone(),
         }
     }
 }
@@ -12170,6 +12463,7 @@ mod lock_tests {
             next_action: None,
             replacement: None,
             release_proof: None,
+            policy_release: None,
         }
     }
 

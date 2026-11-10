@@ -493,6 +493,14 @@ fn call_tool(name: &str, arguments: &Value) -> Result<Value, tiber_git::Error> {
                 },
             )?)
         }
+        "tiber.ci_recovery.release_by_policy" => {
+            structured_content(tiber_git::release_ci_recovery_by_policy(
+                required_string(arguments, "incident_id")?,
+                required_u64(arguments, "epoch")?,
+                required_string(arguments, "policy_ref")?,
+                required_string(arguments, "rationale")?,
+            )?)
+        }
         "tiber.ci_recovery.resolve" => structured_content(tiber_git::resolve_ci_recovery(
             required_string(arguments, "incident_id")?,
             tiber_git::CiRecoveryReleaseInput {
@@ -540,6 +548,9 @@ fn validate_ci_recovery_arguments(name: &str, arguments: &Value) -> Result<(), t
         "tiber.ci_recovery.choose_action" => &["incident_id", "epoch", "kind", "description"][..],
         "tiber.ci_recovery.record_replacement" => {
             &["incident_id", "epoch", "run_id", "run_url", "sha", "status"][..]
+        }
+        "tiber.ci_recovery.release_by_policy" => {
+            &["incident_id", "epoch", "policy_ref", "rationale"][..]
         }
         "tiber.ci_recovery.resolve" => &[
             "incident_id",
@@ -1094,6 +1105,18 @@ fn ci_recovery_tools() -> Vec<Value> {
             vec!["incident_id", "epoch", "run_id", "run_url", "sha", "status"],
         ),
         ci_recovery_tool(
+            "tiber.ci_recovery.release_by_policy",
+            "Release obsolete CI hold by policy",
+            "Explicit owner attestation that a cited repository policy removes this incident's hold. Requires the current owner, fenced epoch and unexpired lease; take over explicitly after expiry. Preserves failure evidence and uncertainty, records actor/time, and returns policy-released, never successful recovery. Workflow names grant no exemption. On unknown publication outcome read status before retrying; stale ownership requires fresh status and authority.",
+            json!({
+                "incident_id": { "type": "string" },
+                "epoch": { "type": "integer", "minimum": 0 },
+                "policy_ref": { "type": "string", "description": "Explicit repository policy authority reference." },
+                "rationale": { "type": "string", "description": "Why that policy removes this incident's hold; does not assert CI success." }
+            }),
+            vec!["incident_id", "epoch", "policy_ref", "rationale"],
+        ),
+        ci_recovery_tool(
             "tiber.ci_recovery.resolve",
             "Resolve CI recovery",
             "Release the hold only with terminal-success proof whose run identity and SHA match the recorded replacement.",
@@ -1181,7 +1204,7 @@ fn ci_recovery_output_schema(name: &str) -> Value {
                 "incident_id": { "type": "string" },
                 "state": { "type": "string" },
                 "epoch": { "type": "integer", "minimum": 0 },
-                "wake_reason": { "type": "string", "enum": ["assignment", "epoch-changed", "resolved", "timeout", "takeover-available"] },
+                "wake_reason": { "type": "string", "enum": ["assignment", "epoch-changed", "resolved", "policy-released", "timeout", "takeover-available"] },
                 "assignment_id": { "type": ["string", "null"] }
             }),
             json!([
@@ -1253,6 +1276,12 @@ fn ci_recovery_output_schema(name: &str) -> Value {
                     "sha": { "type": "string" },
                     "status": { "type": "string" }
                 }), json!(["run_id", "run_url", "sha", "status"])),
+                "policy_release": nullable_ci_recovery_object_schema(json!({
+                    "policy_ref": { "type": "string" },
+                    "rationale": { "type": "string" },
+                    "actor": ci_recovery_participant_output_schema(),
+                    "released_at": { "type": "integer", "minimum": 0 }
+                }), json!(["policy_ref", "rationale", "actor", "released_at"])),
                 "release_proof": nullable_ci_recovery_object_schema(json!({
                     "replacement_run_id": { "type": "string" },
                     "replacement_run_url": { "type": "string" },
@@ -1289,6 +1318,7 @@ fn ci_recovery_output_schema(name: &str) -> Value {
             | "tiber.ci_recovery.diagnose"
             | "tiber.ci_recovery.choose_action"
             | "tiber.ci_recovery.record_replacement"
+            | "tiber.ci_recovery.release_by_policy"
             | "tiber.ci_recovery.resolve"
     ) {
         properties["lease"] = nullable_ci_recovery_object_schema(

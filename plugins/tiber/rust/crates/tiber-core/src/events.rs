@@ -51,6 +51,8 @@ pub struct CiRecoverySnapshot {
     pub replacement: Option<CiRecoveryReplacement>,
     #[serde(default)]
     pub release_proof: Option<CiRecoveryReleaseProof>,
+    #[serde(default)]
+    pub policy_release: Option<CiRecoveryPolicyRelease>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -75,6 +77,24 @@ pub enum CiRecoveryPhase {
     ActionSelected,
     WaitingCi,
     Resolved,
+    PolicyReleased,
+}
+
+/// An explicit policy disposition, never evidence of successful CI recovery.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CiRecoveryPolicyRelease {
+    pub policy_ref: String,
+    pub rationale: String,
+    pub actor: CiRecoveryParticipant,
+    pub released_at: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CiRecoveryHoldReleasedByPolicyEvent {
+    pub stream_id: StreamId,
+    pub incident_id: String,
+    pub epoch: u64,
+    pub release: CiRecoveryPolicyRelease,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -432,6 +452,7 @@ pub enum TiberEvent {
     CiRecoveryActionChosen(CiRecoveryActionChosenEvent),
     CiRecoveryReplacementRecorded(CiRecoveryReplacementRecordedEvent),
     CiRecoveryResolved(CiRecoveryResolvedEvent),
+    CiRecoveryHoldReleasedByPolicy(CiRecoveryHoldReleasedByPolicyEvent),
     /// Historical full-snapshot event retained solely so existing immutable
     /// Git-backed streams can be replayed. New CI-recovery commands must not
     /// emit it; named transition facts are the authority going forward.
@@ -674,6 +695,15 @@ impl TiberEvent {
         value
     }
     #[doc(hidden)]
+    pub fn __eventcore_model_get_CiRecoveryHoldReleasedByPolicy(
+        &self,
+    ) -> &CiRecoveryHoldReleasedByPolicyEvent {
+        let Self::CiRecoveryHoldReleasedByPolicy(value) = self else {
+            unreachable!("modeled event variant mismatch")
+        };
+        value
+    }
+    #[doc(hidden)]
     pub fn __eventcore_model_get_CiRecoveryResolved(&self) -> &CiRecoveryResolvedEvent {
         let Self::CiRecoveryResolved(value) = self else {
             unreachable!("modeled event variant mismatch")
@@ -731,6 +761,10 @@ impl TiberEvent {
                 ..
             })
             | Self::CiRecoveryResolved(CiRecoveryResolvedEvent { stream_id, .. })
+            | Self::CiRecoveryHoldReleasedByPolicy(CiRecoveryHoldReleasedByPolicyEvent {
+                stream_id,
+                ..
+            })
             | Self::LegacyRecoveryStatePublished(CiRecoveryEvent { stream_id, .. }) => stream_id,
         }
     }

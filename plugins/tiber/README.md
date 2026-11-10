@@ -458,8 +458,8 @@ their explicit session identity; MCP callers must use the returned process
 participant for handoff rather than treating the harness session as authority.
 Clients must accept the new claim role and wait wake reason `takeover-available`
 and added response fields. Null lease guidance indicates unavailable observation,
-not permission to act. Epoch fencing, normal publication, and exact successful
-replacement-CI proof as the sole hold release are unchanged.
+not permission to act. Epoch fencing and normal publication remain required. Ordinary recovery requires
+exact successful replacement-CI proof.
 
 To activate, update the marketplace and installed Tiber plugin to the current release, then
 restart its MCP server and reload the updated tasks skill. Claim/join the
@@ -467,6 +467,30 @@ existing incident; an upgrade does not migrate or impersonate an old owner.
 A live old owner may transfer explicitly, otherwise use the reported retry time
 and fenced takeover. Rebuilding a checkout alone does not update an already
 running installed server.
+
+### Release an obsolete hold by explicit repository policy
+
+As of 1.4.0, `ci-recovery release-by-policy` records a policy disposition,
+not a successful repair. The current owner must supply the current epoch,
+a policy reference and a concrete rationale while its lease is active. An
+expired owner must explicitly take over first. No workflow name grants an
+exemption, and Tiber does not infer policy authority from a filename.
+
+```shell
+tiber ci-recovery release-by-policy --incident-id ci-123 --epoch 2 \
+  --policy-ref /absolute/repository/docs/workflow.md \
+  --rationale "Repository policy removes this historical hold; cause remains unknown."
+```
+
+The equivalent MCP tool is `tiber.ci_recovery.release_by_policy`, with
+`incident_id`, `epoch`, `policy_ref`, and `rationale`. Actor and Unix release
+time are supplied by Tiber. Status reports `policy-released`,
+`hold_released: true`, and `policy_release` audit metadata; wait reports the
+`policy-released` state and wake reason. The `release_proof`
+remains absent. Original failures, diagnosis uncertainty and event history are
+retained. A subsequent distinct CI failure can open a new incident. This does
+not authorize additional CI runs or relax `resolve` evidence requirements.
+Upgrade the installed CLI and restart MCP before using the new operation.
 
 ## Stdio MCP
 

@@ -1597,3 +1597,398 @@ fn recovery_wait_wakes_at_expiry_without_an_event() {
     assert!(started.elapsed() < Duration::from_secs(6));
     assert_eq!(result["epoch"], 1);
 }
+
+#[test]
+fn policy_release_preserves_failure_history_and_allows_distinct_normal_ci_claim() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let repo = TempRepo::initialized();
+    assert_success(
+        Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(origin.path())
+            .current_dir(repo.path())
+            .output()
+            .unwrap(),
+    );
+    repo.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    let env = [
+        ("TIBER_CLAIM_HOST", "owner"),
+        ("TIBER_CLAIM_SESSION", "policy-session"),
+        ("TIBER_CI_RECOVERY_TEST_NOW", "1000"),
+    ];
+    let run = |args: &[&str]| repo.tiber_with_env(args, env);
+    assert_success(run(&[
+        "ci-recovery",
+        "claim",
+        "--run-id",
+        "policy-old",
+        "--run-url",
+        "https://forge.invalid/old",
+        "--failed-sha",
+        "abc123",
+        "--workflow",
+        "full mutation",
+        "--ref",
+        "refs/heads/main",
+    ]));
+    assert_success(run(&[
+        "ci-recovery",
+        "diagnose",
+        "--incident-id",
+        "ci-policy-old",
+        "--epoch",
+        "1",
+        "--job",
+        "mutation",
+        "--step",
+        "execute",
+        "--log-evidence",
+        "historical failure",
+        "--cause",
+        "unknown cause retained",
+        "--classification",
+        "unrelated",
+    ]));
+    let before_output = run(&["ci-recovery", "status"]);
+    assert_success_ref(&before_output);
+    let before: serde_json::Value = serde_json::from_slice(&before_output.stdout).unwrap();
+    let tree_before = origin.git_output(["rev-parse", "refs/heads/tiber"]);
+    let release = [
+        "ci-recovery",
+        "release-by-policy",
+        "--incident-id",
+        "ci-policy-old",
+        "--epoch",
+        "1",
+        "--policy-ref",
+        "docs/workflow.md",
+        "--rationale",
+        "Historical incidents no longer impose holds; causes remain unknown",
+    ];
+    for (args, expected) in [
+        (
+            {
+                let mut a = release;
+                a[5] = "0";
+                a
+            },
+            "ci_recovery_stale_epoch",
+        ),
+        (
+            {
+                let mut a = release;
+                a[3] = "ci-absent";
+                a
+            },
+            "ci_recovery_incident_mismatch",
+        ),
+        (
+            {
+                let mut a = release;
+                a[7] = " ";
+                a
+            },
+            "ci_recovery_field_invalid field=policy_ref",
+        ),
+        (
+            {
+                let mut a = release;
+                a[9] = "token=do-not-echo";
+                a
+            },
+            "ci_recovery_field_invalid field=rationale",
+        ),
+    ] {
+        let output = run(&args);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains(expected));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("do-not-echo"));
+    }
+    let wrong_owner = repo.tiber_with_env(
+        release,
+        [
+            ("TIBER_CLAIM_HOST", "other"),
+            ("TIBER_CLAIM_SESSION", "other"),
+            ("TIBER_CI_RECOVERY_TEST_NOW", "1001"),
+        ],
+    );
+    assert!(!wrong_owner.status.success());
+    assert!(String::from_utf8_lossy(&wrong_owner.stderr).contains("ci_recovery_not_owner"));
+    let expired = repo.tiber_with_env(
+        release,
+        [
+            ("TIBER_CLAIM_HOST", "owner"),
+            ("TIBER_CLAIM_SESSION", "policy-session"),
+            ("TIBER_CI_RECOVERY_TEST_NOW", "4600"),
+        ],
+    );
+    assert!(!expired.status.success());
+    assert!(String::from_utf8_lossy(&expired.stderr).contains("ci_recovery_lease_expired"));
+    assert_eq!(
+        origin.git_output(["rev-parse", "refs/heads/tiber"]).stdout,
+        tree_before.stdout
+    );
+    let output = run(&release);
+    assert_success_ref(&output);
+    let after: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(after["state"], "policy-released");
+    assert_eq!(after["hold_released"], true);
+    assert!(after["release_proof"].is_null());
+    assert_eq!(after["policy_release"]["policy_ref"], "docs/workflow.md");
+    assert_eq!(
+        after["policy_release"]["actor"]["session"],
+        "policy-session"
+    );
+    assert_eq!(after["policy_release"]["released_at"], 1000);
+    for field in [
+        "trigger",
+        "triggers",
+        "failure_record",
+        "diagnosis",
+        "assignments",
+        "replacement",
+        "epoch",
+        "owner",
+    ] {
+        assert_eq!(before[field], after[field], "preserve {field}");
+    }
+    assert_eq!(after["lease"]["takeover_available"], false);
+    let duplicate = run(&release);
+    assert!(!duplicate.status.success());
+    assert!(
+        String::from_utf8_lossy(&duplicate.stderr).contains("ci_recovery_hold_already_released")
+    );
+    let released_head = origin.git_output(["rev-parse", "refs/heads/tiber"]);
+    assert_success_ref(&released_head);
+    for command in [
+        vec!["heartbeat"],
+        vec!["takeover"],
+        vec![
+            "transfer",
+            "--to-host",
+            "owner",
+            "--to-session",
+            "policy-session",
+        ],
+        vec![
+            "diagnose",
+            "--job",
+            "mutation",
+            "--step",
+            "execute",
+            "--log-evidence",
+            "new evidence",
+            "--cause",
+            "new cause",
+            "--classification",
+            "unrelated",
+        ],
+        vec![
+            "choose-action",
+            "--kind",
+            "rerun",
+            "--description",
+            "unauthorized after release",
+        ],
+        vec![
+            "record-replacement",
+            "--run-id",
+            "new",
+            "--run-url",
+            "https://forge.invalid/new",
+            "--sha",
+            "abc123",
+            "--status",
+            "queued",
+        ],
+    ] {
+        let mut args = vec![
+            "ci-recovery",
+            command[0],
+            "--incident-id",
+            "ci-policy-old",
+            "--epoch",
+            "1",
+        ];
+        args.extend_from_slice(&command[1..]);
+        let rejected = run(&args);
+        assert!(!rejected.status.success(), "must reject {}", command[0]);
+        assert!(
+            String::from_utf8_lossy(&rejected.stderr).contains("ci_recovery_incident_resolved"),
+            "{}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
+    }
+    assert_eq!(
+        origin.git_output(["rev-parse", "refs/heads/tiber"]).stdout,
+        released_head.stdout
+    );
+    let wait = run(&[
+        "ci-recovery",
+        "wait",
+        "--incident-id",
+        "ci-policy-old",
+        "--epoch",
+        "1",
+        "--timeout-seconds",
+        "1",
+    ]);
+    assert_success_ref(&wait);
+    let waited: serde_json::Value = serde_json::from_slice(&wait.stdout).unwrap();
+    assert_eq!(waited["wake_reason"], "policy-released");
+    // Fresh clone reconstructs the policy disposition from the authoritative remote.
+    let observer = clone_repo(&origin);
+    let replayed = observer.tiber_with_env(["ci-recovery", "status"], env);
+    assert_success_ref(&replayed);
+    let replayed: serde_json::Value = serde_json::from_slice(&replayed.stdout).unwrap();
+    assert_eq!(replayed["policy_release"], after["policy_release"]);
+    let old_head =
+        String::from_utf8(origin.git_output(["rev-parse", "refs/heads/tiber"]).stdout).unwrap();
+    assert_success(run(&[
+        "ci-recovery",
+        "claim",
+        "--run-id",
+        "normal-new",
+        "--run-url",
+        "https://forge.invalid/new",
+        "--failed-sha",
+        "def456",
+        "--workflow",
+        "CI",
+        "--ref",
+        "refs/heads/main",
+    ]));
+    origin.git([
+        "merge-base",
+        "--is-ancestor",
+        old_head.trim(),
+        "refs/heads/tiber",
+    ]);
+    let normal = run(&["ci-recovery", "status"]);
+    let normal: serde_json::Value = serde_json::from_slice(&normal.stdout).unwrap();
+    assert_eq!(normal["incident_id"], "ci-normal-new");
+    assert_eq!(normal["hold_released"], false);
+    assert!(normal["policy_release"].is_null());
+    let false_success = run(&[
+        "ci-recovery",
+        "resolve",
+        "--incident-id",
+        "ci-normal-new",
+        "--replacement-run-id",
+        "fake",
+        "--replacement-run-url",
+        "https://forge.invalid/fake",
+        "--sha",
+        "def456",
+        "--terminal-status",
+        "success",
+    ]);
+    assert!(!false_success.status.success());
+    assert!(
+        String::from_utf8_lossy(&false_success.stderr).contains("ci_recovery_replacement_required")
+    );
+}
+
+#[test]
+fn policy_release_racing_owner_transfer_has_one_fenced_winner() {
+    let origin = TempRepo::new();
+    origin.git(["init", "--bare"]);
+    let seed = TempRepo::initialized();
+    seed.git(["remote", "add", "origin", origin.path().to_str().unwrap()]);
+    seed.git(["push", "origin", "main"]);
+    origin.git(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    let claim = [
+        "ci-recovery",
+        "claim",
+        "--run-id",
+        "policy-race",
+        "--run-url",
+        "https://forge.invalid/race",
+        "--failed-sha",
+        "abc123",
+        "--workflow",
+        "CI",
+        "--ref",
+        "refs/heads/main",
+    ];
+    assert_success(
+        ci_recovery_claim_command(&seed, &claim, "owner", "owner-session")
+            .output()
+            .unwrap(),
+    );
+    assert_success(
+        ci_recovery_claim_command(&seed, &claim, "recipient", "recipient-session")
+            .output()
+            .unwrap(),
+    );
+    let releasing = clone_repo(&origin);
+    let transferring = clone_repo(&origin);
+    install_push_barrier(&origin);
+    let release = ci_recovery_claim_command(
+        &releasing,
+        &[
+            "ci-recovery",
+            "release-by-policy",
+            "--incident-id",
+            "ci-policy-race",
+            "--epoch",
+            "1",
+            "--policy-ref",
+            "docs/workflow.md",
+            "--rationale",
+            "Explicit policy removes historical hold",
+        ],
+        "owner",
+        "owner-session",
+    )
+    .spawn()
+    .unwrap();
+    let transfer = ci_recovery_claim_command(
+        &transferring,
+        &[
+            "ci-recovery",
+            "transfer",
+            "--incident-id",
+            "ci-policy-race",
+            "--epoch",
+            "1",
+            "--to-host",
+            "recipient",
+            "--to-session",
+            "recipient-session",
+        ],
+        "owner",
+        "owner-session",
+    )
+    .spawn()
+    .unwrap();
+    let release = release.wait_with_output().unwrap();
+    let transfer = transfer.wait_with_output().unwrap();
+    assert_ne!(
+        release.status.success(),
+        transfer.status.success(),
+        "one winner required: release={release:?}, transfer={transfer:?}"
+    );
+    let status = seed.tiber_with_env(
+        ["ci-recovery", "status"],
+        [
+            ("TIBER_CLAIM_HOST", "owner"),
+            ("TIBER_CLAIM_SESSION", "owner-session"),
+        ],
+    );
+    assert_success_ref(&status);
+    let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    if release.status.success() {
+        assert_eq!(state["state"], "policy-released");
+        assert_eq!(state["epoch"], 1);
+        assert!(String::from_utf8_lossy(&transfer.stderr).contains("ci_recovery_incident_resolved"));
+    } else {
+        assert_eq!(state["hold_released"], false);
+        assert_eq!(state["epoch"], 2);
+        assert_eq!(state["owner"]["host"], "recipient");
+        assert!(state["policy_release"].is_null());
+        assert!(String::from_utf8_lossy(&release.stderr).contains("ci_recovery_stale_epoch"));
+    }
+}

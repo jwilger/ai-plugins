@@ -218,8 +218,14 @@ Inspect `role`, `epoch`, and the structured `lease` in claim/status/wait:
 
 Resume the recorded diagnosis and selected action from status after handoff or
 takeover; preserve history and evidence. Lease expiry, restart, transfer, and
-successful takeover never release the repository hold. Only exact terminal
-success proof for the recorded replacement CI run releases it. Failed mandatory
+successful takeover never release the repository hold. Ordinary recovery requires exact terminal
+success proof for the recorded replacement CI run. When explicit repository
+policy removes an obsolete hold, the current owner may instead use
+`tiber.ci_recovery.release_by_policy` with current `incident_id`, `epoch`,
+`policy_ref`, and concrete `rationale`, after fenced takeover if expired.
+This records `policy-released` with actor/time and preserves unknown causes;
+it never asserts CI success. Never infer exemptions from workflow names or
+use this operation without an explicit policy authority. Failed mandatory
 coordination calls remain hard stops; restore shared coordination before work.
 
 ## Commands

@@ -912,6 +912,7 @@ fn mcp_stdio_exposes_strict_structured_ci_recovery_tools() {
         "tiber.ci_recovery.choose_action",
         "tiber.ci_recovery.record_replacement",
         "tiber.ci_recovery.resolve",
+        "tiber.ci_recovery.release_by_policy",
     ] {
         let tool = listed_tools
             .iter()
@@ -999,6 +1000,59 @@ fn mcp_stdio_exposes_strict_structured_ci_recovery_tools() {
         status_tool["outputSchema"]["properties"]["release_proof"]["anyOf"][1]
             ["additionalProperties"],
         false
+    );
+
+    let release_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.ci_recovery.release_by_policy")
+        .unwrap();
+    assert_eq!(
+        release_tool["inputSchema"]["required"],
+        serde_json::json!(["incident_id", "epoch", "policy_ref", "rationale"])
+    );
+    assert!(release_tool["outputSchema"]["properties"]["policy_release"].is_object());
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"tiber.ci_recovery.release_by_policy","arguments":{"incident_id":"ci-123","epoch":1,"policy_ref":"docs/workflow.md","rationale":"Historical hold removed by policy","actor":"spoof"}}}"#,
+    );
+    let invalid = read_json_message(&mut stdout);
+    assert!(invalid["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("mcp_argument_unexpected name=actor"));
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"tiber.ci_recovery.release_by_policy","arguments":{"incident_id":"ci-123","epoch":1,"policy_ref":"docs/workflow.md","rationale":"Historical hold removed by policy"}}}"#,
+    );
+    let released = read_json_message(&mut stdout);
+    let released = &released["result"]["structuredContent"];
+    assert_eq!(released["state"], "policy-released");
+    assert_eq!(released["hold_released"], true);
+    assert!(released["release_proof"].is_null());
+    assert_eq!(
+        released["policy_release"]["actor"],
+        claim["result"]["structuredContent"]["participant"]
+    );
+    assert!(released["policy_release"]["released_at"].as_u64().is_some());
+
+    write_message(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"tiber.ci_recovery.wait","arguments":{"incident_id":"ci-123","epoch":1,"timeout_seconds":1}}}"#,
+    );
+    let waited = read_json_message(&mut stdout);
+    assert_eq!(
+        waited["result"]["structuredContent"]["wake_reason"],
+        "policy-released"
+    );
+    let wait_tool = listed_tools
+        .iter()
+        .find(|tool| tool["name"] == "tiber.ci_recovery.wait")
+        .unwrap();
+    assert!(
+        wait_tool["outputSchema"]["properties"]["wake_reason"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("policy-released"))
     );
 
     drop(stdin);

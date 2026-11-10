@@ -190,6 +190,8 @@ enum CiRecoveryCommand {
     RecordReplacement(CiRecoveryReplacementArgs),
     /// Record terminal-success proof and release the hold.
     Resolve(CiRecoveryResolveArgs),
+    /// Release an obsolete hold under explicit policy without claiming CI success.
+    ReleaseByPolicy(CiRecoveryPolicyReleaseArgs),
     /// Read the authoritative repository-wide recovery state.
     Status,
 }
@@ -310,6 +312,18 @@ struct CiRecoveryReplacementArgs {
     sha: String,
     #[arg(long)]
     status: String,
+}
+
+#[derive(Args)]
+struct CiRecoveryPolicyReleaseArgs {
+    #[arg(long)]
+    incident_id: String,
+    #[arg(long)]
+    epoch: u64,
+    #[arg(long)]
+    policy_ref: String,
+    #[arg(long)]
+    rationale: String,
 }
 
 #[derive(Args)]
@@ -1051,6 +1065,17 @@ fn run(cli: Cli) -> Result<(), tiber_git::Error> {
                 )?;
                 print_ci_recovery_json(&status)
             }
+            CiRecoveryCommand::ReleaseByPolicy(CiRecoveryPolicyReleaseArgs {
+                incident_id,
+                epoch,
+                policy_ref,
+                rationale,
+            }) => print_ci_recovery_json(&tiber_git::release_ci_recovery_by_policy(
+                &incident_id,
+                epoch,
+                &policy_ref,
+                &rationale,
+            )?),
             CiRecoveryCommand::Status => {
                 let status = tiber_git::ci_recovery_status()?;
                 print_ci_recovery_json(&status)
