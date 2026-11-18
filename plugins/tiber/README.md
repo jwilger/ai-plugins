@@ -32,7 +32,7 @@ On first installed portable MCP startup, Tiber configures one shared user-level
 Codex transport that forwards `SSH_AUTH_SOCK` by name. The installer can also
 bootstrap it immediately. A stable dispatcher in `PLUGIN_DATA` resolves the
 currently enabled installed Tiber launcher on each launch, so future Tiber
-upgrades require no installer rerun, even when Codex removes the old cache. Existing task history and Git refs require no migration.
+launcher upgrades work even when Codex removes the old cache. Existing task history and Git refs require no migration.
 
 ### SSH authentication and existing installations
 
@@ -58,6 +58,14 @@ only MCP inside an already running Codex process cannot refresh its parent
 environment. No private keys or session socket paths are stored by this repair.
 HTTPS and unsigned repositories can run with `SSH_AUTH_SOCK` unset; repositories
 that require SSH authentication or signing still need usable credentials.
+
+The shared installer refreshes the dispatcher in `PLUGIN_DATA` during upgrade.
+If you update only the plugin cache from 1.4.0 or earlier to 1.4.1, refresh the
+existing dispatcher once to pick up the marketplace-scoped lookup, then restart Codex:
+
+```shell
+python3 "${CODEX_HOME:-$HOME/.codex}/plugins/cache/ai-plugins/tiber/1.4.1/scripts/configure-codex-mcp.py" --apply
+```
 
 For an already installed current release, run
 `python3 /absolute/installed/tiber/scripts/configure-codex-mcp.py` to check, or
@@ -96,9 +104,7 @@ hardcode a session socket in the MCP configuration.
 
 Legacy plugin-only launchers can still read `signing-agent-socket` for
 compatibility, but that snapshot cannot follow socket changes. Current-session
-mode ignores it, including when the parent agent is unset. After the one-time
-stable-dispatcher bootstrap, Tiber upgrades need no installer repair. Agent
-rotation still requires a full new Codex process from the current agent shell.
+mode ignores it, including when the parent agent is unset. Agent rotation still requires a full new Codex process from the current agent shell.
 `tiber.ssh_authentication_failed source_redacted=true` reports a known SSH public-key
 rejection with safe repair guidance; it does not expose Git stderr or remotes.
 For a PATH command, preview `tiber install-bin --target-dir ~/.local/bin --dry-run`.

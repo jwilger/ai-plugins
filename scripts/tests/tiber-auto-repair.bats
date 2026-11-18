@@ -4,11 +4,13 @@ setup() {
   export CODEX_HOME="$BATS_TEST_TMPDIR/codex"
   export PLUGIN_DATA="$BATS_TEST_TMPDIR/data"
   export INVENTORY="$BATS_TEST_TMPDIR/inventory.json"
+  export INVENTORY_ARGS="$BATS_TEST_TMPDIR/inventory-args"
   export INVENTORY_AGENT="$BATS_TEST_TMPDIR/inventory-agent"
   mkdir -p "$PLUGIN_DATA" "$BATS_TEST_TMPDIR/bin"
   cat > "$BATS_TEST_TMPDIR/bin/codex" <<'SH'
 #!/bin/sh
 printf '%s' "${SSH_AUTH_SOCK:-absent}" > "$INVENTORY_AGENT"
+printf '%s\n' "$@" >> "$INVENTORY_ARGS"
 cat "$INVENTORY"
 SH
   chmod +x "$BATS_TEST_TMPDIR/bin/codex"
@@ -28,7 +30,8 @@ repair() { python3 "$INSTALLED/scripts/configure-codex-mcp.py" --plugin-data "$P
 launch() {
   python3 - "$CODEX_HOME/config.toml" <<'PY'
 import os,sys,tomllib
-s=tomllib.load(open(sys.argv[1],'rb'))['mcp_servers']['tiber']
+with open(sys.argv[1],'rb') as config:
+    s=tomllib.load(config)['mcp_servers']['tiber']
 env=dict(os.environ,**s['env'])
 os.execve(s['command'],[s['command'],*s['args']],env)
 PY
@@ -51,12 +54,20 @@ PY
   [[ "$output" == *mcp_configuration_current* ]]
   cmp "$CODEX_HOME/config.toml" "$BATS_TEST_TMPDIR/original"
 }
+@test "installed dispatcher requests only the ai-plugins marketplace inventory" {
+  repair
+  : > "$INVENTORY_ARGS"
+  run launch
+  [ "$status" -eq 0 ]
+  diff -u <(printf '%s\n' -C /tmp plugin list --marketplace ai-plugins --json) "$INVENTORY_ARGS"
+}
 @test "dispatcher refuses disabled plugins without exposing source and allows absent agent" {
   run repair
   [ "$status" -eq 0 ]
   run env -u SSH_AUTH_SOCK bash -c 'python3 - "$CODEX_HOME/config.toml" <<'\''PY'\''
 import os,sys,tomllib
-s=tomllib.load(open(sys.argv[1],"rb"))["mcp_servers"]["tiber"]
+with open(sys.argv[1],"rb") as config:
+    s=tomllib.load(config)["mcp_servers"]["tiber"]
 os.execve(s["command"],[s["command"],*s["args"]],dict(os.environ,**s["env"]))
 PY'
   [ "$status" -eq 0 ]

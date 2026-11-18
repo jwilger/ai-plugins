@@ -14,7 +14,7 @@ def installed_root(codex, home):
     environment = dict(os.environ)
     environment.pop('SSH_AUTH_SOCK', None)
     environment['CODEX_HOME'] = str(home)
-    result = subprocess.run([codex, '-C', '/tmp', 'plugin', 'list', '--json'],
+    result = subprocess.run([codex, '-C', '/tmp', 'plugin', 'list', '--marketplace', 'ai-plugins', '--json'],
                             cwd='/tmp', env=environment, capture_output=True, text=True, timeout=30)
     if result.returncode:
         raise ValueError('inventory_unavailable')
