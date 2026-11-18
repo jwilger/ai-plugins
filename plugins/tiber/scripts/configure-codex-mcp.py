@@ -58,17 +58,62 @@ def configuration(original, root, data, codex, home):
     return result
 
 
+def replace_dispatcher(dispatcher, dispatcher_source):
+    with tempfile.NamedTemporaryFile(dir=dispatcher.parent, prefix='.tiber-dispatch-', delete=False) as handle:
+        dispatcher_pending = Path(handle.name)
+        try:
+            handle.write(dispatcher_source)
+            handle.flush()
+            os.fchmod(handle.fileno(), 0o700)
+            os.fsync(handle.fileno())
+            os.replace(dispatcher_pending, dispatcher)
+        finally:
+            dispatcher_pending.unlink(missing_ok=True)
+
+
+def refresh_dispatcher(root, home):
+    # Refresh only the executable owned by the active installed transport.
+    target = home / 'config.toml'
+    if not target.is_file():
+        return
+    with (home / '.tiber-mcp-config.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        server = tomllib.loads(target.read_text()).get('mcp_servers', {}).get('tiber', {})
+        env = server.get('env', {})
+        data = Path(os.environ.get('PLUGIN_DATA', env.get('PLUGIN_DATA', '')))
+        dispatcher = data / 'mcp-dispatch.py'
+        if not data.is_absolute() or dispatcher.is_symlink() or not dispatcher.is_file():
+            return
+        source = (root / 'scripts/mcp-dispatch.py').read_bytes()
+        if dispatcher.read_bytes() == source:
+            return
+        if (server.get('command') != str(dispatcher) or env.get('PLUGIN_DATA') != str(data)
+                or env.get('CODEX_HOME') != str(home) or env.get('TIBER_AGENT_FORWARDING') != 'current-session'):
+            return
+        dispatch = importlib.import_module('mcp-dispatch')
+        if dispatch.installed_root(env['TIBER_CODEX_EXECUTABLE'], home) != root:
+            return
+        if not dispatcher.is_symlink() and dispatcher.is_file() and dispatcher.read_bytes() != source:
+            replace_dispatcher(dispatcher, source)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--apply', action='store_true', help='update the shared user configuration')
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument('--refresh-dispatcher', action='store_true', help='refresh only the existing Tiber transport executable')
+    actions.add_argument('--apply', action='store_true', help='update the shared user configuration')
     parser.add_argument('--plugin-data', type=Path, help='absolute Tiber PLUGIN_DATA from Codex inventory')
     args = parser.parse_args()
     home = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex')))
     root = Path(__file__).resolve().parents[1]
     version = json.loads((root / 'plugin.json').read_text())['version']
-    expected = home / 'plugins/cache/ai-plugins/tiber' / version
+    cache = home / 'plugins/cache/ai-plugins/tiber'
+    expected = cache / ('local' if args.refresh_dispatcher and root.name == 'local' else version)
     if not home.is_absolute() or root != expected.resolve() or not (root / 'bin/tiber').is_file():
         fail('untrusted_launcher_location', 'run_this_helper_from_the_installed_Tiber_plugin_cache')
+    if args.refresh_dispatcher:
+        refresh_dispatcher(root, home)
+        return 0
     codex = shutil.which('codex')
     if not codex or not Path(codex).is_absolute():
         fail('codex_executable_unavailable', 'run_from_a_shell_with_a_trusted_absolute_codex_executable')
@@ -114,16 +159,7 @@ def main():
         data.mkdir(parents=True, exist_ok=True)
         dispatcher_changed = not dispatcher.is_file() or dispatcher.read_bytes() != dispatcher_source
         if dispatcher_changed:
-            with tempfile.NamedTemporaryFile(dir=data, prefix='.tiber-dispatch-', delete=False) as handle:
-                dispatcher_pending = Path(handle.name)
-                try:
-                    handle.write(dispatcher_source)
-                    handle.flush()
-                    os.fchmod(handle.fileno(), 0o700)
-                    os.fsync(handle.fileno())
-                    os.replace(dispatcher_pending, dispatcher)
-                finally:
-                    dispatcher_pending.unlink(missing_ok=True)
+            replace_dispatcher(dispatcher, dispatcher_source)
         if original != updated:
             pending = None
             try:

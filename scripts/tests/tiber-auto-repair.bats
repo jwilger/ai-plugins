@@ -147,3 +147,29 @@ PY'
   [[ "$output" != *Traceback* ]]
   [[ "$output" != *private-source-marker* ]]
 }
+@test "managed startup refreshes a stale dispatcher through a plugin-only upgrade" {
+  repair
+  # Codex may discard the comment markers when serializing user config.
+  sed -i '/^# .*ai-plugins:tiber/d' "$CODEX_HOME/config.toml"
+  cp "$CODEX_HOME/config.toml" "$BATS_TEST_TMPDIR/original"
+  printf '\n# previous release\n' >> "$PLUGIN_DATA/mcp-dispatch.py"
+  install_version 1.3.0
+  cp "$ROOT/plugins/tiber/bin/tiber" "$INSTALLED/bin/tiber"
+  mkdir "$INSTALLED/lib"
+  cp "$ROOT/plugins/tiber/lib/installed-binary.sh" "$INSTALLED/lib/"
+  binary_dir="$PLUGIN_DATA/ai-plugins/tiber/1.3.0/$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+  mkdir -p "$binary_dir"
+  printf '1.3.0\n' > "$binary_dir/.plugin-version"
+  printf '#!/bin/sh\nprintf "native-output\\n"\n' > "$binary_dir/tiber"
+  chmod +x "$binary_dir/tiber"
+  : > "$INVENTORY_ARGS"
+  run launch
+  [ "$status" -eq 0 ]
+  [ "$output" = native-output ]
+  cmp "$PLUGIN_DATA/mcp-dispatch.py" "$INSTALLED/scripts/mcp-dispatch.py"
+  cmp "$CODEX_HOME/config.toml" "$BATS_TEST_TMPDIR/original"
+  : > "$INVENTORY_ARGS"
+  run launch
+  [ "$status" -eq 0 ]
+  diff -u <(printf '%s\n' -C /tmp plugin list --marketplace ai-plugins --json) "$INVENTORY_ARGS"
+}

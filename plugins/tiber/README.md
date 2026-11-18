@@ -59,13 +59,14 @@ environment. No private keys or session socket paths are stored by this repair.
 HTTPS and unsigned repositories can run with `SSH_AUTH_SOCK` unset; repositories
 that require SSH authentication or signing still need usable credentials.
 
-The shared installer refreshes the dispatcher in `PLUGIN_DATA` during upgrade.
-If you update only the plugin cache from 1.4.0 or earlier to 1.4.1, refresh the
-existing dispatcher once to pick up the marketplace-scoped lookup, then restart Codex:
-
-```shell
-python3 "${CODEX_HOME:-$HOME/.codex}/plugins/cache/ai-plugins/tiber/1.4.1/scripts/configure-codex-mcp.py" --apply
-```
+After a plugin-only update, the first successful managed MCP launch refreshes
+the dispatcher in `PLUGIN_DATA` if its contents changed. Subsequent starts use
+that copy directly. This works even if Codex has rewritten the comments in
+`config.toml`. If a pre-1.4.1 dispatcher is already stuck contacting the remote
+catalog, it must reach the launcher once before this automatic
+update can take effect. To recover a stuck installation offline, run the
+installed 1.5.0 or newer helper with `--refresh-dispatcher`. It reads the
+existing registration and updates only the dispatcher.
 
 For an already installed current release, run
 `python3 /absolute/installed/tiber/scripts/configure-codex-mcp.py` to check, or
