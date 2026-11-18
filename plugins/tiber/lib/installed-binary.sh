@@ -86,7 +86,7 @@ tiber_exec_installed_binary() {
   }
   binary_path="$data_home/ai-plugins/tiber/$version/$host/$binary_name"
   if ! tiber_installation_matches_plugin "$plugin_root"; then
-    "$plugin_root/scripts/install-tiber-binaries.sh" --auto || {
+    "$plugin_root/scripts/install-tiber-binaries.sh" --auto >&2 || {
       printf '%s\n' "tiber.binary_repair_failed binary=$binary_name version=$version" >&2
       exit 1
     }

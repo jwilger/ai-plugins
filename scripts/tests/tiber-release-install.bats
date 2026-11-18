@@ -87,15 +87,17 @@ install_release() {
   printf '%s\n' stale >"$installation/.plugin-version"
   : >"$CURL_LOG"
 
-  run env \
+  run --separate-stderr env \
     PATH="$FAKE_BIN:$PATH" \
     CURL_LOG="$CURL_LOG" \
     RELEASE_DIR="$RELEASE_DIR" \
     ARCHIVE="$ARCHIVE" \
     XDG_DATA_HOME="$TMPROOT/xdg-data" \
-    "$ROOT/plugins/tiber/bin/tiber" --help
+    "$ROOT/plugins/tiber/bin/tiber" mcp stdio
 
   [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *tiber.binaries_installed* ]]
   [ "$(<"$installation/.plugin-version")" = "$VERSION" ]
   [ "$(wc -l <"$CURL_LOG")" -eq 2 ]
   : >"$CURL_LOG"
