@@ -7,7 +7,7 @@ setup() {
 #!/bin/sh
 case "$*" in
   'plugin marketplace list --json') printf '%s\n' '{"marketplaces":[]}' ;;
-  'plugin list --json'|'-C /tmp plugin list --json')
+  'plugin list --json'|'-C /tmp plugin list --marketplace ai-plugins --json')
     if [ "${MOCK_INSTALLED:-}" = 1 ]; then
       printf '%s\n' '{"installed":[{"pluginId":"development-system@ai-plugins","name":"development-system","version":"10.0.0"},{"pluginId":"tiber@ai-plugins","name":"tiber","version":"1.0.0","installed":true,"enabled":true}],"available":[]}'
     else
