@@ -42,10 +42,13 @@ There is no CLI fallback for this skill. If the needed Tiber MCP tools are
 unavailable, stop and explain that Tiber MCP tools are required for backlog
 capture from chat. Do not pass user text through shell interpolation, command
 substitution, `eval`, a generated shell script, or a wildcard Bash permission.
-If a structured write fails because Codex sandboxing blocks Tiber's Git write,
-sync, signing, or push operations, call the structured Tiber MCP sandbox setup
-tool, request only the narrow case-by-case approval it identifies, and retry
-the same structured MCP operation.
+If a structured write returns `tiber.publication_failed`, use the reported
+phase and cause and call `tiber.sync` to reconcile the saved transaction.
+Repeat a staged write only if sync reports that it was discarded. If the
+error says the requested change was not staged, retry it after sync resolves
+the earlier transaction.
+`tiber.codex_sandbox_setup` provides read-only signing and recovery guidance.
+Codex shell approvals do not change Tiber MCP permissions.
 
 ## Write for the whole product team
 
@@ -122,9 +125,8 @@ expected stream-version mismatch is a confirmed optimistic-concurrency conflict
 that Tiber may refresh and retry with the same invocation identity. An ambiguous
 publication outcome blocks all further mutations until the structured Tiber sync
 tool reconciles that exact pending invocation and confirms or rejects its durable
-publication. If Codex sandboxing caused the failure, use the structured sandbox
-setup tool before retrying the exact operation; do not ask the user to run an
-equivalent CLI command manually.
+publication. Follow the error's retry guidance after reconciliation. Use the
+read-only sandbox setup preview for Codex configuration guidance when relevant.
 
 If creation reports `tiber.backlog_capacity_exceeded`, no task was created.
 Do not retry, increase or bypass the configured limit, or retain the candidate

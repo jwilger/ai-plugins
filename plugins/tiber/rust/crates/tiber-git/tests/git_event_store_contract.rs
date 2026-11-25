@@ -11,7 +11,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::TempDir;
-use tiber_git::git_event_store::{GitEventStore, SynchronizeOutcome};
+use tiber_git::git_event_store::{
+    GitEventStore, GitEventStoreOpenError, PublicationCause, PublicationFailure, PublicationPhase,
+    SynchronizeOutcome,
+};
 
 struct TempGitStore {
     _dir: TempDir,
@@ -446,6 +449,92 @@ async fn synchronize_recognizes_a_candidate_published_after_a_lost_response() {
     assert_eq!(
         fixture.inner.synchronize().await.unwrap(),
         SynchronizeOutcome::PublishedPending
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_remote_confirmation_preserves_the_signed_candidate_until_sync() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = make_store();
+    let upload_pack = fixture.repository.join("test-upload-pack");
+    fs::write(
+        &upload_pack,
+        "#!/bin/sh\nif [ -f \"$1/deny-confirmation\" ]; then\n  echo 'private confirmation details' >&2\n  exit 1\nfi\nexec git-upload-pack \"$@\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&upload_pack, fs::Permissions::from_mode(0o755)).unwrap();
+    run(
+        &fixture.repository,
+        [
+            "config",
+            "remote.origin.uploadpack",
+            upload_pack.to_str().unwrap(),
+        ],
+    );
+    let hook = fixture.origin.join("hooks/post-receive");
+    fs::write(&hook, "#!/bin/sh\n: > deny-confirmation\n").unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(fixture
+        .inner
+        .append_events(writes("tiber:unconfirmed"))
+        .await
+        .is_err());
+    let marker_path = pending_marker(&fixture.repository);
+    let pending = fs::read_to_string(&marker_path).unwrap();
+    let marker: serde_json::Value = serde_json::from_str(&pending).unwrap();
+    let candidate = marker["candidate"].as_str().unwrap();
+    let remote_head = git_output(&fixture.origin, ["rev-parse", "refs/heads/tiber"]);
+    assert_eq!(remote_head.trim(), candidate);
+    assert!(
+        git_output(&fixture.repository, ["cat-file", "commit", candidate])
+            .contains("gpgsig -----BEGIN SSH SIGNATURE-----")
+    );
+    let blocker = fixture.repository.join(".git/tiber/workflow-blocker.json");
+    let stored = fs::read_to_string(&blocker).unwrap();
+    let typed: serde_json::Value = serde_json::from_str(&stored).unwrap();
+    assert_eq!(
+        typed["publication"],
+        serde_json::json!({"phase": "confirm_remote", "cause": "unknown"})
+    );
+    assert!(!stored.contains("private confirmation details"));
+
+    assert!(matches!(
+        fixture.inner.synchronize().await,
+        Err(GitEventStoreOpenError::Publication(PublicationFailure {
+            phase: PublicationPhase::ConfirmRemote,
+            cause: PublicationCause::Unknown,
+        }))
+    ));
+    assert_eq!(fs::read_to_string(&marker_path).unwrap(), pending);
+    fs::remove_file(fixture.origin.join("deny-confirmation")).unwrap();
+    assert_eq!(
+        fixture.inner.synchronize().await.unwrap(),
+        SynchronizeOutcome::PublishedPending
+    );
+    assert_eq!(
+        fixture.inner.synchronize().await.unwrap(),
+        SynchronizeOutcome::Current
+    );
+    assert!(!marker_path.exists());
+    assert!(!blocker.exists());
+    assert_eq!(
+        git_output(&fixture.origin, ["rev-parse", "refs/heads/tiber"]),
+        remote_head
+    );
+    assert_eq!(
+        fixture
+            .inner
+            .read_events::<ContractTestEvent>(
+                EventFilter::all(),
+                EventPage::first(BatchSize::new(10))
+            )
+            .await
+            .unwrap()
+            .len(),
+        1
     );
 }
 

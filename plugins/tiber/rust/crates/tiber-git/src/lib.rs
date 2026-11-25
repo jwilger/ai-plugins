@@ -1,9 +1,14 @@
-use crate::git_event_store::{GitEventStore, SynchronizeOutcome};
+use crate::git_event_store::{
+    GitEventStore, GitEventStoreOpenError, PublicationFailure, SynchronizeOutcome,
+    PUBLICATION_REQUIRED_ACTION, RETRY_DISCARDED_ACTION, RETRY_UNSTAGED_ACTION,
+};
 use eventcore::model::{ModelCommandLogic, Modeled, ModeledEvents};
 use eventcore::{
     mapping, ModelCommand, ModelInput, ModelOutput, ModelState, RetryPolicy, StreamIdentity,
 };
-use eventcore_types::{BatchSize, EventFilter, EventPage, EventReader, EventStoreError, StreamId};
+use eventcore_types::{
+    BatchSize, EventFilter, EventPage, EventReader, EventStoreError, Operation, StreamId,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 #[cfg(test)]
@@ -2648,6 +2653,49 @@ fn event_store_error(error: impl EventStoreFailure) -> Error {
     }
 }
 
+fn tiber_store_write_error(
+    error: GitEventStoreOpenError,
+    publication_action: &'static str,
+) -> Error {
+    match error {
+        GitEventStoreOpenError::Publication(failure) => Error::PublicationBlocked {
+            failure,
+            required_action: publication_action,
+        },
+        GitEventStoreOpenError::EarlierPublication(failure) => Error::PublicationBlocked {
+            failure,
+            required_action: RETRY_UNSTAGED_ACTION,
+        },
+        GitEventStoreOpenError::Signing => Error::SigningFailed,
+        error => event_store_error(error),
+    }
+}
+
+fn execute_tiber_command<C: eventcore::CommandLogic + Send + 'static>(
+    store: GitEventStore,
+    command: C,
+) -> Result<Result<eventcore::ExecutionResponse, eventcore::CommandError>, Error> {
+    run_async(async move {
+        let result = eventcore::execute(store.clone(), command, RetryPolicy::new()).await;
+        if matches!(
+            &result,
+            Err(eventcore::CommandError::EventStoreError(
+                EventStoreError::StoreFailure {
+                    operation: Operation::AppendEvents
+                }
+            ))
+        ) {
+            // EventCore's StoreFailure carries only the operation. Each command
+            // owns a fresh store, so this preserves its exact failure across
+            // the adapter boundary without inferring it from shared files.
+            if let Some(error) = store.take_append_failure().await {
+                return Err(tiber_store_write_error(error, RETRY_DISCARDED_ACTION));
+            }
+        }
+        Ok(result)
+    })
+}
+
 /// Preserve deliberately typed domain rejections while ensuring infrastructure
 /// errors cannot disclose remote URLs, local paths, or credential-bearing
 /// process output through a CLI/MCP response.
@@ -3366,7 +3414,7 @@ impl ModelCommandLogic for CreateTask {
 fn execute_create_task(root: &Path, title: TaskTitle) -> Result<TaskPath, Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let task_id = new_task_id();
     let max_queued = repository.project_config()?.backlog.max_queued;
     let intent = CreateTaskIntent {
@@ -3384,7 +3432,7 @@ fn execute_create_task(root: &Path, title: TaskTitle) -> Result<TaskPath, Error>
         .intent(CreateTaskRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => load_tiber_projection(root)?
             .tasks
             .keys()
@@ -3768,7 +3816,7 @@ fn resolve_task_stem_from_projection(
 fn execute_transition_task(root: &Path, task_ref: &str, status: &str) -> Result<TaskPath, Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let stem = resolve_task_stem_from_projection(&projection, task_ref)?;
     let status = parse_status(status)?.to_string();
@@ -3832,7 +3880,7 @@ fn execute_transition_task(root: &Path, task_ref: &str, status: &str) -> Result<
         .intent(TransitionTaskRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(TaskPath { path: stem }),
         Err(eventcore::CommandError::BusinessRuleViolation(error)) => {
             let message = error.to_string();
@@ -3954,7 +4002,7 @@ impl ModelCommandLogic for PrioritizeTask {
 fn execute_prioritize_task(root: &Path, task_ref: &str, before_ref: &str) -> Result<(), Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let intent = PrioritizeTaskIntent {
         task_stem: resolve_task_stem_from_projection(&projection, task_ref)?,
@@ -3969,7 +4017,7 @@ fn execute_prioritize_task(root: &Path, task_ref: &str, before_ref: &str) -> Res
         .intent(PrioritizeTaskRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -4369,7 +4417,7 @@ impl ModelCommandLogic for UnlinkTasks {
 fn execute_link_blocks(root: &Path, from_ref: &str, to_ref: &str) -> Result<(), Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let intent = TaskLinkIntent {
         from_stem: resolve_task_stem_from_projection(&projection, from_ref)?,
@@ -4384,7 +4432,7 @@ fn execute_link_blocks(root: &Path, from_ref: &str, to_ref: &str) -> Result<(), 
         .board(LinkTasksRequestToBoard::apply(request.as_ref()))
         .intent(LinkTasksRequestToIntent::apply(request.as_ref()))
         .build();
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -4397,7 +4445,7 @@ fn execute_link_blocks(root: &Path, from_ref: &str, to_ref: &str) -> Result<(), 
 fn execute_unlink_blocks(root: &Path, from_ref: &str, to_ref: &str) -> Result<(), Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let intent = TaskLinkIntent {
         from_stem: resolve_task_stem_from_projection(&projection, from_ref)?,
@@ -4412,7 +4460,7 @@ fn execute_unlink_blocks(root: &Path, from_ref: &str, to_ref: &str) -> Result<()
         .board(UnlinkTasksRequestToBoard::apply(request.as_ref()))
         .intent(UnlinkTasksRequestToIntent::apply(request.as_ref()))
         .build();
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -4610,7 +4658,7 @@ fn execute_add_subtask(
         .collect::<Result<Vec<_>, Error>>()?;
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let request = AddSubtaskRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -4625,7 +4673,7 @@ fn execute_add_subtask(
         .intent(AddSubtaskRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -4732,7 +4780,7 @@ fn execute_set_subtask_checked(
 ) -> Result<(), Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let request = SetSubtaskCheckedRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -4747,7 +4795,7 @@ fn execute_set_subtask_checked(
         .intent(SetSubtaskCheckedRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -5015,7 +5063,7 @@ fn execute_update_task(root: &Path, task_ref: &str, update: TaskUpdate<'_>) -> R
     let context = update.context.map(parse_task_section_body).transpose()?;
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let request = UpdateTaskRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -5034,7 +5082,7 @@ fn execute_update_task(root: &Path, task_ref: &str, update: TaskUpdate<'_>) -> R
         .intent(UpdateTaskRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -5216,7 +5264,7 @@ fn execute_add_acceptance(root: &Path, task_ref: &str, criterion: &str) -> Resul
     let criterion = parse_nonempty_text(criterion, "acceptance")?;
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let request = AddAcceptanceRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -5230,7 +5278,7 @@ fn execute_add_acceptance(root: &Path, task_ref: &str, criterion: &str) -> Resul
         .intent(AddAcceptanceRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -5332,7 +5380,7 @@ fn execute_set_acceptance_checked(
     let index = parse_one_based_usize(index, "acceptance")? - 1;
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let request = SetAcceptanceCheckedRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -5347,7 +5395,7 @@ fn execute_set_acceptance_checked(
         .intent(SetAcceptanceCheckedRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -5440,7 +5488,7 @@ fn execute_remove_acceptance(root: &Path, task_ref: &str, index: &str) -> Result
     let index = parse_one_based_usize(index, "acceptance")? - 1;
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let request = RemoveAcceptanceRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -5454,7 +5502,7 @@ fn execute_remove_acceptance(root: &Path, task_ref: &str, index: &str) -> Result
         .intent(RemoveAcceptanceRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -5575,7 +5623,7 @@ fn execute_add_task_note(root: &Path, task_ref: &str, note: &str) -> Result<(), 
     let text = parse_nonempty_text(note, "note")?;
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let request = AddTaskNoteRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
@@ -5592,7 +5640,7 @@ fn execute_add_task_note(root: &Path, task_ref: &str, note: &str) -> Result<(), 
         .intent(AddTaskNoteRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -7091,7 +7139,7 @@ fn execute_record_final_review(
     })?;
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let mut requested_scope = scope.to_vec();
     requested_scope.sort();
@@ -7164,7 +7212,7 @@ fn execute_record_final_review(
         .intent(RecordFinalReviewRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -7453,7 +7501,7 @@ fn evolve_task_board_state(
 fn execute_validate_task_board(root: &Path) -> Result<Vec<ValidationMessage>, Error> {
     let repository = GitRepository::at(root);
     let _lock = repository.acquire_lock()?;
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let request = ValidateTaskBoardRequest::model_builder()
         .board(TiberBoardStream(stream_id(BOARD_STREAM)?))
         .build();
@@ -7461,7 +7509,7 @@ fn execute_validate_task_board(root: &Path) -> Result<Vec<ValidationMessage>, Er
         .board(ValidateTaskBoardRequestToBoard::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(Vec::new()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -7716,7 +7764,7 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
     if requested.is_empty() {
         return Ok(Vec::new());
     }
-    execute_initialize_tiber_repository(root)?;
+    ensure_tiber_repository_initialized(root)?;
     let projection = load_tiber_projection(root)?;
     let mut stems = requested
         .iter()
@@ -7781,7 +7829,7 @@ fn execute_close_tasks_from_commit_trailers(root: &Path) -> Result<Vec<String>, 
         ))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(stems),
         Err(eventcore::CommandError::BusinessRuleViolation(error)) => {
             let message = error.to_string();
@@ -7836,7 +7884,7 @@ fn execute_initialize_tiber_repository(root: &Path) -> Result<(), Error> {
         ))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         // Initialization is idempotent. A retry may reload a transaction that
         // was durably published before this caller observed its outcome.
@@ -7858,6 +7906,16 @@ fn execute_initialize_tiber_repository(root: &Path) -> Result<(), Error> {
     }
 }
 
+fn ensure_tiber_repository_initialized(root: &Path) -> Result<(), Error> {
+    execute_initialize_tiber_repository(root).map_err(|error| match error {
+        Error::PublicationBlocked { failure, .. } => Error::PublicationBlocked {
+            failure,
+            required_action: RETRY_UNSTAGED_ACTION,
+        },
+        error => error,
+    })
+}
+
 fn execute_claim_ci_recovery(root: &Path, intent: ClaimCiRecoveryIntent) -> Result<(), Error> {
     let request = ClaimCiRecoveryRequest::model_builder()
         .stream(CiRecoveryStream(stream_id(CI_RECOVERY_STREAM)?))
@@ -7868,8 +7926,7 @@ fn execute_claim_ci_recovery(root: &Path, intent: ClaimCiRecoveryIntent) -> Resu
         .intent(ClaimCiRecoveryRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -7890,8 +7947,7 @@ fn execute_join_ci_recovery(root: &Path, intent: JoinCiRecoveryIntent) -> Result
         .intent(JoinCiRecoveryRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -7915,8 +7971,7 @@ fn execute_transfer_ci_recovery(
         .intent(TransferCiRecoveryRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -7940,8 +7995,7 @@ fn execute_takeover_ci_recovery(
         .intent(TakeOverCiRecoveryRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -7966,8 +8020,7 @@ fn execute_assign_ci_recovery_work(
         .intent(AssignCiRecoveryWorkRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => load_tiber_projection(root)?
             .ci_recovery
@@ -8005,8 +8058,7 @@ fn execute_report_ci_recovery_work(
         .intent(ReportCiRecoveryWorkRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -8030,8 +8082,7 @@ fn execute_renew_ci_recovery_lease(
         .intent(RenewCiRecoveryLeaseRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -8059,8 +8110,7 @@ fn execute_release_ci_recovery_by_policy(
         ))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -8088,8 +8138,7 @@ fn execute_record_ci_recovery_diagnosis(
         ))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    let outcome =
-        run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await });
+    let outcome = execute_tiber_command(store, command)?;
     match outcome {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
@@ -8117,7 +8166,7 @@ fn execute_select_ci_recovery_action(
         ))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -8144,7 +8193,7 @@ fn execute_record_ci_recovery_replacement(
         ))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -8164,7 +8213,7 @@ fn execute_resolve_ci_recovery(root: &Path, intent: ResolveCiRecoveryIntent) -> 
         .intent(ResolveCiRecoveryRequestToIntent::apply(request.as_ref()))
         .build();
     let store = GitEventStore::open(root).map_err(event_store_error)?;
-    match run_async(async move { eventcore::execute(store, command, RetryPolicy::new()).await }) {
+    match execute_tiber_command(store, command)? {
         Ok(_) => Ok(()),
         Err(eventcore::CommandError::ConcurrencyError(_))
         | Err(eventcore::CommandError::EventStoreError(EventStoreError::VersionConflict {
@@ -8194,6 +8243,7 @@ struct WorkflowBlocker {
 pub struct WorkflowBlockerData {
     pub error_code: &'static str,
     pub required_action: &'static str,
+    pub publication: Option<PublicationFailure>,
 }
 
 pub fn with_mcp_ci_recovery_session<T>(session: &str, operation: impl FnOnce() -> T) -> T {
@@ -8284,6 +8334,7 @@ pub fn claim_ci_recovery(input: CiRecoveryTrigger) -> Result<CiRecoveryClaim, Er
             clear_workflow_blocker(&repo, "ci_claim_failed")?;
             Ok(claim)
         }
+        Err(source @ Error::PublicationBlocked { .. }) => Err(source),
         Err(source) => {
             record_workflow_blocker(
                 &repo,
@@ -9952,9 +10003,7 @@ fn required_ci_recovery_text(field: &str, value: &str) -> Result<String, Error> 
 }
 
 pub fn sync_repository() -> Result<(), Error> {
-    let repo = GitRepository::discover()?;
-    repo.sync_repository()?;
-    clear_workflow_blocker(&repo, "publication_failed")
+    GitRepository::discover()?.sync_repository()
 }
 
 /// Persist a fail-closed operational hold when the authoritative Git
@@ -10210,6 +10259,11 @@ pub struct TaskUpdate<'a> {
 #[derive(Debug)]
 pub enum Error {
     SshAuthentication,
+    SigningFailed,
+    PublicationBlocked {
+        failure: PublicationFailure,
+        required_action: &'static str,
+    },
     CommandFailed {
         program: String,
         args: Vec<String>,
@@ -10236,6 +10290,17 @@ impl fmt::Display for Error {
         match self {
             Self::SshAuthentication => formatter.write_str(
                 "tiber.ssh_authentication_failed source_redacted=true remediation=\"verify SSH agent credentials and SSH_AUTH_SOCK forwarding; rerun the installed configure-codex-mcp.py --apply for Codex; restart Codex from the current agent shell\"",
+            ),
+            Self::SigningFailed => formatter.write_str(
+                "tiber.signing_failed source_redacted=true remediation=\"check Git signing configuration and, for SSH signing, SSH_AUTH_SOCK in the running Tiber process; restart Codex if its agent environment is stale\"",
+            ),
+            Self::PublicationBlocked {
+                failure,
+                required_action,
+            } => write!(
+                formatter,
+                "tiber.publication_failed workflow_blocked=true required_action=\"{required_action}\" publication={} source_redacted=true",
+                serde_json::to_string(failure).map_err(|_| fmt::Error)?
             ),
             Self::CommandFailed {
                 program,
@@ -10277,6 +10342,14 @@ impl std::error::Error for Error {}
 impl Error {
     pub fn workflow_blocker_data(&self) -> Option<WorkflowBlockerData> {
         match self {
+            Self::PublicationBlocked {
+                failure,
+                required_action,
+            } => Some(WorkflowBlockerData {
+                error_code: "tiber.publication_failed",
+                required_action,
+                publication: Some(*failure),
+            }),
             Self::WorkflowBlocked {
                 code,
                 required_action,
@@ -10284,6 +10357,7 @@ impl Error {
             } => Some(WorkflowBlockerData {
                 error_code: code,
                 required_action,
+                publication: None,
             }),
             _ => None,
         }
@@ -10298,6 +10372,7 @@ impl Error {
     fn sanitized_sync_source(&self) -> String {
         match self {
             Self::SshAuthentication => self.to_string(),
+            Self::SigningFailed | Self::PublicationBlocked { .. } => self.to_string(),
             Self::CommandFailed {
                 program,
                 status,
@@ -10481,9 +10556,8 @@ impl GitRepository {
     }
 
     fn sync_repository(&self) -> Result<(), Error> {
-        let store = GitEventStore::open(&self.root).map_err(event_store_error)?;
-        let outcome: SynchronizeOutcome =
-            run_async(async move { store.synchronize().await }).map_err(event_store_error)?;
+        let outcome = git_event_store::synchronize_repository(&self.root)
+            .map_err(|error| tiber_store_write_error(error, PUBLICATION_REQUIRED_ACTION))?;
         match outcome {
             SynchronizeOutcome::Current | SynchronizeOutcome::PublishedPending => Ok(()),
             SynchronizeOutcome::DiscardedUnpublished => Err(Error::Parse(

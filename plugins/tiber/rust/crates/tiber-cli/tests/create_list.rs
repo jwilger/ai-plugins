@@ -352,7 +352,11 @@ fn rejected_publication_is_blocking_and_sync_can_publish_the_pending_transaction
         "create should surface sync failure"
     );
     let stderr = String::from_utf8(create.stderr).expect("stderr should be utf8");
-    assert!(stderr.contains("event_store_failed"), "{stderr}");
+    assert!(stderr.contains("tiber.publication_failed"), "{stderr}");
+    assert!(
+        stderr.contains(r#"publication={"phase":"push","cause":"remote_rejected"}"#),
+        "{stderr}"
+    );
     assert!(
         !stderr.contains("secret@example.invalid"),
         "stderr should not leak token-bearing remote details: {stderr}"

@@ -7,6 +7,110 @@ use std::process::{Command, Stdio};
 use support::{assert_success, task_stem, TempRepo};
 
 #[test]
+fn mcp_reports_rejected_publication_and_recovers_without_reissuing_the_change() {
+    let (origin, hook) = TempRepo::bare_with_rejecting_hook();
+    let rejection = fs::read(&hook).unwrap();
+    let hook_permissions = fs::metadata(&hook).unwrap().permissions();
+    let repo = TempRepo::initialized();
+    repo.git(["remote", "add", "origin", origin.path().to_str().unwrap()]);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_tiber"))
+        .args(["mcp", "stdio"])
+        .current_dir(repo.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn Tiber MCP");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut call = |id, name, arguments| {
+        write_message(
+            &mut stdin,
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments}
+            })
+            .to_string(),
+        );
+        read_json_message(&mut stdout)
+    };
+    let initial_create = call(
+        1,
+        "tiber.create",
+        serde_json::json!({"title": "Pending MCP task"}),
+    );
+    assert_eq!(
+        initial_create["error"]["data"]["error_code"],
+        "tiber.publication_failed"
+    );
+    assert!(initial_create["error"]["data"]["required_action"]
+        .as_str()
+        .unwrap()
+        .contains("the requested change was not staged"));
+    fs::remove_file(&hook).unwrap();
+    let initialized = call(2, "tiber.sync", serde_json::json!({}));
+    assert!(initialized.get("result").is_some(), "{initialized}");
+    let tasks = call(3, "tiber.list", serde_json::json!({}));
+    assert!(tasks.get("result").is_some(), "{tasks}");
+    assert!(!tasks.to_string().contains("Pending MCP task"));
+
+    fs::write(&hook, rejection).unwrap();
+    fs::set_permissions(&hook, hook_permissions).unwrap();
+    let create = call(
+        4,
+        "tiber.create",
+        serde_json::json!({"title": "Pending MCP task"}),
+    );
+    let pending_path = repo.path().join(".git/tiber/pending-publication");
+    let pending = fs::read_to_string(&pending_path).unwrap();
+    let rejected_sync = call(5, "tiber.sync", serde_json::json!({}));
+    let blocked_create = call(
+        6,
+        "tiber.create",
+        serde_json::json!({"title": "Second MCP task"}),
+    );
+    assert_eq!(fs::read_to_string(&pending_path).unwrap(), pending);
+    assert!(create["error"]["data"]["required_action"]
+        .as_str()
+        .unwrap()
+        .contains("only if sync reports it was discarded"));
+    assert!(blocked_create["error"]["data"]["required_action"]
+        .as_str()
+        .unwrap()
+        .contains("the requested change was not staged"));
+    for response in [create, rejected_sync, blocked_create] {
+        let data = &response["error"]["data"];
+        assert_eq!(data["error_code"], "tiber.publication_failed");
+        assert_eq!(
+            data["publication"],
+            serde_json::json!({"phase": "push", "cause": "remote_rejected"})
+        );
+        let wire = response.to_string();
+        assert!(!wire.contains("secret@example.invalid"));
+        assert!(!wire.contains("private/repo.git"));
+        assert!(!wire.contains(repo.path().to_str().unwrap()));
+        assert!(!wire.contains(origin.path().to_str().unwrap()));
+    }
+
+    fs::remove_file(hook).unwrap();
+    let recovered_sync = call(7, "tiber.sync", serde_json::json!({}));
+    assert!(recovered_sync.get("result").is_some(), "{recovered_sync}");
+    assert!(!pending_path.exists());
+    task_stem(&repo, "backlog", "pending-mcp-task");
+    let pending: serde_json::Value = serde_json::from_str(&pending).unwrap();
+    let remote_head = origin.git_output(["rev-parse", "refs/heads/tiber"]);
+    assert_success(remote_head.clone());
+    assert_eq!(
+        String::from_utf8(remote_head.stdout).unwrap().trim(),
+        pending["candidate"].as_str().unwrap(),
+    );
+
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
 fn mcp_uses_codex_sandbox_metadata_when_started_from_an_installed_plugin_root() {
     let repo = TempRepo::initialized();
     assert_success(repo.tiber(["init"]));
@@ -351,6 +455,9 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         .expect("initialize instructions should be a string");
     assert!(instructions.contains("origin/tiber"));
     assert!(instructions.contains("tasks://codex-sandbox"));
+    assert!(instructions.contains("call tiber.sync. Reissue a staged change only"));
+    assert!(instructions.contains("only if sync reports the candidate was discarded"));
+    assert!(instructions.contains("retry it after sync resolves the earlier transaction"));
 
     write_message(
         &mut stdin,
@@ -647,12 +754,10 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     assert!(codex_setup_tool.contains("Portable mcp.json cannot forward env_vars"));
     assert!(!codex_setup_tool.contains("signing-agent-socket"));
     assert!(codex_setup_tool.contains("Never send a signing agent socket to a PATH-resolved"));
-    assert!(codex_setup_tool.contains("publish event transactions to origin/tiber"));
-    assert!(codex_setup_tool.contains(
-        "Persist approval only when the harness can scope it to the exact Tiber-internal operation"
-    ));
-    assert!(codex_setup_tool.contains("Never persist a raw git"));
-    assert!(codex_setup_tool.contains("retry the same structured Tiber MCP operation"));
+    assert!(codex_setup_tool.contains("This read-only preview grants no permissions"));
+    assert!(codex_setup_tool
+        .contains("shell network allowlists do not configure the Tiber MCP process"));
+    assert!(codex_setup_tool.contains("call tiber.sync to reconcile the saved candidate"));
 
     write_message(
         &mut stdin,
@@ -660,13 +765,9 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
     );
     let codex_setup_resource = read_message(&mut stdout);
     assert!(codex_setup_resource.contains(r#""id":92"#));
-    assert!(codex_setup_resource.contains("Prefer the narrowest approval"));
-    assert!(codex_setup_resource.contains("case-by-case approval for prefix_rule"));
-    assert!(codex_setup_resource.contains("exact Tiber-internal operation"));
-    assert!(codex_setup_resource.contains("Never persist a raw git"));
-    assert!(
-        codex_setup_resource.contains("Do not run the whole Tiber MCP server outside the sandbox")
-    );
+    assert!(codex_setup_resource.contains("This read-only preview grants no permissions"));
+    assert!(codex_setup_resource.contains("only if sync reports that the candidate was discarded"));
+    assert!(!codex_setup_resource.contains("prefix_rule"));
 
     write_message(
         &mut stdin,

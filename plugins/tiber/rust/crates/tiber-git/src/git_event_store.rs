@@ -112,9 +112,67 @@ pub enum GitEventStoreOpenError {
     FileStore(#[from] FsEventStoreError),
     #[error("Git event store operation failed: {0}")]
     Git(String),
+    #[error("Git command timed out")]
+    Timeout,
+    #[error("Git failed to sign the event transaction")]
+    Signing,
+    #[error("Git publication failed: {0:?}")]
+    Publication(PublicationFailure),
+    #[error("Earlier Git publication remains pending: {0:?}")]
+    EarlierPublication(PublicationFailure),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicationPhase {
+    Push,
+    ConfirmRemote,
+    UpdateLocalRef,
+    Reconcile,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicationCause {
+    Authentication,
+    LocalHook,
+    RemoteRejected,
+    Timeout,
+    Unknown,
+}
+
+/// Only fixed values cross the Tiber error boundary or reach recovery markers.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct PublicationFailure {
+    pub phase: PublicationPhase,
+    pub cause: PublicationCause,
+}
+
+impl PublicationFailure {
+    fn new(phase: PublicationPhase, cause: PublicationCause) -> Self {
+        Self { phase, cause }
+    }
+
+    fn from_git_error(phase: PublicationPhase, error: &GitEventStoreOpenError) -> Self {
+        let cause = match error {
+            GitEventStoreOpenError::Timeout => PublicationCause::Timeout,
+            GitEventStoreOpenError::Git(message) if is_authentication_failure(message) => {
+                PublicationCause::Authentication
+            }
+            _ => PublicationCause::Unknown,
+        };
+        Self::new(phase, cause)
+    }
+}
+
+pub(crate) const PUBLICATION_REQUIRED_ACTION: &str =
+    "address the reported cause and run tiber.sync to reconcile the pending transaction";
+pub(crate) const RETRY_DISCARDED_ACTION: &str =
+    "address the reported cause and run tiber.sync to reconcile the pending transaction; reissue the change only if sync reports it was discarded";
+pub(crate) const RETRY_UNSTAGED_ACTION: &str =
+    "the requested change was not staged; address the reported cause and reconcile the earlier transaction with tiber.sync before retrying the requested change";
 
 #[derive(Debug)]
 struct Stage {
@@ -134,6 +192,7 @@ pub struct GitEventStore {
     authority: GitEventStoreAuthority,
     stage: Arc<Mutex<Stage>>,
     operation: Arc<Mutex<()>>,
+    append_failure: Arc<Mutex<Option<GitEventStoreOpenError>>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -156,13 +215,15 @@ struct PendingPublication {
 /// fact: the authoritative append is either confirmed on the selected Git ref
 /// or unresolved. Synchronization re-derives and removes this marker only
 /// after resolving that authority.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PublicationBlocker<'a> {
     schema_version: u8,
     kind: &'a str,
     error_code: &'a str,
     required_action: &'a str,
     created_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    publication: Option<PublicationFailure>,
 }
 
 /// Serializes Git ref updates for stores that share one Git common directory.
@@ -208,12 +269,7 @@ impl GitEventStore {
         authority: GitEventStoreAuthority,
     ) -> Result<Self, GitEventStoreOpenError> {
         let repository = repository.as_ref().to_path_buf();
-        let common_directory = git_path(&repository, ["rev-parse", "--git-common-dir"])?;
-        let common_directory = if common_directory.is_absolute() {
-            common_directory
-        } else {
-            repository.join(common_directory)
-        };
+        let common_directory = git_common_directory(&repository)?;
         let stage = load_stage(&repository, &common_directory, authority)?;
         Ok(Self {
             repository,
@@ -221,19 +277,25 @@ impl GitEventStore {
             authority,
             stage: Arc::new(Mutex::new(stage)),
             operation: Arc::new(Mutex::new(())),
+            append_failure: Arc::new(Mutex::new(None)),
         })
     }
 
-    fn pending_publication_path(&self) -> PathBuf {
+    pub(crate) async fn take_append_failure(&self) -> Option<GitEventStoreOpenError> {
+        self.append_failure.lock().await.take()
+    }
+
+    fn state_directory(&self) -> PathBuf {
         self.common_directory
             .join(self.authority.config().state_directory)
-            .join("pending-publication")
+    }
+
+    fn pending_publication_path(&self) -> PathBuf {
+        self.state_directory().join("pending-publication")
     }
 
     fn publication_blocker_path(&self) -> PathBuf {
-        self.common_directory
-            .join(self.authority.config().state_directory)
-            .join("workflow-blocker.json")
+        self.state_directory().join("workflow-blocker.json")
     }
 
     fn command_state_snapshot_path(&self, snapshot_id: &CommandStateSnapshotId) -> PathBuf {
@@ -271,72 +333,107 @@ impl GitEventStore {
     pub async fn synchronize(&self) -> Result<SynchronizeOutcome, GitEventStoreOpenError> {
         let _operation = self.operation.lock().await;
         let _common_operation = self.lock_common_operation().await?;
-        let path = self.pending_publication_path();
-        if !path.exists() {
-            *self.stage.lock().await =
-                load_stage(&self.repository, &self.common_directory, self.authority)?;
-            clear_publication_failure(&self.publication_blocker_path())?;
-            return Ok(SynchronizeOutcome::Current);
-        }
-        let pending = read_pending(&path)?;
-        validate_pending(&self.repository, &pending)?;
-        let has_remote_authority = remote_authority_is_available(&self.repository, self.authority);
-        let expected_authority = if has_remote_authority {
-            "origin"
-        } else {
-            "local"
-        };
-        if pending.authority != expected_authority {
-            return Err(GitEventStoreOpenError::Git(
-                "pending publication authority changed".into(),
-            ));
-        }
-        let head = if has_remote_authority {
-            refresh_remote(&self.repository, self.authority)?
-        } else {
-            resolve_optional_ref(&self.repository, self.authority.config().local_ref)?
-        };
-        let pending_is_noop = if let Some(base) = pending.base.as_deref() {
-            commit_tree_id(&self.repository, &pending.candidate)?
-                == commit_tree_id(&self.repository, base)?
-        } else {
-            false
-        };
-        let outcome = if pending_is_noop {
-            SynchronizeOutcome::Current
-        } else if head
-            .as_deref()
-            .is_some_and(|head| is_ancestor(&self.repository, &pending.candidate, head))
-        {
-            SynchronizeOutcome::PublishedPending
-        } else if head == pending.base {
-            match if has_remote_authority {
-                publish_remote(
-                    &self.repository,
-                    &pending.candidate,
-                    pending.base.as_deref(),
-                    self.authority,
-                )?
-            } else {
-                publish_local(
-                    &self.repository,
-                    &pending.candidate,
-                    pending.base.as_deref(),
-                    self.authority,
-                )?
-            } {
-                Publication::Confirmed => SynchronizeOutcome::PublishedPending,
-                Publication::Conflict => SynchronizeOutcome::DiscardedUnpublished,
-            }
-        } else {
-            SynchronizeOutcome::DiscardedUnpublished
-        };
-        remove_pending(&path)?;
-        *self.stage.lock().await =
-            load_stage(&self.repository, &self.common_directory, self.authority)?;
-        clear_publication_failure(&self.publication_blocker_path())?;
-        Ok(outcome)
+        synchronize_authority(&self.repository, &self.common_directory, self.authority)
     }
+}
+
+fn git_common_directory(repository: &Path) -> Result<PathBuf, GitEventStoreOpenError> {
+    let path = git_path(repository, ["rev-parse", "--git-common-dir"])?;
+    Ok(repository.join(path))
+}
+
+/// Recover without an initial remote refresh that could hide a pending
+/// publication failure before reconciliation starts.
+pub(crate) fn synchronize_repository(
+    repository: &Path,
+) -> Result<SynchronizeOutcome, GitEventStoreOpenError> {
+    let authority = GitEventStoreAuthority::Tiber;
+    let common_directory = git_common_directory(repository)?;
+    let _operation = EventStoreOperationLock::acquire(&common_directory, authority)?;
+    synchronize_authority(repository, &common_directory, authority)
+}
+
+fn synchronize_authority(
+    repository: &Path,
+    common_directory: &Path,
+    authority: GitEventStoreAuthority,
+) -> Result<SynchronizeOutcome, GitEventStoreOpenError> {
+    let state_directory = common_directory.join(authority.config().state_directory);
+    let path = state_directory.join("pending-publication");
+    let blocker = state_directory.join("workflow-blocker.json");
+    if !path.exists() {
+        load_stage(repository, common_directory, authority)?;
+        clear_publication_failure(&blocker)?;
+        return Ok(SynchronizeOutcome::Current);
+    }
+    let outcome = reconcile_pending(repository, authority, &path).map_err(|error| {
+        let failure = match error {
+            GitEventStoreOpenError::Publication(failure) => failure,
+            error => PublicationFailure::from_git_error(PublicationPhase::Reconcile, &error),
+        };
+        let _ = record_publication_failure(&blocker, authority, Some(failure));
+        GitEventStoreOpenError::Publication(failure)
+    })?;
+    remove_pending(&path)?;
+    clear_publication_failure(&blocker)?;
+    Ok(outcome)
+}
+
+fn reconcile_pending(
+    repository: &Path,
+    authority: GitEventStoreAuthority,
+    path: &Path,
+) -> Result<SynchronizeOutcome, GitEventStoreOpenError> {
+    let pending = read_pending(path)?;
+    validate_pending(repository, &pending)?;
+    let has_remote_authority = remote_authority_is_available(repository, authority);
+    let expected_authority = if has_remote_authority {
+        "origin"
+    } else {
+        "local"
+    };
+    if pending.authority != expected_authority {
+        return Err(GitEventStoreOpenError::Git(
+            "pending publication authority changed".into(),
+        ));
+    }
+    let head = if has_remote_authority {
+        confirm_remote(repository, authority)?
+    } else {
+        resolve_optional_ref(repository, authority.config().local_ref)?
+    };
+    let pending_is_noop = if let Some(base) = pending.base.as_deref() {
+        commit_tree_id(repository, &pending.candidate)? == commit_tree_id(repository, base)?
+    } else {
+        false
+    };
+    let outcome = if pending_is_noop {
+        SynchronizeOutcome::Current
+    } else if contains_candidate(repository, head.as_deref(), &pending.candidate)? {
+        SynchronizeOutcome::PublishedPending
+    } else if head == pending.base {
+        match if has_remote_authority {
+            publish_remote(
+                repository,
+                &pending.candidate,
+                pending.base.as_deref(),
+                authority,
+            )?
+        } else {
+            publish_local(
+                repository,
+                &pending.candidate,
+                pending.base.as_deref(),
+                authority,
+            )?
+        } {
+            Publication::Confirmed => SynchronizeOutcome::PublishedPending,
+            Publication::Conflict => SynchronizeOutcome::DiscardedUnpublished,
+        }
+    } else {
+        SynchronizeOutcome::DiscardedUnpublished
+    };
+    Ok(outcome)
 }
 
 impl EventStore for GitEventStore {
@@ -362,7 +459,22 @@ impl EventStore for GitEventStore {
             .lock_common_operation()
             .await
             .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?;
+        let mut failure = self.append_failure.lock().await;
+        *failure = None;
         if self.pending_publication_path().exists() {
+            let recorded = fs::read_to_string(self.publication_blocker_path())
+                .ok()
+                .and_then(|body| {
+                    serde_json::from_str::<PublicationBlocker<'_>>(&body)
+                        .ok()
+                        .and_then(|marker| marker.publication)
+                });
+            *failure = Some(GitEventStoreOpenError::EarlierPublication(
+                recorded.unwrap_or(PublicationFailure::new(
+                    PublicationPhase::Reconcile,
+                    PublicationCause::Unknown,
+                )),
+            ));
             return Err(store_failure(Operation::AppendEvents));
         }
 
@@ -375,7 +487,7 @@ impl EventStore for GitEventStore {
             .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?;
         let appended = stage.store.append_events(writes).await?;
         let Some(candidate) = create_candidate(&self.repository, &stage, self.authority)
-            .map_err(|error| diagnosed_store_failure(Operation::AppendEvents, &error))?
+            .map_err(|error| record_append_failure(&mut failure, error))?
         else {
             return Ok(appended);
         };
@@ -400,9 +512,7 @@ impl EventStore for GitEventStore {
 
         match publication {
             Ok(Publication::Confirmed) => {
-                *self.stage.lock().await =
-                    load_stage(&self.repository, &self.common_directory, self.authority)
-                        .map_err(|_| store_failure(Operation::AppendEvents))?;
+                *self.stage.lock().await = stage;
                 Ok(appended)
             }
             Ok(Publication::Conflict) => {
@@ -437,7 +547,7 @@ impl EventStore for GitEventStore {
                     .map_err(|_| store_failure(Operation::AppendEvents))?;
                     let Some(rebased_candidate) =
                         create_candidate(&self.repository, &merged, self.authority)
-                            .map_err(|_| store_failure(Operation::AppendEvents))?
+                            .map_err(|error| record_append_failure(&mut failure, error))?
                     else {
                         *self.stage.lock().await = merged;
                         return Ok(appended);
@@ -460,12 +570,7 @@ impl EventStore for GitEventStore {
                         )
                     } {
                         Ok(Publication::Confirmed) => {
-                            *self.stage.lock().await = load_stage(
-                                &self.repository,
-                                &self.common_directory,
-                                self.authority,
-                            )
-                            .map_err(|_| store_failure(Operation::AppendEvents))?;
+                            *self.stage.lock().await = merged;
                             return Ok(appended);
                         }
                         Ok(Publication::Conflict) => {
@@ -477,21 +582,25 @@ impl EventStore for GitEventStore {
                             .map_err(|_| store_failure(Operation::AppendEvents))?;
                         }
                         Err(error) => {
-                            let _ = diagnosed_store_failure(Operation::AppendEvents, &error);
-                            persist_indeterminate(self, &rebased_candidate, &merged)?;
-                            *self.stage.lock().await = merged;
-                            return Err(store_failure(Operation::AppendEvents));
+                            return Err(persist_indeterminate(
+                                self,
+                                &rebased_candidate,
+                                &merged,
+                                error,
+                                &mut failure,
+                            ));
                         }
                     }
                 }
                 Err(store_failure(Operation::AppendEvents))
             }
-            Err(error) => {
-                let _ = diagnosed_store_failure(Operation::AppendEvents, &error);
-                persist_indeterminate(self, &candidate, &stage)?;
-                *self.stage.lock().await = stage;
-                Err(store_failure(Operation::AppendEvents))
-            }
+            Err(error) => Err(persist_indeterminate(
+                self,
+                &candidate,
+                &stage,
+                error,
+                &mut failure,
+            )),
         }
     }
 
@@ -701,8 +810,14 @@ fn persist_indeterminate(
     event_store: &GitEventStore,
     candidate: &str,
     stage: &Stage,
-) -> Result<(), EventStoreError> {
-    persist_pending(
+    error: GitEventStoreOpenError,
+    append_failure: &mut Option<GitEventStoreOpenError>,
+) -> EventStoreError {
+    let failure = match error {
+        GitEventStoreOpenError::Publication(failure) => failure,
+        error => PublicationFailure::from_git_error(PublicationPhase::Reconcile, &error),
+    };
+    if let Err(error) = persist_pending(
         &event_store.pending_publication_path(),
         &PendingPublication {
             version: PENDING_VERSION,
@@ -715,24 +830,34 @@ fn persist_indeterminate(
             }
             .to_owned(),
         },
-    )
-    .map_err(|_| store_failure(Operation::AppendEvents))?;
-    record_publication_failure(
+    ) {
+        return record_append_failure(append_failure, error.into());
+    }
+    // The pending receipt owns recovery even if the diagnostic marker fails.
+    let _ = record_publication_failure(
         &event_store.publication_blocker_path(),
         event_store.authority,
-    )
-    .map_err(|_| store_failure(Operation::AppendEvents))
+        Some(failure),
+    );
+    record_append_failure(append_failure, GitEventStoreOpenError::Publication(failure))
+}
+
+fn record_append_failure(
+    slot: &mut Option<GitEventStoreOpenError>,
+    error: GitEventStoreOpenError,
+) -> EventStoreError {
+    let result = diagnosed_store_failure(Operation::AppendEvents, &error);
+    *slot = Some(error);
+    result
 }
 
 fn record_publication_failure(
     path: &Path,
     authority: GitEventStoreAuthority,
+    publication: Option<PublicationFailure>,
 ) -> Result<(), GitEventStoreOpenError> {
     let (error_code, required_action) = match authority {
-        GitEventStoreAuthority::Tiber => (
-            "tiber.publication_failed",
-            "run Tiber sync until authoritative publication is resolved",
-        ),
+        GitEventStoreAuthority::Tiber => ("tiber.publication_failed", PUBLICATION_REQUIRED_ACTION),
         GitEventStoreAuthority::DevelopmentWorkflow => (
             "development_workflow.publication_failed",
             "synchronize Development Workflow until authoritative publication is resolved",
@@ -751,6 +876,7 @@ fn record_publication_failure(
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(std::io::Error::other)?
             .as_secs(),
+        publication,
     };
     let parent = path.parent().ok_or_else(|| {
         GitEventStoreOpenError::Git("publication blocker has no parent directory".to_owned())
@@ -807,11 +933,30 @@ fn refresh_remote(
                     &format!("+{}:{}", authority.head, authority.tracking_ref),
                 ],
             )?)?;
-            resolve_optional_ref(repository, authority.tracking_ref)
+            resolve_optional_ref(repository, authority.tracking_ref)?
+                .map(Some)
+                .ok_or_else(|| {
+                    GitEventStoreOpenError::Git("fetched tracking ref is missing".into())
+                })
         }
         Some(2) => Ok(None),
         _ => Err(git_error("refresh authoritative tiber ref", &advertised)),
     }
+}
+
+fn confirm_remote(
+    repository: &Path,
+    authority: GitEventStoreAuthority,
+) -> Result<Option<String>, GitEventStoreOpenError> {
+    refresh_remote(repository, authority)
+        .map_err(|error| publication_error(PublicationPhase::ConfirmRemote, &error))
+}
+
+fn publication_error(
+    phase: PublicationPhase,
+    error: &GitEventStoreOpenError,
+) -> GitEventStoreOpenError {
+    GitEventStoreOpenError::Publication(PublicationFailure::from_git_error(phase, error))
 }
 
 fn checkout_tree(
@@ -899,12 +1044,18 @@ fn create_candidate(
             ("GIT_COMMITTER_EMAIL", OsStr::new(FALLBACK_GIT_EMAIL)),
         ]);
     }
-    let candidate = output_text(require_success(git_with(
-        repository,
-        None,
-        commit_environment,
-        arguments,
-    )?)?);
+    let output = git_with(repository, None, commit_environment, &arguments)?;
+    if arguments.contains(&"-S")
+        && !output.status.success()
+        && String::from_utf8_lossy(&output.stderr).lines().any(|line| {
+            line == "error: gpg failed to sign the data"
+                || line.starts_with("error: Couldn't get agent socket?")
+                || line.starts_with("error: Load key ")
+        })
+    {
+        return Err(GitEventStoreOpenError::Signing);
+    }
+    let candidate = output_text(require_success(output)?);
     let _ = fs::remove_file(index);
     Ok(Some(candidate))
 }
@@ -926,32 +1077,78 @@ fn publish_remote(
     let authority_config = authority.config().remote.ok_or_else(|| {
         GitEventStoreOpenError::Git("selected authority has no remote publication ref".to_owned())
     })?;
+    let mut failure = PublicationFailure::new(PublicationPhase::Push, PublicationCause::Unknown);
     for _ in 0..PUBLICATION_RETRIES {
         let push = git(
             repository,
             [
                 "push",
+                "--porcelain",
                 "origin",
                 &format!("{candidate}:{}", authority_config.head),
             ],
-        )?;
-        let remote = refresh_remote(repository, authority)?;
-        if remote
-            .as_deref()
-            .is_some_and(|head| is_ancestor(repository, candidate, head))
+        );
+        let remote = confirm_remote(repository, authority)?;
+        if contains_candidate(repository, remote.as_deref(), candidate)
+            .map_err(|error| publication_error(PublicationPhase::ConfirmRemote, &error))?
         {
             return Ok(Publication::Confirmed);
         }
         if remote.as_deref() != base {
             return Ok(Publication::Conflict);
         }
-        if push.status.success() {
-            break;
+        match push {
+            Ok(output) if output.status.success() => {
+                failure = PublicationFailure::new(
+                    PublicationPhase::ConfirmRemote,
+                    PublicationCause::Unknown,
+                );
+                break;
+            }
+            Ok(output) => {
+                failure =
+                    PublicationFailure::new(PublicationPhase::Push, push_failure_cause(&output));
+            }
+            Err(error) => {
+                failure = PublicationFailure::from_git_error(PublicationPhase::Push, &error);
+                break;
+            }
         }
     }
-    Err(GitEventStoreOpenError::Git(
-        "publication outcome remained indeterminate".to_owned(),
-    ))
+    Err(GitEventStoreOpenError::Publication(failure))
+}
+
+fn push_failure_cause(output: &Output) -> PublicationCause {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if String::from_utf8_lossy(&output.stdout).lines().any(|line| {
+        line.strip_prefix("!\t")
+            .and_then(|row| row.split_once('\t'))
+            .is_some_and(|(_, summary)| summary.starts_with("[remote rejected]"))
+    }) {
+        PublicationCause::RemoteRejected
+    } else if is_authentication_failure(&stderr) {
+        PublicationCause::Authentication
+    } else if stderr.lines().any(|line| {
+        line.starts_with("error: pre-push hook ")
+            || line.starts_with("fatal: cannot run .git/hooks/pre-push")
+    }) {
+        PublicationCause::LocalHook
+    } else {
+        PublicationCause::Unknown
+    }
+}
+
+fn is_authentication_failure(message: &str) -> bool {
+    message.lines().any(|line| {
+        let line = line
+            .strip_prefix("execute Git command: ")
+            .or_else(|| line.strip_prefix("refresh authoritative tiber ref: "))
+            .unwrap_or(line);
+        line.starts_with("fatal: Authentication failed for ")
+            || line.starts_with("fatal: could not read Username for ")
+            || line.starts_with("fatal: could not read Password for ")
+            || (line.contains(": Permission denied (publickey") && !line.starts_with("remote:"))
+    })
 }
 
 fn publish_local(
@@ -965,43 +1162,53 @@ fn publish_local(
     let update = git(
         repository,
         ["update-ref", authority.local_ref, candidate, expected],
-    )?;
+    )
+    .map_err(|error| publication_error(PublicationPhase::UpdateLocalRef, &error))?;
     if update.status.success() {
         return Ok(Publication::Confirmed);
     }
-    let current = resolve_optional_ref(repository, authority.local_ref)?;
-    if current
-        .as_deref()
-        .is_some_and(|head| is_ancestor(repository, candidate, head))
+    let current = resolve_optional_ref(repository, authority.local_ref)
+        .map_err(|error| publication_error(PublicationPhase::UpdateLocalRef, &error))?;
+    if contains_candidate(repository, current.as_deref(), candidate)
+        .map_err(|error| publication_error(PublicationPhase::UpdateLocalRef, &error))?
     {
         Ok(Publication::Confirmed)
     } else if current.as_deref() == base {
         // A failed ref write with unchanged authority is not a concurrency
-        // conflict. Preserve its diagnostics and the existing indeterminate
-        // candidate reconciliation instead of repeatedly rerunning the command.
-        Err(git_error("publish local authority", &update))
+        // conflict. Preserve the candidate for reconciliation.
+        Err(GitEventStoreOpenError::Publication(
+            PublicationFailure::new(PublicationPhase::UpdateLocalRef, PublicationCause::Unknown),
+        ))
     } else {
         Ok(Publication::Conflict)
     }
 }
 
-fn is_ancestor(repository: &Path, ancestor: &str, descendant: &str) -> bool {
-    git(
-        repository,
-        ["merge-base", "--is-ancestor", ancestor, descendant],
-    )
-    .is_ok_and(|output| output.status.success())
+fn contains_candidate(
+    repository: &Path,
+    head: Option<&str>,
+    candidate: &str,
+) -> Result<bool, GitEventStoreOpenError> {
+    let Some(head) = head else {
+        return Ok(false);
+    };
+    let output = git(repository, ["merge-base", "--is-ancestor", candidate, head])?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(git_error("check publication ancestry", &output)),
+    }
 }
 
 fn resolve_optional_ref(
     repository: &Path,
     reference: &str,
 ) -> Result<Option<String>, GitEventStoreOpenError> {
-    let output = git(repository, ["rev-parse", "--verify", reference])?;
-    if output.status.success() {
-        Ok(Some(output_text(output)))
-    } else {
-        Ok(None)
+    let output = git(repository, ["rev-parse", "--verify", "--quiet", reference])?;
+    match output.status.code() {
+        Some(0) => Ok(Some(output_text(output))),
+        Some(1) => Ok(None),
+        _ => Err(git_error("resolve publication ref", &output)),
     }
 }
 
@@ -1206,9 +1413,7 @@ where
         None => {
             child.kill()?;
             let _ = child.wait();
-            Err(GitEventStoreOpenError::Git(
-                "Git command timed out".to_owned(),
-            ))
+            Err(GitEventStoreOpenError::Timeout)
         }
     }
 }
@@ -1641,7 +1846,8 @@ mod tests {
             },
         )
         .unwrap();
-        record_publication_failure(&store.publication_blocker_path(), store.authority).unwrap();
+        record_publication_failure(&store.publication_blocker_path(), store.authority, None)
+            .unwrap();
 
         assert_eq!(
             store.synchronize().await.unwrap(),
@@ -1693,6 +1899,7 @@ mod tests {
         record_publication_failure(
             &workflow_blocker,
             GitEventStoreAuthority::DevelopmentWorkflow,
+            None,
         )
         .unwrap();
         assert!(workflow_blocker.exists());

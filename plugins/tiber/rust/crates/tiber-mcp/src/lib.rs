@@ -8,8 +8,8 @@ pub fn codex_sandbox_setup() -> String {
     [
         "Tiber Codex sandbox setup preview",
         "",
-        "Prefer the narrowest approval that can retry the same structured Tiber MCP operation.",
-        "Do not run the whole Tiber MCP server outside the sandbox unless these narrow permissions are insufficient.",
+        "This read-only preview grants no permissions and changes no Codex or Git configuration.",
+        "Codex shell Git approvals and shell network allowlists do not configure the Tiber MCP process. If Codex presents an approval for an MCP call, review the specific tool and arguments it presents.",
         "",
         "For SSH public-key failures or `Couldn't get agent socket?`, verify the current agent and SSH_AUTH_SOCK forwarding before changing sandbox permissions.",
         "Installed portable MCP startup automatically bootstraps the shared stable dispatcher; fully restart Codex to activate initial forwarding. Tiber upgrades then need no installer rerun, even when old caches are removed. Existing 1.1.x registrations need one migration using the marketplace installer or trusted installed scripts/configure-codex-mcp.py --apply. Rebootstrap if the captured trusted Codex executable disappears. Fully restart Codex from the current agent shell after agent rotation.",
@@ -17,17 +17,10 @@ pub fn codex_sandbox_setup() -> String {
         "Never send a signing agent socket to a PATH-resolved, repo-relative, or otherwise project-controlled MCP launcher.",
         "Do not try to fix SSH signing by enabling danger-full-access, unsandboxing the whole MCP server, or approving every git command.",
         "",
-        "Request these approvals only when a Tiber MCP write/sync fails because Git cannot write refs, objects, signed commits, or push credentials from the sandbox:",
-        "- case-by-case approval for prefix_rule [\"git\", \"hash-object\"] because it can write arbitrary host-readable file contents into Git objects",
-        "- case-by-case approval for prefix_rule [\"git\", \"mktree\"] because it can construct arbitrary Git trees from stdin",
-        "- case-by-case approval for prefix_rule [\"git\", \"commit-tree\"] because it can create commits, including signed commit-tree -S when commit.gpgsign=true",
-        "- case-by-case approval for Tiber MCP calls that publish event transactions to origin/tiber",
+        "For tiber.publication_failed, use the reported publication phase and cause to diagnose the Git operation. A failed remote confirmation may follow a successful push.",
+        "After addressing the cause, call tiber.sync to reconcile the saved candidate. Reissue a staged change only if sync reports that the candidate was discarded. If the error says the requested change was not staged, retry it after sync resolves the earlier transaction.",
         "",
-        "Persist approval only when the harness can scope it to the exact Tiber-internal operation, not merely to a raw git prefix.",
-        "Never persist a raw git, wildcard git, bash, sh, or whole-MCP-server permission for Tiber recovery.",
-        "",
-        "After the user approves the needed narrow permissions, retry the same structured Tiber MCP operation.",
-        "Do not ask the user to rerun an equivalent tiber CLI command manually as the normal recovery path.",
+        "For tiber.signing_failed, check signing configuration and, for SSH, the agent available to the running Tiber process. Fully restart Codex if its agent environment is stale.",
         "",
     ]
     .join("\n")
@@ -125,7 +118,7 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
                 "name": "tiber",
                 "version": env!("CARGO_PKG_VERSION")
             },
-            "instructions": "Mutations publish to origin/tiber. For sandbox recovery, read tasks://codex-sandbox before retrying the same MCP operation."
+            "instructions": "Mutations publish to origin/tiber. For tiber.publication_failed, address the reported cause and call tiber.sync. Reissue a staged change only if sync reports the candidate was discarded. If the error says the requested change was not staged, retry it after sync resolves the earlier transaction. Read tasks://codex-sandbox for setup guidance. It grants no permissions."
         }),
         "tools/list" => json!({ "tools": tools() }),
         "resources/list" => json!({ "resources": resources()? }),
@@ -713,7 +706,7 @@ fn tools() -> Vec<Value> {
         tool(
             "tiber.codex_sandbox_setup",
             "Preview Codex sandbox setup",
-            "Preview the narrow Codex approval guidance for Tiber-owned Git write and sync operations.",
+            "Read how to diagnose and recover Tiber Git publication and signing in Codex. This preview grants no permissions.",
             json!({}),
             vec![],
         ),
@@ -1508,18 +1501,30 @@ fn blocking_error_response(
     message: &str,
     blocker: tiber_git::WorkflowBlockerData,
 ) -> Value {
+    let mut data = json!({
+        "error_code": blocker.error_code,
+        "workflow_blocked": true,
+        "required_action": blocker.required_action
+    });
+    if let Some(publication) = blocker.publication {
+        data["publication"] = json!(publication);
+    } else {
+        data["prohibited_actions"] = json!([
+            "diagnose",
+            "edit",
+            "test",
+            "rerun",
+            "push",
+            "unrelated-work"
+        ]);
+    }
     json!({
         "jsonrpc": "2.0",
         "id": id,
         "error": {
             "code": -32603,
             "message": message,
-            "data": {
-                "error_code": blocker.error_code,
-                "workflow_blocked": true,
-                "required_action": blocker.required_action,
-                "prohibited_actions": ["diagnose", "edit", "test", "rerun", "push", "unrelated-work"]
-            }
+            "data": data
         }
     })
 }
@@ -1595,12 +1600,17 @@ mod blocker_response_tests {
 
     #[test]
     fn structured_blocker_uses_the_errors_actual_code_and_recovery() {
+        use tiber_git::git_event_store::{PublicationCause, PublicationFailure, PublicationPhase};
         let response = blocking_error_response(
             json!(7),
             "tiber.publication_failed workflow_blocked=true",
             tiber_git::WorkflowBlockerData {
                 error_code: "tiber.publication_failed",
                 required_action: "run Tiber sync until authoritative publication is resolved",
+                publication: Some(PublicationFailure {
+                    phase: PublicationPhase::ConfirmRemote,
+                    cause: PublicationCause::Timeout,
+                }),
             },
         );
         assert_eq!(
@@ -1611,5 +1621,12 @@ mod blocker_response_tests {
             response["error"]["data"]["required_action"],
             "run Tiber sync until authoritative publication is resolved"
         );
+        assert_eq!(
+            response["error"]["data"]["publication"],
+            json!({"phase": "confirm_remote", "cause": "timeout"})
+        );
+        assert!(response["error"]["data"]
+            .get("prohibited_actions")
+            .is_none());
     }
 }

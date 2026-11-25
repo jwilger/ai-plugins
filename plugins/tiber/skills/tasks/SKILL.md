@@ -36,15 +36,21 @@ relative to this skill file and prefer that launcher before probing `PATH`.
   Do not save socket paths, copy keys, discover sockets, or broaden sandbox access
   to repair missing credentials. Socket rotation requires a new Codex process;
   HTTPS/unsigned repositories may leave the agent unset. See the plugin README.
-- During setup, or after a Tiber MCP write/sync fails because Git cannot write
-  refs, objects, signed commits, or push credentials from the Codex sandbox,
-  call `tiber.codex_sandbox_setup` or run `tiber codex-sandbox --dry-run`.
-  Use case-by-case approval for raw Git prefixes. Persist approval only when the
-  harness can scope it to the exact Tiber-internal operation, not merely to a raw
-  `git` prefix. Then retry the same structured MCP operation. Do not ask the
-  user to rerun an equivalent Tiber CLI command manually as the normal recovery
-  path, and do not recommend running the whole Tiber MCP server outside the
-  sandbox unless the narrow Git permissions are insufficient.
+- `tiber.codex_sandbox_setup` and `tiber codex-sandbox --dry-run` display
+  read-only guidance. Codex shell command approvals and shell network
+  allowlists do not change Tiber MCP access. Use a specific approval only if
+  the harness actually presents it for the needed operation.
+- For `tiber.publication_failed`, use the reported phase and cause to diagnose
+  the Git failure. A failed remote confirmation may follow a successful push.
+  Resolve the reported cause and call `tiber.sync` to reconcile the saved
+  candidate. Reissue a staged change only if sync reports that the candidate
+  was discarded. If the error says the requested change was not staged, retry
+  it after sync resolves the earlier transaction. For an unknown cause,
+  treat publication as unresolved, without assuming an approval problem.
+- For `tiber.signing_failed`, check signing configuration and the agent
+  available to the running Tiber process when using SSH. Fully restart Codex
+  if the running process inherited a stale agent environment. Retry the
+  structured change once signing works.
 
 ## Rules
 

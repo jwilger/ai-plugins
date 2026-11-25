@@ -65,7 +65,7 @@ fn init_ignores_an_existing_source_tree_tasks_system_without_mutation() {
 }
 
 #[test]
-fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
+fn codex_sandbox_preview_explains_publication_and_signing_recovery() {
     let repo = TempRepo::initialized();
 
     let output = repo.tiber(["codex-sandbox", "--dry-run"]);
@@ -73,7 +73,7 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     assert_success_ref(&output);
     let stdout = String::from_utf8(output.stdout).expect("preview output should be utf8");
     assert!(stdout.contains("Tiber Codex sandbox setup preview"));
-    assert!(stdout.contains("Prefer the narrowest approval"));
+    assert!(stdout.contains("This read-only preview grants no permissions"));
     assert!(stdout.contains("Couldn't get agent socket?"));
     assert!(stdout.contains("SSH_AUTH_SOCK"));
     assert!(stdout.contains("env_vars name"));
@@ -82,16 +82,8 @@ fn codex_sandbox_preview_prefers_narrow_git_prefixes() {
     assert!(stdout.contains("Portable mcp.json cannot forward env_vars"));
     assert!(!stdout.contains("signing-agent-socket"));
     assert!(stdout.contains("Never send a signing agent socket to a PATH-resolved"));
-    assert!(stdout.contains("publish event transactions to origin/tiber"));
-    assert!(stdout.contains(
-        "Persist approval only when the harness can scope it to the exact Tiber-internal operation"
-    ));
-    assert!(stdout.contains(
-        "Never persist a raw git, wildcard git, bash, sh, or whole-MCP-server permission"
-    ));
-    assert!(stdout.contains("retry the same structured Tiber MCP operation"));
-    assert!(stdout.contains("Do not run the whole Tiber MCP server outside the sandbox"));
-    assert!(
-        stdout.contains("Do not ask the user to rerun an equivalent tiber CLI command manually")
-    );
+    assert!(stdout.contains("shell network allowlists do not configure the Tiber MCP process"));
+    assert!(stdout.contains("call tiber.sync to reconcile the saved candidate"));
+    assert!(stdout.contains("only if sync reports that the candidate was discarded"));
+    assert!(!stdout.contains("prefix_rule"));
 }

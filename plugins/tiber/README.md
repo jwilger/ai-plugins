@@ -136,20 +136,19 @@ root through `core.worktree`. Relative values are resolved from the Git
 directory. A true bare repository or another context without an explicit
 worktree root is refused with actionable repository-context guidance.
 
-For Codex sandboxed sessions, preview the narrow host-access setup before
-granting broad permissions:
+For Codex sessions, read the Git signing and publication recovery guidance:
 
 ```shell
 tiber codex-sandbox --dry-run
 ```
 
-The preview treats raw Git prefix approvals as case-by-case, including
-`hash-object`, `mktree`, `commit-tree -S`, `update-ref`, fetch, and push.
-Persist approval only when the harness can scope it to the exact Tiber-internal
-operation rather than a reusable raw `git` prefix. Prefer the narrowest approval
-that lets the same structured Tiber MCP operation be retried. Do not run the
-whole Tiber MCP server outside the sandbox unless the narrow Git permissions are
-insufficient.
+The preview is read-only. Codex shell command approvals and shell network
+allowlists do not configure the Tiber MCP process. If a write returns
+`tiber.publication_failed`, check the reported phase and cause, then run
+`tiber sync` to reconcile the saved candidate. A failed remote confirmation
+can follow a successful push. Reissue a staged write only if sync reports
+the candidate was discarded. If the error says the requested change was not
+staged, retry it after sync resolves the earlier transaction.
 
 When you start working on an existing task, move it out of the backlog first:
 
@@ -538,9 +537,9 @@ Tool names use the `tiber.*` namespace, for example `tiber.create`,
 `tiber.note.add`, `tiber.codex_sandbox_setup`, `tiber.install_bin`, and
 `tiber.validate_fix`.
 
-The `initialize` response also points Codex agents at
-`tiber.codex_sandbox_setup` and `tasks://codex-sandbox` so sandbox setup can be
-discovered through MCP before retrying a failed write.
+The `initialize` response points Codex agents at
+`tiber.codex_sandbox_setup` and `tasks://codex-sandbox` for read-only
+publication and signing recovery guidance.
 
 ## Dashboard
 
