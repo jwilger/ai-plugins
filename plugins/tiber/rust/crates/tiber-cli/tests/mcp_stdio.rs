@@ -455,9 +455,7 @@ fn mcp_stdio_exposes_tools_and_task_resources() {
         .expect("initialize instructions should be a string");
     assert!(instructions.contains("origin/tiber"));
     assert!(instructions.contains("tasks://codex-sandbox"));
-    assert!(instructions.contains("call tiber.sync. Reissue a staged change only"));
-    assert!(instructions.contains("only if sync reports the candidate was discarded"));
-    assert!(instructions.contains("retry it after sync resolves the earlier transaction"));
+    assert!(instructions.contains("follow required_action and run tiber.sync first"));
 
     write_message(
         &mut stdin,

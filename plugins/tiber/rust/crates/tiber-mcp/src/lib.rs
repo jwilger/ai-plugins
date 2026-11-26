@@ -118,7 +118,7 @@ pub fn handle_json_rpc(request: &Value) -> Result<Value, tiber_git::Error> {
                 "name": "tiber",
                 "version": env!("CARGO_PKG_VERSION")
             },
-            "instructions": "Mutations publish to origin/tiber. For tiber.publication_failed, address the reported cause and call tiber.sync. Reissue a staged change only if sync reports the candidate was discarded. If the error says the requested change was not staged, retry it after sync resolves the earlier transaction. Read tasks://codex-sandbox for setup guidance. It grants no permissions."
+            "instructions": "Mutations publish to origin/tiber. On tiber.publication_failed, follow required_action and run tiber.sync first. Read tasks://codex-sandbox for setup."
         }),
         "tools/list" => json!({ "tools": tools() }),
         "resources/list" => json!({ "resources": resources()? }),

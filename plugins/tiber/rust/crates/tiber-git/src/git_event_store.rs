@@ -129,7 +129,6 @@ pub enum GitEventStoreOpenError {
 pub enum PublicationPhase {
     Push,
     ConfirmRemote,
-    UpdateLocalRef,
     Reconcile,
 }
 
@@ -813,6 +812,11 @@ fn persist_indeterminate(
     error: GitEventStoreOpenError,
     append_failure: &mut Option<GitEventStoreOpenError>,
 ) -> EventStoreError {
+    if event_store.authority == GitEventStoreAuthority::PluginAdvisoryFinalReview {
+        // Advisory review's opt-in diagnostic identifies denied local Git paths.
+        // Only the classified failure below goes into the recovery marker.
+        let _ = diagnosed_store_failure(Operation::AppendEvents, &error);
+    }
     let failure = match error {
         GitEventStoreOpenError::Publication(failure) => failure,
         error => PublicationFailure::from_git_error(PublicationPhase::Reconcile, &error),
@@ -1162,23 +1166,17 @@ fn publish_local(
     let update = git(
         repository,
         ["update-ref", authority.local_ref, candidate, expected],
-    )
-    .map_err(|error| publication_error(PublicationPhase::UpdateLocalRef, &error))?;
+    )?;
     if update.status.success() {
         return Ok(Publication::Confirmed);
     }
-    let current = resolve_optional_ref(repository, authority.local_ref)
-        .map_err(|error| publication_error(PublicationPhase::UpdateLocalRef, &error))?;
-    if contains_candidate(repository, current.as_deref(), candidate)
-        .map_err(|error| publication_error(PublicationPhase::UpdateLocalRef, &error))?
-    {
+    let current = resolve_optional_ref(repository, authority.local_ref)?;
+    if contains_candidate(repository, current.as_deref(), candidate)? {
         Ok(Publication::Confirmed)
     } else if current.as_deref() == base {
-        // A failed ref write with unchanged authority is not a concurrency
-        // conflict. Preserve the candidate for reconciliation.
-        Err(GitEventStoreOpenError::Publication(
-            PublicationFailure::new(PublicationPhase::UpdateLocalRef, PublicationCause::Unknown),
-        ))
+        // Keep the local ref diagnostic available to advisory final review.
+        // The event-store adapter reports it only with diagnostics enabled.
+        Err(git_error("publish local authority", &update))
     } else {
         Ok(Publication::Conflict)
     }
